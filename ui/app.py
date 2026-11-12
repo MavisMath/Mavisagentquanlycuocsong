@@ -9,6 +9,18 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 import streamlit as st
+
+# Tự động đồng bộ hóa secrets từ Streamlit Cloud vào biến môi trường hệ thống
+try:
+    if hasattr(st, "secrets"):
+        for _k, _v in st.secrets.items():
+            if isinstance(_v, str):
+                os.environ[_k] = _v
+                if _k == "GEMINI_API_KEY" and "GOOGLE_API_KEY" not in os.environ:
+                    os.environ["GOOGLE_API_KEY"] = _v
+except Exception:
+    pass
+
 from langchain_core.messages import HumanMessage, AIMessage
 from agents.graph import mavis_agent
 from memory.goals import load_goals, CATEGORY_LABELS, load_historical_insights
