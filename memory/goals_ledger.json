@@ -1,0 +1,292 @@
+{
+  "mavis": {
+    "career": {
+      "label": "💼 Sự nghiệp & Học tập (Career)",
+      "description": "Học tập, Công việc, Quan hệ đối tác & Sự nghiệp",
+      "children": [
+        {
+          "id": "goal_car_1_2493",
+          "title": "Đạt chứng chỉ IELTS 7.0",
+          "category": "career",
+          "deadline": "4 tháng",
+          "status": "in_progress",
+          "feasibility_score": 85,
+          "priority": "P1 - Critical",
+          "feasibility_analysis": "Mavis có nền tảng tư duy logic tốt, đây là lợi thế lớn để tiếp cận IELTS theo phương pháp kỹ thuật (Engineering approach). Nút thắt cổ chai nằm ở việc duy trì sự tập trung cao độ trong khung giờ vàng 08:00-10:00 mà không bị phân tán bởi các dự án khác. Rủi ro burnout thấp nếu tuân thủ nghiêm ngặt việc không học nặng sau 14:00. Chiến lược là tập trung vào kỹ thuật làm bài (test-taking strategies) thay vì học dàn trải.",
+          "total_estimated_hours": 240,
+          "recommended_hours_per_week": 15,
+          "dependencies": [],
+          "leaf_nodes": [
+            {
+              "id": "leaf_goal_car_1_2493_1",
+              "title": "Đánh giá năng lực nền tảng và xác định Gap",
+              "milestone": "Đánh giá năng lực nền tảng và xác định Gap",
+              "deadline": "Tuần 1",
+              "timeline": "Tuần 1",
+              "status": "pending",
+              "dependencies": [],
+              "cognitive_load": "high",
+              "estimated_hours": 10,
+              "platform": "Study4 / VS Code / App"
+            },
+            {
+              "id": "leaf_goal_car_1_2493_2",
+              "title": "Tối ưu hóa kỹ năng Reading & Listening",
+              "milestone": "Tối ưu hóa kỹ năng Reading & Listening",
+              "deadline": "Tuần 2 - Tuần 7",
+              "timeline": "Tuần 2 - Tuần 7",
+              "status": "pending",
+              "dependencies": [
+                "leaf_goal_car_1_2493_1"
+              ],
+              "cognitive_load": "high",
+              "estimated_hours": 90,
+              "platform": "Study4 / VS Code / App"
+            },
+            {
+              "id": "leaf_goal_car_1_2493_3",
+              "title": "Bứt phá Writing & Speaking",
+              "milestone": "Bứt phá Writing & Speaking",
+              "deadline": "Tuần 8 - Tuần 13",
+              "timeline": "Tuần 8 - Tuần 13",
+              "status": "pending",
+              "dependencies": [
+                "leaf_goal_car_1_2493_2"
+              ],
+              "cognitive_load": "high",
+              "estimated_hours": 90,
+              "platform": "Study4 / VS Code / App"
+            },
+            {
+              "id": "leaf_goal_car_1_2493_4",
+              "title": "Luyện đề thực chiến và kiểm soát áp lực",
+              "milestone": "Luyện đề thực chiến và kiểm soát áp lực",
+              "deadline": "Tuần 14 - Tuần 16",
+              "timeline": "Tuần 14 - Tuần 16",
+              "status": "pending",
+              "dependencies": [
+                "leaf_goal_car_1_2493_3"
+              ],
+              "cognitive_load": "high",
+              "estimated_hours": 50,
+              "platform": "Study4 / VS Code / App"
+            }
+          ],
+          "milestones": [
+            {
+              "id": "leaf_goal_car_1_2493_1",
+              "title": "Đánh giá năng lực nền tảng và xác định Gap",
+              "milestone": "Đánh giá năng lực nền tảng và xác định Gap",
+              "deadline": "Tuần 1",
+              "timeline": "Tuần 1",
+              "status": "pending",
+              "dependencies": [],
+              "cognitive_load": "high",
+              "estimated_hours": 10,
+              "platform": "Study4 / VS Code / App"
+            },
+            {
+              "id": "leaf_goal_car_1_2493_2",
+              "title": "Tối ưu hóa kỹ năng Reading & Listening",
+              "milestone": "Tối ưu hóa kỹ năng Reading & Listening",
+              "deadline": "Tuần 2 - Tuần 7",
+              "timeline": "Tuần 2 - Tuần 7",
+              "status": "pending",
+              "dependencies": [
+                "leaf_goal_car_1_2493_1"
+              ],
+              "cognitive_load": "high",
+              "estimated_hours": 90,
+              "platform": "Study4 / VS Code / App"
+            },
+            {
+              "id": "leaf_goal_car_1_2493_3",
+              "title": "Bứt phá Writing & Speaking",
+              "milestone": "Bứt phá Writing & Speaking",
+              "deadline": "Tuần 8 - Tuần 13",
+              "timeline": "Tuần 8 - Tuần 13",
+              "status": "pending",
+              "dependencies": [
+                "leaf_goal_car_1_2493_2"
+              ],
+              "cognitive_load": "high",
+              "estimated_hours": 90,
+              "platform": "Study4 / VS Code / App"
+            },
+            {
+              "id": "leaf_goal_car_1_2493_4",
+              "title": "Luyện đề thực chiến và kiểm soát áp lực",
+              "milestone": "Luyện đề thực chiến và kiểm soát áp lực",
+              "deadline": "Tuần 14 - Tuần 16",
+              "timeline": "Tuần 14 - Tuần 16",
+              "status": "pending",
+              "dependencies": [
+                "leaf_goal_car_1_2493_3"
+              ],
+              "cognitive_load": "high",
+              "estimated_hours": 50,
+              "platform": "Study4 / VS Code / App"
+            }
+          ],
+          "resources": [],
+          "created_at": "2026-11-10T11:37:11.740905"
+        }
+      ]
+    },
+    "relationships": {
+      "label": "🤝 Mối quan hệ (Relationships)",
+      "description": "Gia đình, Bạn bè, Tình yêu & Mạng lưới kết nối",
+      "children": []
+    },
+    "health": {
+      "label": "🧘 Sức khỏe & Thể chất (Health)",
+      "description": "Thể chất, Tinh thần, Dinh dưỡng & Nhịp sinh học",
+      "children": []
+    },
+    "beauty": {
+      "label": "✨ Sắc vóc & Làm đẹp (Beauty)",
+      "description": "Vóc dáng, Làm đẹp, Skincare & Phong thái Executive",
+      "children": []
+    },
+    "historical_insights": {
+      "failed_methods": [],
+      "effective_methods": [],
+      "productivity_patterns": []
+    }
+  },
+  "user_b": {
+    "career": {
+      "label": "💼 Sự nghiệp & Học tập (Career)",
+      "description": "Học tập, Công việc, Quan hệ đối tác & Sự nghiệp",
+      "children": []
+    },
+    "relationships": {
+      "label": "🤝 Mối quan hệ (Relationships)",
+      "description": "Gia đình, Bạn bè, Tình yêu & Mạng lưới kết nối",
+      "children": []
+    },
+    "health": {
+      "label": "🧘 Sức khỏe & Thể chất (Health)",
+      "description": "Thể chất, Tinh thần, Dinh dưỡng & Nhịp sinh học",
+      "children": []
+    },
+    "beauty": {
+      "label": "✨ Sắc vóc & Làm đẹp (Beauty)",
+      "description": "Vóc dáng, Làm đẹp, Skincare & Phong thái Executive",
+      "children": []
+    },
+    "historical_insights": {
+      "failed_methods": [],
+      "effective_methods": [],
+      "productivity_patterns": []
+    }
+  },
+  "alex_dev": {
+    "career": {
+      "label": "💼 Sự nghiệp & Học tập (Career)",
+      "description": "Học tập, Công việc, Quan hệ đối tác & Sự nghiệp",
+      "children": []
+    },
+    "relationships": {
+      "label": "🤝 Mối quan hệ (Relationships)",
+      "description": "Gia đình, Bạn bè, Tình yêu & Mạng lưới kết nối",
+      "children": []
+    },
+    "health": {
+      "label": "🧘 Sức khỏe & Thể chất (Health)",
+      "description": "Thể chất, Tinh thần, Dinh dưỡng & Nhịp sinh học",
+      "children": []
+    },
+    "beauty": {
+      "label": "✨ Sắc vóc & Làm đẹp (Beauty)",
+      "description": "Vóc dáng, Làm đẹp, Skincare & Phong thái Executive",
+      "children": []
+    },
+    "historical_insights": {
+      "failed_methods": [],
+      "effective_methods": [],
+      "productivity_patterns": []
+    }
+  },
+  "hồng thắm phạm thị": {
+    "career": {
+      "label": "💼 Sự nghiệp & Học tập (Career)",
+      "description": "Học tập, Công việc, Quan hệ đối tác & Sự nghiệp",
+      "children": []
+    },
+    "relationships": {
+      "label": "🤝 Mối quan hệ (Relationships)",
+      "description": "Gia đình, Bạn bè, Tình yêu & Mạng lưới kết nối",
+      "children": []
+    },
+    "health": {
+      "label": "🧘 Sức khỏe & Thể chất (Health)",
+      "description": "Thể chất, Tinh thần, Dinh dưỡng & Nhịp sinh học",
+      "children": []
+    },
+    "beauty": {
+      "label": "✨ Sắc vóc & Làm đẹp (Beauty)",
+      "description": "Vóc dáng, Làm đẹp, Skincare & Phong thái Executive",
+      "children": []
+    },
+    "historical_insights": {
+      "failed_methods": [],
+      "effective_methods": [],
+      "productivity_patterns": []
+    }
+  },
+  "test_flow_user": {
+    "career": {
+      "label": "💼 Sự nghiệp & Học tập (Career)",
+      "description": "Học tập, Công việc, Quan hệ đối tác & Sự nghiệp",
+      "children": []
+    },
+    "relationships": {
+      "label": "🤝 Mối quan hệ (Relationships)",
+      "description": "Gia đình, Bạn bè, Tình yêu & Mạng lưới kết nối",
+      "children": []
+    },
+    "health": {
+      "label": "🧘 Sức khỏe & Thể chất (Health)",
+      "description": "Thể chất, Tinh thần, Dinh dưỡng & Nhịp sinh học",
+      "children": []
+    },
+    "beauty": {
+      "label": "✨ Sắc vóc & Làm đẹp (Beauty)",
+      "description": "Vóc dáng, Làm đẹp, Skincare & Phong thái Executive",
+      "children": []
+    },
+    "historical_insights": {
+      "failed_methods": [],
+      "effective_methods": [],
+      "productivity_patterns": []
+    }
+  },
+  "new_user_test": {
+    "career": {
+      "label": "💼 Sự nghiệp & Học tập (Career)",
+      "description": "Học tập, Công việc, Quan hệ đối tác & Sự nghiệp",
+      "children": []
+    },
+    "relationships": {
+      "label": "🤝 Mối quan hệ (Relationships)",
+      "description": "Gia đình, Bạn bè, Tình yêu & Mạng lưới kết nối",
+      "children": []
+    },
+    "health": {
+      "label": "🧘 Sức khỏe & Thể chất (Health)",
+      "description": "Thể chất, Tinh thần, Dinh dưỡng & Nhịp sinh học",
+      "children": []
+    },
+    "beauty": {
+      "label": "✨ Sắc vóc & Làm đẹp (Beauty)",
+      "description": "Vóc dáng, Làm đẹp, Skincare & Phong thái Executive",
+      "children": []
+    },
+    "historical_insights": {
+      "failed_methods": [],
+      "effective_methods": [],
+      "productivity_patterns": []
+    }
+  }
+}

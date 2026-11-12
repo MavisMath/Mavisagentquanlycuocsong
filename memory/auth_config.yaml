@@ -1,0 +1,22 @@
+cookie:
+  expiry_days: 30.0
+  key: mavis_secret_signature_key_2026
+  name: mavis_auth_cookie
+credentials:
+  usernames:
+    alex_dev:
+      email: alex@saas.com
+      name: Alex Developer
+      password: $2b$12$DUCPnPbI0dcqxF4ic17HlO4AqiMAEqV5ZTlYo8ghdYKKg2Sm.NXJe
+    hồng thắm phạm thị:
+      email: thamp0317@gmail.com
+      name: thamp0317@gmail.com
+      password: $2b$12$9ttBAPVK9q7VMetHeb1kv.M1jzluEITZehzKkLkq9APl7EiwFwQFO
+    mavis:
+      email: mavis@executive.ai
+      name: Mavis Executive
+      password: $2b$12$46vaWyktLKItjivNssR/LOEzO7NfUEYiBUhdfA7rzBWILUngriAYy
+    user_b:
+      email: user_b@saas.com
+      name: User B
+      password: $2b$12$FCunZtdx/24gYm/Ch/a2OugA9j7COU7cvwfECYVdV36z3gJL56LI2
