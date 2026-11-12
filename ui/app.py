@@ -214,17 +214,6 @@ if not auth_status:
             elif st.session_state.get("authentication_status") is None:
                 st.info("💡 Vui lòng nhập thông tin để đăng nhập vào không gian làm việc của bạn.")
 
-            st.markdown(
-                """
-                <div class="metric-card" style="margin-top: 20px;">
-                    <div style="font-weight: bold; color: #38bdf8; margin-bottom: 6px;">🔐 TÀI KHOẢN MẪU KHẢO SÁT HỆ THỐNG:</div>
-                    <div style="font-size: 0.9em; margin-bottom: 4px;">👑 <b>Executive Admin:</b> <code>mavis</code> | Mật khẩu: <code>mavis123</code></div>
-                    <div style="font-size: 0.9em;">👤 <b>SaaS User B:</b> <code>user_b</code> | Mật khẩu: <code>user123</code></div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
         with tab_register:
             st.markdown("#### 📝 Đăng ký thành viên SaaS mới")
             with st.form("reg_form", clear_on_submit=True):
