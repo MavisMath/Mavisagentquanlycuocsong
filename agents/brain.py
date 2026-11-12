@@ -27,6 +27,8 @@ from memory.goals import (
     append_opportunity_and_networking_tasks,
     load_tree_goals,
     save_tree_goals,
+    save_user_profile,
+    load_user_profile,
     load_historical_insights,
     save_historical_insights,
     append_insight,
@@ -1364,13 +1366,22 @@ def strategic_planner_node(state: AgentState) -> Dict[str, Any]:
     # Bước C: Xác định Milestone trung gian trọng tâm để kích hoạt Opportunity Scout (Phase 7.3)
     target_milestone = "Cột mốc T-1.5 năm: Cần 2 năm kinh nghiệm thực chiến AI qua vị trí AI Engineer / IT BA & VinUni AI Bootcamp"
 
+    user_obstacles = state.get("user_obstacles") or user_profile.get("obstacles") or []
+    obstacles_str = (
+        "; ".join(user_obstacles)
+        if user_obstacles
+        else "Tối ưu hóa nhịp sinh học và quỹ tải nhận thức để không bị phân tán"
+    )
+
     # Biên soạn bản báo cáo chiến lược
     reply_lines = [
         "🎯 **BẢN ĐỒ CHIẾN LƯỢC BACKCASTING & ĐIỀU PHỐI XUNG ĐỘT ƯU TIÊN (PHASE 7.2)**",
         "\n### 1. 🔍 ĐỐI CHIẾU HỒ SƠ & PHÂN TÍCH KHOẢNG TRỐNG (GAP ANALYSIS):",
         f"- **Hồ sơ hiện tại:** {user_profile.get('current_situation') or 'Nhân sự định hướng phát triển và nâng cao năng lực'}.",
+        f"- **Rào cản thực tế đã ghi nhận:** {obstacles_str}",
         "- **Khoảng trống cốt tử (The Gap):** Cần tích lũy kinh nghiệm thực chiến và sản phẩm portfolio cụ thể để đáp ứng yêu cầu tuyển sinh/tuyển dụng chuyên sâu.",
         "- **Chiến lược bù đắp (Compensatory Strategy):** Bắt buộc phải bù đắp bằng **kinh nghiệm thực chiến/dự án thực tế** và xây dựng **Portfolio sản phẩm hoàn chỉnh**.",
+        "- **Phương án hóa giải rào cản:** Phân bổ micro-milestones theo nhịp sinh học, áp dụng Pareto 80/20 giảm tải nhận thức và cô lập khung giờ vàng buổi sáng.",
         f"- **Tích hợp Bộ Nhớ Thích Nghi:** Kế hoạch hành động tự động tránh các phương pháp trong `failed_methods` và thiết kế theo nhịp năng suất sinh học của bạn.",
         "\n### 2. 🚩 LỘ TRÌNH CỘT MỐC ĐẢO NGƯỢC (BACKCAST REVERSE MILESTONES):",
     ]
@@ -1395,12 +1406,23 @@ def strategic_planner_node(state: AgentState) -> Dict[str, Any]:
 
     reply_text = "\n".join(reply_lines)
 
+    # Cập nhật coaching_stage và tiêu thụ cờ is_info_sufficient
+    if not isinstance(user_profile, dict):
+        user_profile = {}
+    user_profile["coaching_stage"] = "action"
+    user_profile["status"] = "action"
+    save_user_profile(user_profile, username=username)
+
     return {
         "messages": [AIMessage(content=reply_text)],
         "intent": "strategic_plan",
         "conflicts": [conflict_data] if conflict_data.get("conflict_detected") else [],
         "target_milestone": target_milestone,
         "target_goal": target_vision,
+        "user_profile": user_profile,
+        "coaching_stage": "action",
+        "status": "action",
+        "is_info_sufficient": False,
     }
 
 
@@ -1619,11 +1641,12 @@ Nhiệm vụ:
                 "financial_status": result.financial_status,
                 "time_constraints": result.time_constraints,
                 "is_onboarded": True,
+                "coaching_stage": "analyzing",
             }
 
             reply_text = result.coach_feedback.strip() if result.coach_feedback else "Tôi đã lưu thông tin vào hệ thống hậu đài. Mục tiêu trọng tâm đầu tiên bạn muốn cùng tôi bứt phá là gì?"
         else:
-            user_profile = {"is_onboarded": False}
+            user_profile = {"is_onboarded": False, "coaching_stage": "interviewing"}
             reply_text = result.coach_feedback.strip()
 
     except Exception as e:
@@ -1633,15 +1656,21 @@ Nhiệm vụ:
             "financial_status": "Ổn định",
             "time_constraints": "Khung giờ vàng 08:00 - 10:00 sáng dành cho High Load; ngủ trước 23:00",
             "is_onboarded": True if len(last_user_message) > 15 else False,
+            "coaching_stage": "analyzing" if len(last_user_message) > 15 else "interviewing",
         }
         reply_text = (
             "Tôi đã ghi nhận thông tin và thiết lập hồ sơ của bạn vào hệ thống hậu đài. "
             "Bạn muốn chúng ta bắt đầu bằng việc xây dựng lộ trình cho mục tiêu nào trước?"
         )
 
+    stage = user_profile.get("coaching_stage", "interviewing")
+    save_user_profile(user_profile, username=username)
+
     return {
         "messages": [AIMessage(content=reply_text)],
         "user_profile": user_profile,
+        "coaching_stage": stage,
+        "status": stage,
         "plan": [],
     }
 
@@ -1741,7 +1770,50 @@ def chat_node(state: AgentState) -> Dict[str, Any]:
         }
 
     # -------------------------------------------------------------
-    # 2. XỬ LÝ ĐỐI THOẠI COACHING (AGENTIC COACH)
+    # 2. XỬ LÝ NHẬN DIỆN RÀO CẢN / THÁCH THỨC (PHÁ VỠ VÒNG LẶP ONBOARDING)
+    # -------------------------------------------------------------
+    last_coach_msg = ""
+    for m in reversed(messages[:-1] if len(messages) > 1 else messages):
+        if isinstance(m, AIMessage) or getattr(m, "type", "") == "ai":
+            last_coach_msg = str(getattr(m, "content", "")).lower()
+            break
+        elif isinstance(m, dict) and m.get("role") == "assistant":
+            last_coach_msg = str(m.get("content", "")).lower()
+            break
+
+    obstacle_keywords = [
+        "thời gian", "bận", "lười", "trì hoãn", "thiếu", "không có thời gian", "tiền", 
+        "tài chính", "áp lực", "công việc", "gia đình", "con cái", "đi làm", "tập trung", 
+        "mệt mỏi", "quá tải", "kỷ luật", "động lực", "ngại", "rào cản", "khó khăn", 
+        "trở ngại", "vướng", "chi phí", "học phí", "chưa biết", "bế tắc", "thiếu kiến thức",
+        "mất phương hướng", "không có người hướng dẫn", "nền tảng yếu", "full-time", "ot",
+        "rào cản lớn nhất", "khó khăn lớn nhất"
+    ]
+
+    coach_asked_obstacle = any(w in last_coach_msg for w in ["rào cản", "thách thức", "khó khăn", "trở ngại", "obstacle", "điều gì thôi thúc"])
+    user_mentions_obstacle = any(w in user_lower for w in ["rào cản", "khó khăn", "thách thức", "trở ngại"]) or any(w in user_lower for w in obstacle_keywords)
+    current_stage = state.get("coaching_stage") or user_profile.get("coaching_stage", "interviewing")
+
+    is_answering_obstacle = (
+        (coach_asked_obstacle and len(user_lower) >= 3)
+        or (current_stage in ["interviewing", "analyzing"] and user_mentions_obstacle)
+        or any(w in user_lower for w in ["rào cản của tôi", "rào cản lớn nhất", "khó khăn của tôi", "trở ngại của tôi"])
+    )
+
+    user_obstacles = list(state.get("user_obstacles") or user_profile.get("obstacles") or [])
+    if is_answering_obstacle:
+        if last_user_message and last_user_message not in user_obstacles:
+            user_obstacles.append(last_user_message)
+        if not isinstance(user_profile, dict):
+            user_profile = {}
+        user_profile["obstacles"] = user_obstacles
+        user_profile["coaching_stage"] = "planning"
+        user_profile["status"] = "analyzing"
+        user_profile["is_onboarded"] = True
+        save_user_profile(user_profile, username=username)
+
+    # -------------------------------------------------------------
+    # 3. XỬ LÝ ĐỐI THOẠI COACHING (AGENTIC COACH)
     # -------------------------------------------------------------
     advice_keywords = [
         "làm sao", "làm thế nào", "tại sao", "thế nào", "được không", "có nên",
@@ -1783,9 +1855,20 @@ CHỈ THỊ CỐT LÕI TỪ EXECUTIVE LIFE COACH (AGENTIC COACHING & ADVICE PROT
    - Trả lời cụ thể, thực chiến, có cấu trúc rõ ràng và truyền cảm hứng hành động.
    - Đưa ra ĐÚNG 1 CÂU HỎI gợi mở tiếp theo để đồng hành đào sâu chiến lược.
    - TUYỆT ĐỐI KHÔNG ép người dùng vào câu hỏi xác nhận quy trình ("{TRIGGER_CLOSING_QUESTION}") khi họ đang tìm kiếm lời khuyên hoặc hỏi đáp chiến lược!
-4. Chỉ khi người dùng chia sẻ ước mơ/dự định MỚI và cuộc trò chuyện ĐÃ ĐỦ THÔNG TIN làm rõ khao khát/ràng buộc, bạn mới được đưa ra câu hỏi chốt:
+4. Khi người dùng chia sẻ rào cản/thách thức:
+   - Ghi nhận và phân tích phương án giải quyết (bảo vệ nhịp sinh học, micro-habits, khung giờ High Load).
+   - Xác nhận thông tin đã đầy đủ và thông báo kích hoạt Strategic Planner để thiết kế bản đồ hành động. TUYỆT ĐỐI KHÔNG hỏi lại câu hỏi rào cản!
+5. Chỉ khi người dùng chia sẻ ước mơ/dự định MỚI và cuộc trò chuyện ĐÃ ĐỦ THÔNG TIN làm rõ khao khát/ràng buộc, bạn mới được đưa ra câu hỏi chốt:
    "{TRIGGER_CLOSING_QUESTION}"
-5. Giữ phong cách trò chuyện tự nhiên, 1-1, sắc sảo và điềm đạm của một Executive Coach hàng đầu. Tuyệt đối không nhại lại lời người dùng (chống lỗi Echo).
+6. Giữ phong cách trò chuyện tự nhiên, 1-1, sắc sảo và điềm đạm của một Executive Coach hàng đầu. Tuyệt đối không nhại lại lời người dùng (chống lỗi Echo).
+"""
+    if is_answering_obstacle:
+        system_instruction += f"""
+CHỈ THỊ ƯU TIÊN CAO: Người dùng vừa cung cấp rào cản/thách thức: "{last_user_message}".
+- Phản hồi ngắn gọn (2-3 câu), xác nhận đã ghi nhận rào cản này vào hệ thống hậu đài.
+- Nêu ngắn gọn nguyên tắc hóa giải (bảo vệ nhịp sinh học và phân bổ micro-habits).
+- Thông báo hệ thống đang tự động chuyển tiếp sang Strategic Planner & Holistic Bio-Scheduler để thiết kế bản đồ hành động.
+- TUYỆT ĐỐI KHÔNG đặt thêm câu hỏi về rào cản, không lặp lại câu hỏi cũ!
 """
 
     llm_messages = [SystemMessage(content=system_instruction)]
@@ -1872,19 +1955,38 @@ CHỈ THỊ CỐT LÕI TỪ EXECUTIVE LIFE COACH (AGENTIC COACHING & ADVICE PROT
                     )
                     new_awaiting = False
                     new_pending = {"title": target_name, "category": "career"}
+            elif is_answering_obstacle:
+                reply_content = (
+                    f"🎯 **GHI NHẬN RÀO CẢN CHIẾN LƯỢC & HÓA GIẢI ÁP LỰC**\n\n"
+                    f"Tôi đã nắm rõ rào cản cốt tử bạn đang đối mặt: *\"{last_user_message}\"*.\n"
+                    "Từ góc độ Executive Coach, mọi rào cản về thời gian, công việc hay sự phân tâm đều có thể hóa giải bằng chiến thuật: "
+                    "cô lập khung giờ vàng buổi sáng (08:00 - 10:00) cho High Load và phân bổ các micro-habits 15-30 phút mỗi ngày.\n\n"
+                    "⚡ **Thông tin đã được ghi nhận đầy đủ vào hệ thống hậu đài (Goals Ledger).**\n"
+                    "Tôi đang kích hoạt **Strategic Planner** để thiết kế bản đồ Backcasting và **Holistic Bio-Scheduler** nhằm lên lịch hành động thực chiến ngay cho bạn!"
+                )
             else:
                 reply_content = (
-                    f"Tôi đã nắm rõ ý kiến của bạn về **{last_user_message}**. "
-                    "Là một Executive Life Coach, tôi muốn cùng bạn phân tích sâu hơn: Rào cản lớn nhất bạn đang đối mặt ở thời điểm hiện tại là gì?"
+                    f"Tôi đã ghi nhận định hướng của bạn về **{last_user_message}**. "
+                    "Là một Executive Life Coach, tôi sẽ đồng hành cùng bạn thiết kế chiến lược tối ưu nhất.\n\n"
+                    "Bạn muốn chúng ta bắt đầu bằng việc xây dựng lộ trình hành động chi tiết hay tối ưu lại lịch trình sinh hoạt trước?"
                 )
             new_awaiting = False
 
+    stage = "planning" if is_answering_obstacle else (state.get("coaching_stage") or user_profile.get("coaching_stage", "interviewing"))
+    status_val = "analyzing" if is_answering_obstacle else (state.get("status") or "interviewing")
+    info_flag = True if is_answering_obstacle else False
+
     return {
         "messages": [AIMessage(content=reply_content)],
-        "intent": "coach_dialogue" if (is_sharing_dream or is_asking_advice) else "chat",
+        "intent": "strategic_plan" if is_answering_obstacle else ("coach_dialogue" if (is_sharing_dream or is_asking_advice) else "chat"),
         "pending_goal": new_pending,
         "awaiting_confirmation": new_awaiting,
         "is_confirmed": False,
+        "user_profile": user_profile,
+        "user_obstacles": user_obstacles,
+        "coaching_stage": stage,
+        "status": status_val,
+        "is_info_sufficient": info_flag,
     }
 
 

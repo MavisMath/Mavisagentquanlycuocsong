@@ -64,3 +64,15 @@ class AgentState(TypedDict):
 
     # Báo cáo hồi cứu gần nhất (Phase 10 Retrospective Report)
     retrospective_report: Optional[str]
+
+    # Giai đoạn hội thoại Coaching: "interviewing" | "analyzing" | "planning" | "action"
+    coaching_stage: Optional[str]
+
+    # Danh sách các rào cản / thách thức của người dùng đã thu thập
+    user_obstacles: Optional[List[str]]
+
+    # Cờ trạng thái thông tin đã thu thập đầy đủ để chuyển sang lập kế hoạch
+    is_info_sufficient: Optional[bool]
+
+    # Trạng thái tổng quát của phiên làm việc
+    status: Optional[str]

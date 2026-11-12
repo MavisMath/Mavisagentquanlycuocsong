@@ -94,14 +94,18 @@ def route_by_intent(state: AgentState) -> str:
 def route_from_chat(state: AgentState) -> str:
     """
     Conditional Edge từ node giao tiếp (chat_node - Phase 9):
-    Cơ chế Kích hoạt Hành động (Trigger Action):
+    Cơ chế Kích hoạt Hành động & Điều hướng Kế hoạch:
     - Nếu người dùng trả lời 'Đồng ý' (is_confirmed == True):
-      Rẽ nhánh truyền dữ liệu sang goal_manager_node (để lưu DB/ledger) và sau đó sang holistic_scheduler_node.
-    - Ngược lại (đang trò chuyện coaching, hỏi mở Socratic, hoặc trao đổi thông thường):
+      Rẽ nhánh truyền dữ liệu sang goal_manager_node.
+    - Nếu đã thu thập đầy đủ thông tin rào cản / mục tiêu (is_info_sufficient == True hoặc coaching_stage in ["planning"]):
+      Rẽ nhánh sang strategic_planner_node để lập kế hoạch ngược (Backcasting) và giải quyết rào cản.
+    - Ngược lại (đang trò chuyện coaching bình thường):
       Kết thúc luồng tại END.
     """
     if state.get("is_confirmed"):
         return "goal_manager"
+    if state.get("is_info_sufficient") or state.get("coaching_stage") in ["planning"]:
+        return "strategic_planner"
     return END
 
 
@@ -110,11 +114,11 @@ def route_from_strategic_planner(state: AgentState) -> str:
     Conditional Edge nối từ strategic_planner sang opportunity_scout (Phase 7.3):
     - Nếu có target_milestone (từ thuật toán Backcasting) -> Tự động chuyển tiếp sang opportunity_scout
       để trinh sát cơ hội thực chiến (VinUni AI Bootcamp) và sinh task nhỏ trong tuần.
-    - Nếu là luồng giải phóng lịch (unpause trigger) -> kết thúc (END).
+    - Nếu không có milestone -> chuyển tiếp sang holistic_scheduler để cập nhật nhịp sinh học.
     """
     if state.get("target_milestone"):
         return "opportunity_scout"
-    return END
+    return "holistic_scheduler"
 
 
 # 1. Khởi tạo StateGraph với schema AgentState
@@ -171,13 +175,16 @@ workflow.add_edge("schedule", END)
 workflow.add_edge("holistic_scheduler", END)
 workflow.add_edge("trend", END)
 workflow.add_edge("retrospective", END)
-# Node giao tiếp (chat) rẽ nhánh có điều kiện (Phase 9 Trigger Action):
-# Nếu user trả lời 'Đồng ý' (is_confirmed == True) -> truyền dữ liệu sang goal_manager; ngược lại kết thúc tại END
+# Node giao tiếp (chat) rẽ nhánh có điều kiện:
+# - Nếu user trả lời 'Đồng ý' (is_confirmed == True) -> truyền dữ liệu sang goal_manager
+# - Nếu đã thu thập đủ thông tin rào cản -> truyền dữ liệu sang strategic_planner
+# - Ngược lại: kết thúc tại END
 workflow.add_conditional_edges(
     "chat",
     route_from_chat,
     {
         "goal_manager": "goal_manager",
+        "strategic_planner": "strategic_planner",
         END: END,
     },
 )
@@ -192,10 +199,11 @@ workflow.add_conditional_edges(
     route_from_strategic_planner,
     {
         "opportunity_scout": "opportunity_scout",
+        "holistic_scheduler": "holistic_scheduler",
         END: END,
     },
 )
-workflow.add_edge("opportunity_scout", END)
+workflow.add_edge("opportunity_scout", "holistic_scheduler")
 
 # 6. CẤU HÌNH BỘ NHỚ HỘI THOẠI (MEMORYSAVER CHECKPOINTER)
 # Tích hợp MemorySaver giúp đồ thị LangGraph ghi nhớ ngữ cảnh hội thoại liên tục

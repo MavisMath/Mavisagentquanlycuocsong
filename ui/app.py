@@ -296,12 +296,30 @@ if awaiting_confirmation_key not in st.session_state:
 
 profile_key = f"profile_{current_username}"
 if profile_key not in st.session_state:
-    st.session_state[profile_key] = {
-        "current_situation": "",
-        "financial_status": "",
-        "time_constraints": "",
-        "is_onboarded": False,
-    }
+    try:
+        from memory.goals import load_user_profile
+        saved_prof = load_user_profile(current_username)
+    except Exception:
+        saved_prof = {}
+    if saved_prof and isinstance(saved_prof, dict) and saved_prof.get("is_onboarded"):
+        st.session_state[profile_key] = saved_prof
+    else:
+        st.session_state[profile_key] = {
+            "current_situation": "",
+            "financial_status": "",
+            "time_constraints": "",
+            "is_onboarded": False,
+            "coaching_stage": "interviewing",
+            "obstacles": [],
+        }
+
+stage_key = f"stage_{current_username}"
+if stage_key not in st.session_state:
+    st.session_state[stage_key] = st.session_state[profile_key].get("coaching_stage", "interviewing")
+
+obstacles_key = f"obstacles_{current_username}"
+if obstacles_key not in st.session_state:
+    st.session_state[obstacles_key] = st.session_state[profile_key].get("obstacles", [])
 
 thread_ver_key = f"thread_ver_{current_username}"
 if thread_ver_key not in st.session_state:
@@ -345,6 +363,11 @@ with st.sidebar:
             st.markdown(f"**Tình trạng:** {user_prof.get('current_situation', 'N/A')}")
             st.markdown(f"**Thời gian:** {user_prof.get('time_constraints', 'N/A')}")
             st.markdown(f"**Tài chính:** {user_prof.get('financial_status', 'N/A')}")
+            if user_prof.get("obstacles"):
+                obs_list = user_prof.get("obstacles")
+                obs_disp = ", ".join(obs_list) if isinstance(obs_list, list) else str(obs_list)
+                st.markdown(f"**Rào cản:** {obs_disp}")
+            st.markdown(f"**Giai đoạn:** `{user_prof.get('coaching_stage', 'action').upper()}`")
     else:
         st.warning("⚠️ Chưa hoàn thành Onboarding! Hãy chat để hoàn thiện hồ sơ.")
 
@@ -606,6 +629,10 @@ if user_input := st.chat_input("Nhập mục tiêu hoặc trao đổi cùng Coac
         "intent": st.session_state[intent_key],
         "plan": st.session_state[plan_key],
         "user_profile": st.session_state[profile_key],
+        "coaching_stage": st.session_state.get(stage_key, "interviewing"),
+        "user_obstacles": st.session_state.get(obstacles_key, []),
+        "status": st.session_state.get(f"status_{current_username}", "interviewing"),
+        "is_info_sufficient": False,
         "uploaded_context": st.session_state.get(rag_key),
         "username": current_username,
         "pending_goal": st.session_state.get(pending_goal_key),
@@ -621,36 +648,61 @@ if user_input := st.chat_input("Nhập mục tiêu hoặc trao đổi cùng Coac
                 config = {"configurable": {"thread_id": f"thread_{current_username}_{current_ver}"}}
                 output_state = mavis_agent.invoke(input_state, config=config)
 
-                # Dọn dẹp hiển thị UI: Chỉ lấy duy nhất nội dung của tin nhắn AIMessage cuối cùng được sinh ra
-                last_reply = None
-                for msg in reversed(output_state.get("messages", [])):
-                    if isinstance(msg, AIMessage) or getattr(msg, "type", "") == "ai":
-                        c = extract_text_from_content(getattr(msg, "content", msg))
-                        if c and c.strip():
-                            last_reply = c
-                            break
-                    elif isinstance(msg, dict) and msg.get("role") == "assistant":
-                        c = extract_text_from_content(msg.get("content", ""))
-                        if c and c.strip():
-                            last_reply = c
-                            break
+                # Dọn dẹp hiển thị UI: Gom tất cả các phản hồi AI mới được sinh ra trong lượt này (sau tin nhắn của user)
+                new_ai_texts = []
+                all_msgs = output_state.get("messages", [])
 
-                # Phòng vệ: Tuyệt đối không lấy nhầm tin nhắn của user hoặc nhại lại lời user
-                if not last_reply or last_reply.strip() == user_input.strip():
-                    from agents.brain import chat_node
-                    chat_fallback = chat_node(input_state)
-                    last_reply = extract_text_from_content(chat_fallback["messages"][-1].content)
+                last_user_idx = -1
+                for idx, m in enumerate(all_msgs):
+                    if isinstance(m, HumanMessage) or getattr(m, "type", "") == "human" or (isinstance(m, dict) and m.get("role") == "user"):
+                        last_user_idx = idx
 
-                st.markdown(last_reply)
+                if last_user_idx >= 0:
+                    for m in all_msgs[last_user_idx + 1:]:
+                        if isinstance(m, AIMessage) or getattr(m, "type", "") == "ai":
+                            c = extract_text_from_content(getattr(m, "content", m))
+                            if c and c.strip() and c.strip() != user_input.strip() and c.strip() not in new_ai_texts:
+                                new_ai_texts.append(c.strip())
+                        elif isinstance(m, dict) and m.get("role") == "assistant":
+                            c = extract_text_from_content(m.get("content", ""))
+                            if c and c.strip() and c.strip() != user_input.strip() and c.strip() not in new_ai_texts:
+                                new_ai_texts.append(c.strip())
 
-                # Lưu vào lịch sử hiển thị của user (duy nhất 1 tin nhắn trợ lý cho lượt này)
+                if new_ai_texts:
+                    combined_reply = "\n\n---\n\n".join(new_ai_texts)
+                else:
+                    last_reply = None
+                    for msg in reversed(all_msgs):
+                        if isinstance(msg, AIMessage) or getattr(msg, "type", "") == "ai":
+                            c = extract_text_from_content(getattr(msg, "content", msg))
+                            if c and c.strip() and c.strip() != user_input.strip():
+                                last_reply = c
+                                break
+                    if not last_reply:
+                        from agents.brain import chat_node
+                        chat_fallback = chat_node(input_state)
+                        last_reply = extract_text_from_content(chat_fallback["messages"][-1].content)
+                    combined_reply = last_reply
+
+                st.markdown(combined_reply)
+
+                # Lưu vào lịch sử hiển thị của user
                 st.session_state[msg_key].append(
-                    {"role": "assistant", "content": last_reply}
+                    {"role": "assistant", "content": combined_reply}
                 )
 
                 # Cập nhật các trạng thái của Agent vào session_state của user
                 if "user_profile" in output_state and output_state["user_profile"]:
                     st.session_state[profile_key] = output_state["user_profile"]
+
+                if "coaching_stage" in output_state and output_state["coaching_stage"]:
+                    st.session_state[stage_key] = output_state["coaching_stage"]
+
+                if "user_obstacles" in output_state and output_state["user_obstacles"]:
+                    st.session_state[obstacles_key] = output_state["user_obstacles"]
+
+                if "status" in output_state and output_state["status"]:
+                    st.session_state[f"status_{current_username}"] = output_state["status"]
 
                 if "current_energy_level" in output_state:
                     st.session_state[energy_key] = output_state["current_energy_level"]

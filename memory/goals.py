@@ -250,6 +250,28 @@ def save_tree_goals(data: Dict[str, Any], username: str = "mavis") -> bool:
     return save_all_users_data(all_data)
 
 
+def save_user_profile(profile: Dict[str, Any], username: str = "mavis") -> bool:
+    """Lưu hồ sơ người dùng, các rào cản và trạng thái coaching vào goals_ledger.json."""
+    username = (username or DEFAULT_USER).strip().lower()
+    all_data = load_all_users_data()
+    if username not in all_data or not isinstance(all_data[username], dict):
+        all_data[username] = get_blank_tree()
+    existing_profile = all_data[username].get("user_profile", {})
+    if isinstance(existing_profile, dict):
+        existing_profile.update(profile)
+        all_data[username]["user_profile"] = existing_profile
+    else:
+        all_data[username]["user_profile"] = profile
+    return save_all_users_data(all_data)
+
+
+def load_user_profile(username: str = "mavis") -> Dict[str, Any]:
+    """Tải hồ sơ người dùng từ goals_ledger.json."""
+    username = (username or DEFAULT_USER).strip().lower()
+    all_data = load_all_users_data()
+    return all_data.get(username, {}).get("user_profile", {})
+
+
 def load_categorized_goals(username: str = "mavis") -> Dict[str, Any]:
     """
     Truy xuất vào đúng nhánh dữ liệu của tài khoản đó từ memory/goals_ledger.json (Phase 8 Multi-Tenant).
