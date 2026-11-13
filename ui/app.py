@@ -248,8 +248,11 @@ if not auth_status:
 # ==========================================
 # 3. KHI ĐĂNG NHẬP THÀNH CÔNG: PHÂN TÁCH DỮ LIỆU
 # ==========================================
-current_username = st.session_state.get("username", "mavis").strip().lower()
-current_name = st.session_state.get("name", current_username.capitalize())
+raw_session_user = st.session_state.get("username")
+if not raw_session_user or not str(raw_session_user).strip():
+    raw_session_user = "mavis"
+current_username = str(raw_session_user).strip().lower()
+current_name = st.session_state.get("name") or current_username.capitalize()
 
 # Khởi tạo các biến Session State riêng biệt cho từng User
 msg_key = f"messages_{current_username}"
@@ -622,6 +625,7 @@ if user_input := st.chat_input("Nhập mục tiêu hoặc trao đổi cùng Coac
     # QUY TẮC PHÒNG NGỪA NHÂN BẢN:
     # LangGraph State Reducer (add_messages) tự động nối tin nhắn mới vào phiên trò chuyện.
     # Chỉ truyền duy nhất tin nhắn mới [HumanMessage(content=user_input)], tuyệt đối KHÔNG truyền lại mảng cũ!
+    active_username = (st.session_state.get("username") or current_username or "mavis").strip().lower()
     input_state = {
         "messages": [HumanMessage(content=user_input)],
         "current_energy_level": st.session_state[energy_key],
@@ -631,10 +635,10 @@ if user_input := st.chat_input("Nhập mục tiêu hoặc trao đổi cùng Coac
         "user_profile": st.session_state[profile_key],
         "coaching_stage": st.session_state.get(stage_key, "interviewing"),
         "user_obstacles": st.session_state.get(obstacles_key, []),
-        "status": st.session_state.get(f"status_{current_username}", "interviewing"),
+        "status": st.session_state.get(f"status_{active_username}", "interviewing"),
         "is_info_sufficient": False,
         "uploaded_context": st.session_state.get(rag_key),
-        "username": current_username,
+        "username": active_username,
         "pending_goal": st.session_state.get(pending_goal_key),
         "awaiting_confirmation": st.session_state.get(awaiting_confirmation_key, False),
     }
@@ -645,7 +649,7 @@ if user_input := st.chat_input("Nhập mục tiêu hoặc trao đổi cùng Coac
             try:
                 # Cấu hình thread_id cho MemorySaver phân tách phiên trò chuyện theo user & phiên làm việc
                 current_ver = st.session_state.get(thread_ver_key, 1)
-                config = {"configurable": {"thread_id": f"thread_{current_username}_{current_ver}"}}
+                config = {"configurable": {"thread_id": f"thread_{active_username}_{current_ver}"}}
                 output_state = mavis_agent.invoke(input_state, config=config)
 
                 # Dọn dẹp hiển thị UI: Gom tất cả các phản hồi AI mới được sinh ra trong lượt này (sau tin nhắn của user)
@@ -680,6 +684,7 @@ if user_input := st.chat_input("Nhập mục tiêu hoặc trao đổi cùng Coac
                                 break
                     if not last_reply:
                         from agents.brain import chat_node
+                        input_state["username"] = active_username
                         chat_fallback = chat_node(input_state)
                         last_reply = extract_text_from_content(chat_fallback["messages"][-1].content)
                     combined_reply = last_reply
@@ -702,7 +707,7 @@ if user_input := st.chat_input("Nhập mục tiêu hoặc trao đổi cùng Coac
                     st.session_state[obstacles_key] = output_state["user_obstacles"]
 
                 if "status" in output_state and output_state["status"]:
-                    st.session_state[f"status_{current_username}"] = output_state["status"]
+                    st.session_state[f"status_{active_username}"] = output_state["status"]
 
                 if "current_energy_level" in output_state:
                     st.session_state[energy_key] = output_state["current_energy_level"]

@@ -266,6 +266,7 @@ def analyze_input_node(state: AgentState) -> Dict[str, Any]:
     - Phân biệt giữa tin nhắn 'tâm sự/dự định' (coach_dialogue) và 'lệnh thực thi'.
     - Khi người dùng phản hồi 'Đồng ý' / 'Xác nhận' cho câu hỏi chốt của Coach, nhận diện intent = 'confirm_goal'.
     """
+    username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
     messages = state.get("messages", [])
     if not messages:
         return {
@@ -273,6 +274,7 @@ def analyze_input_node(state: AgentState) -> Dict[str, Any]:
             "detected_emotion": "neutral",
             "current_energy_level": "high",
             "is_emergency": False,
+            "username": username,
         }
 
     # Lấy câu nói gần nhất của Mavis
@@ -305,6 +307,7 @@ def analyze_input_node(state: AgentState) -> Dict[str, Any]:
             "current_energy_level": "high",
             "is_emergency": False,
             "uploaded_context": state.get("uploaded_context"),
+            "username": username,
         }
 
     # Động cơ RAG (Phase 7.1): Tự động quét xem user có cung cấp link URL hoặc file PDF mới không
@@ -446,6 +449,7 @@ Yêu cầu phân loại chính xác theo thứ tự ưu tiên:
             "current_energy_level": energy,
             "is_emergency": is_emergency,
             "uploaded_context": uploaded_context,
+            "username": username,
         }
 
 
@@ -455,6 +459,7 @@ def motivate_node(state: AgentState) -> Dict[str, Any]:
     Node 2: Kích hoạt 'Giao thức Tự hào' (Pride-Activation Protocol) khi nhận diện cảm xúc tiêu cực.
     Trích xuất Achievement Ledger, loại bỏ lời an ủi sáo rỗng, kích hoạt Dopamine và đề xuất giảm tải.
     """
+    username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
     detected_emotion = state.get("detected_emotion", "negative")
     user_msg = state.get("messages", [])[-1].content if state.get("messages") else ""
 
@@ -489,6 +494,7 @@ Hãy áp dụng triệt để "Giao thức Tự hào" (Pride-Activation Protocol
     return {
         "messages": [AIMessage(content=reply_text)],
         "current_energy_level": "low",
+        "username": username,
     }
 
 
@@ -502,6 +508,7 @@ def schedule_node(state: AgentState) -> Dict[str, Any]:
       -> Tự động chèn các LOW LOAD TASKS kết hợp vào thói quen sinh hoạt (Habit Stacking, ví dụ: nghe podcast tiếng Trung / audio sách tư duy khi rửa bát, dọn nhà, đi dạo).
     - Nếu thể trạng bình thường (high energy): Lập lịch tối ưu nhịp sinh học (08:00 - 10:00 cho High Load, chiều Low Load, kết hợp Habit Stacking).
     """
+    username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
     messages = state.get("messages", [])
     user_msg = ""
     for msg in reversed(messages):
@@ -535,7 +542,6 @@ def schedule_node(state: AgentState) -> Dict[str, Any]:
     if any(w in user_msg.lower() for w in ["cân bằng sinh học", "cân bằng động", "dynamic equilibrium", "holistic", "dung hòa", "chạy bộ 30 phút", "thâm hụt calo", "giảm cân"]):
         return holistic_scheduler_node(state)
 
-    username = state.get("username") or "mavis"
     goals_summary = get_goals_summary_text(username=username)
     active_tasks = get_active_tasks_and_milestones(username=username)
     uploaded_context = state.get("uploaded_context") or ""
@@ -788,6 +794,7 @@ def holistic_scheduler_node(state: AgentState) -> Dict[str, Any]:
          * Chèn Bữa tối gia đình (19:00 - 20:00): Gắn kết người thân & nạp dinh dưỡng lành mạnh.
     4. Sinh Bảng Lịch Trình Chi Tiết Chia Giờ (Hourly Detailed Timeline Table) và nạp vào State Plan.
     """
+    username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
     messages = state.get("messages", [])
     last_user_message = ""
     for msg in reversed(messages):
@@ -801,7 +808,6 @@ def holistic_scheduler_node(state: AgentState) -> Dict[str, Any]:
     user_msg_lower = (last_user_message or "").lower()
     uploaded_context = (state.get("uploaded_context") or "").lower()
 
-    username = state.get("username") or "mavis"
     active_tasks = get_active_tasks_and_milestones(username=username)
 
     # KIỂM TRA HỒ SƠ MỤC TIÊU TRỐNG (PHASE ONBOARDING GUARD):
@@ -986,6 +992,7 @@ def trend_node(state: AgentState) -> Dict[str, Any]:
     Gọi tool tìm kiếm Tavily để quét các tin tức mới nhất về AI hoặc khởi nghiệp dựa trên câu hỏi của Mavis,
     sau đó tổng hợp và trả về bản tóm tắt sắc bén (Weekly Alpha Brief) kèm định hướng kỹ năng sinh lời.
     """
+    username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
     messages = state.get("messages", [])
     last_user_message = ""
     for msg in reversed(messages):
@@ -1066,6 +1073,7 @@ def goal_manager_node(state: AgentState) -> Dict[str, Any]:
     5. Ghi dữ liệu vào memory/goals_ledger.json (có cơ chế chống duplicate, update nếu đã tồn tại).
     6. Chuyển tiếp sang Holistic Scheduler Node để bóc tách checklist và tạo lịch trình cân bằng toàn diện.
     """
+    username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
     messages = state.get("messages", [])
     last_user_message = ""
     for msg in reversed(messages):
@@ -1076,7 +1084,6 @@ def goal_manager_node(state: AgentState) -> Dict[str, Any]:
             last_user_message = msg.get("content", "")
             break
 
-    username = state.get("username") or "mavis"
     user_profile = state.get("user_profile") or {}
 
     # Ưu tiên lấy từ target_goal, sau đó pending_goal, tránh lấy các từ xác nhận như "Đồng ý"
@@ -1166,6 +1173,7 @@ def resource_finder_node(state: AgentState) -> Dict[str, Any]:
       GitHub repo, roadmap và ước lượng chi phí/báo giá.
     - Tự động gắn kết quả vào mục tiêu trong goals_ledger.json.
     """
+    username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
     messages = state.get("messages", [])
     last_user_message = ""
     for msg in reversed(messages):
@@ -1175,8 +1183,6 @@ def resource_finder_node(state: AgentState) -> Dict[str, Any]:
         elif isinstance(msg, dict) and msg.get("role") == "user":
             last_user_message = msg.get("content", "")
             break
-
-    username = state.get("username") or "mavis"
 
     # Nếu được kích hoạt tự động từ goal_manager_node, lấy target_goal từ state
     target_topic = state.get("target_goal") or ""
@@ -1304,6 +1310,7 @@ def strategic_planner_node(state: AgentState) -> Dict[str, Any]:
        - Khi nhận tín hiệu IELTS hoàn thành hoặc ngày hệ thống vượt qua 11/12/2026,
          tự động giải phóng lịch trình và kích hoạt lại mục tiêu HSK sang 'in_progress'.
     """
+    username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
     messages = state.get("messages", [])
     last_user_message = ""
     for msg in reversed(messages):
@@ -1334,8 +1341,6 @@ def strategic_planner_node(state: AgentState) -> Dict[str, Any]:
             "thi xong ielts",
         ]
     )
-
-    username = state.get("username") or "mavis"
 
     if is_unpause_request:
         unpause_result = check_and_trigger_unpause(reference_date="2026-12-12", force_completed_goal="IELTS", username=username)
@@ -1439,6 +1444,7 @@ def opportunity_scout_node(state: AgentState) -> Dict[str, Any]:
        - Phân rã thành các task cụ thể theo nhịp sinh học (High Load sáng, Networking chiều, Habit Stacking tối).
        - Nạp trực tiếp vào state['plan'] và lưu tài nguyên/task vào memory/goals_ledger.json.
     """
+    username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
     target_milestone = state.get("target_milestone")
     intent = state.get("intent", "")
 
@@ -1502,7 +1508,6 @@ def opportunity_scout_node(state: AgentState) -> Dict[str, Any]:
         },
     ]
 
-    username = state.get("username") or "mavis"
     # Cập nhật vào goals_ledger.json của username
     target_goal_name = state.get("target_goal") or "Phát triển Năng lực Thực chiến"
     append_opportunity_and_networking_tasks(
@@ -1568,6 +1573,7 @@ def onboarding_node(state: AgentState) -> Dict[str, Any]:
     - Ràng buộc thời gian & nhịp sinh học
     Cập nhật trực tiếp hồ sơ người dùng và nạp các mục tiêu vào memory/goals_ledger.json.
     """
+    username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
     messages = state.get("messages", [])
     last_user_message = ""
     for msg in reversed(messages):
@@ -1594,6 +1600,7 @@ def onboarding_node(state: AgentState) -> Dict[str, Any]:
             "messages": [AIMessage(content=interview_text)],
             "user_profile": {"is_onboarded": False},
             "plan": [],
+            "username": username,
         }
 
     # Nếu người dùng đã chia sẻ thông tin, kích hoạt Gemini trích xuất đa chiều
@@ -1623,7 +1630,6 @@ Nhiệm vụ:
             HumanMessage(content=extraction_prompt),
         ])
 
-        username = state.get("username") or "mavis"
         if result.is_sufficient:
             # Nạp các mục tiêu thu thập được vào goals_ledger.json của username
             for g in result.goals:
@@ -1672,6 +1678,7 @@ Nhiệm vụ:
         "coaching_stage": stage,
         "status": stage,
         "plan": [],
+        "username": username,
     }
 
 
@@ -1684,8 +1691,8 @@ def chat_node(state: AgentState) -> Dict[str, Any]:
     Đảm nhiệm vai trò phản hồi mọi thắc mắc, trò chuyện, đính chính thông tin từ người dùng (ví dụ: 'tôi có thi tiếng trung đâu'),
     giải quyết triệt để lỗi Echo (nhại lại lời người dùng) và duy trì sự thông minh, chủ động của Life Coach.
     """
+    username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
     messages = state.get("messages", [])
-    username = state.get("username") or "mavis"
     user_profile = state.get("user_profile") or {}
     goals_summary = get_goals_summary_text(username=username)
     current_energy = state.get("current_energy_level", "high")
@@ -1987,6 +1994,7 @@ CHỈ THỊ ƯU TIÊN CAO: Người dùng vừa cung cấp rào cản/thách th�
         "coaching_stage": stage,
         "status": status_val,
         "is_info_sufficient": info_flag,
+        "username": username,
     }
 
 
@@ -2005,6 +2013,7 @@ def retrospective_node(state: AgentState) -> Dict[str, Any]:
     - Nếu người dùng thông báo hủy bỏ hoặc hoàn thành một mục tiêu, cập nhật status trong goals_ledger.json.
     - Trả về báo cáo Hồi Cứu Executive Life Coach toàn diện và cam kết điều chỉnh chiến lược.
     """
+    username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
     messages = state.get("messages", [])
     last_user_message = ""
     for msg in reversed(messages):
@@ -2017,7 +2026,6 @@ def retrospective_node(state: AgentState) -> Dict[str, Any]:
     if not last_user_message and messages:
         last_user_message = str(messages[-1].content if hasattr(messages[-1], "content") else messages[-1])
 
-    username = state.get("username") or "mavis"
     user_lower = last_user_message.lower().strip()
     insights_summary = get_historical_insights_summary_text(username=username)
 
@@ -2170,4 +2178,5 @@ NHIỆM VỤ CỦA BẠN:
         "historical_insights": updated_insights,
         "retrospective_report": report_text,
         "intent": "retrospective",
+        "username": username,
     }

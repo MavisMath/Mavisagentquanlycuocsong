@@ -152,6 +152,10 @@
       "failed_methods": [],
       "effective_methods": [],
       "productivity_patterns": []
+    },
+    "user_profile": {
+      "is_onboarded": false,
+      "coaching_stage": "interviewing"
     }
   },
   "user_b": {

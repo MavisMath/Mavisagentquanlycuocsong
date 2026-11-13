@@ -24,9 +24,11 @@ def check_profile_router(state: AgentState) -> str:
     Kiểm tra xem người dùng đã hoàn thành onboarding / có thông tin nền tảng chưa.
     - Nếu người dùng đang hỏi tư vấn / chiến lược / thắc mắc thực thi (How/Why/Làm thế nào/Được không/VinUni...):
       Bỏ qua onboarding để chuyển thẳng vào 'analyze' -> 'chat' (Coaching node) giải đáp chuyên sâu.
-    - Nếu user_profile trống hoặc is_onboarded == False: Bắt buộc rẽ nhánh vào 'onboarding'.
+    - Nếu user_profile trống hoặc is_onboarded == False:
+      Kiểm tra thêm trong goals_ledger.json của username. Nếu đã hoàn tất onboarding -> 'analyze', ngược lại -> 'onboarding'.
     - Nếu đã có đầy đủ hồ sơ nền tảng: Cho phép đi tiếp vào 'analyze'.
     """
+    username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
     messages = state.get("messages", [])
     last_msg = ""
     for msg in reversed(messages):
@@ -48,6 +50,13 @@ def check_profile_router(state: AgentState) -> str:
 
     profile = state.get("user_profile")
     if not profile or not profile.get("is_onboarded", False):
+        try:
+            from memory.goals import load_user_profile
+            saved_prof = load_user_profile(username)
+            if saved_prof and isinstance(saved_prof, dict) and saved_prof.get("is_onboarded"):
+                return "analyze"
+        except Exception:
+            pass
         return "onboarding"
     return "analyze"
 
@@ -215,18 +224,43 @@ class MavisAgentWrapper:
     """
     Wrapper tích hợp MemorySaver quản lý chat_history xuyên suốt phiên làm việc.
     Tự động gắn thread_id theo username để cô lập phiên trò chuyện từng người dùng.
+    Đảm bảo 100% username luôn hiện diện trong AgentState ở cả invoke() và stream().
     """
     def __init__(self, graph):
         self.graph = graph
 
-    def invoke(self, state, config=None, **kwargs):
+    def _prepare_call(self, state, config):
         config = dict(config or {})
         configurable = dict(config.get("configurable", {}))
+
+        # 1. Trích xuất username chuẩn mực từ state hoặc config
+        user = "mavis"
+        if isinstance(state, dict):
+            raw_user = state.get("username")
+            if raw_user and str(raw_user).strip():
+                user = str(raw_user).strip().lower()
+        if user == "mavis" and "thread_id" in configurable:
+            tid_parts = str(configurable["thread_id"]).replace("thread_", "").split("_")
+            if tid_parts and tid_parts[0].strip():
+                user = tid_parts[0].strip().lower()
+
+        # 2. Đảm bảo state dict luôn mang username chính xác
+        if isinstance(state, dict):
+            state["username"] = user
+
+        # 3. Đồng bộ thread_id
         if "thread_id" not in configurable:
-            user = (state.get("username") if isinstance(state, dict) else None) or "mavis"
             configurable["thread_id"] = f"thread_{user}"
         config["configurable"] = configurable
+        return state, config
+
+    def invoke(self, state, config=None, **kwargs):
+        state, config = self._prepare_call(state, config)
         return self.graph.invoke(state, config=config, **kwargs)
+
+    def stream(self, state, config=None, **kwargs):
+        state, config = self._prepare_call(state, config)
+        return self.graph.stream(state, config=config, **kwargs)
 
     def __getattr__(self, name):
         return getattr(self.graph, name)
