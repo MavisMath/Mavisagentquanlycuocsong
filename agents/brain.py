@@ -79,6 +79,34 @@ def extract_text_from_content(content: Any) -> str:
     return str(content)
 
 
+def safe_dict(val: Any) -> Dict[str, Any]:
+    """Chuyển đổi an toàn mọi giá trị sang dict, tránh AttributeError khi gọi .get()."""
+    if isinstance(val, dict):
+        return val
+    if isinstance(val, str):
+        try:
+            parsed = json.loads(val)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+    return {}
+
+
+def safe_list(val: Any) -> List[Any]:
+    """Chuyển đổi an toàn mọi giá trị sang list, tránh lỗi khi lặp hoặc parse JSON."""
+    if isinstance(val, list):
+        return val
+    if isinstance(val, str):
+        try:
+            parsed = json.loads(val)
+            if isinstance(parsed, list):
+                return parsed
+        except Exception:
+            pass
+    return []
+
+
 # ==============================================================================
 # PYDANTIC SCHEMAS CHO MULTI-AGENT COACHING SYSTEM (PHASE 11)
 # ==============================================================================
@@ -1428,13 +1456,11 @@ def profiler_node(state: CoachState) -> Dict[str, Any]:
     username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
     
     # 1. Đọc hồ sơ hiện có từ State hoặc Disk
-    current_profile = state.get("profile") or {}
-    if not isinstance(current_profile, dict) or not current_profile.get("goal_name"):
-        saved_prof = load_user_goal_profile(username)
-        if saved_prof and isinstance(saved_prof, dict) and saved_prof.get("goal_name"):
+    current_profile = safe_dict(state.get("profile"))
+    if not current_profile.get("goal_name"):
+        saved_prof = safe_dict(load_user_goal_profile(username))
+        if saved_prof.get("goal_name"):
             current_profile = dict(saved_prof)
-        else:
-            current_profile = {}
 
     # 2. Lấy tin nhắn người dùng mới nhất
     messages = state.get("messages", [])
@@ -1561,7 +1587,7 @@ def research_node(state: CoachState) -> Dict[str, Any]:
     Tìm kiếm tài liệu, giáo trình, bộ đề hoặc công cụ thực tế, uy tín và khả thi theo quỹ thời gian của khách.
     """
     username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
-    profile = state.get("profile") or load_user_goal_profile(username)
+    profile = safe_dict(state.get("profile") or load_user_goal_profile(username))
 
     goal_name = profile.get("goal_name", "IELTS 7.0")
     current_level = profile.get("current_level", "Band 5.0")
@@ -1649,8 +1675,8 @@ def strategic_planner_node(state: CoachState) -> Dict[str, Any]:
 
     # MULTI-AGENT BACKCASTING (PHASE 11):
     # Kích hoạt khi có profile mục tiêu đã chốt thông số và danh sách tài nguyên thẩm định
-    profile = state.get("profile") or load_user_goal_profile(username)
-    resources = state.get("resources") or load_user_resources(username)
+    profile = safe_dict(state.get("profile") or load_user_goal_profile(username))
+    resources = safe_list(state.get("resources") or load_user_resources(username))
     if profile and profile.get("goal_name") and (profile.get("is_complete") or state.get("is_complete")):
         goal_name = profile.get("goal_name", "IELTS 7.0")
         current_level = profile.get("current_level", "Band 5.0")
@@ -1848,9 +1874,9 @@ def scheduler_node(state: CoachState) -> Dict[str, Any]:
     - Soạn thảo và trả về Bản Báo cáo Huấn luyện Điều hành (Executive Coaching Briefing).
     """
     username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
-    profile = state.get("profile") or load_user_goal_profile(username)
-    resources = state.get("resources") or load_user_resources(username)
-    roadmap = state.get("roadmap") or load_user_roadmap(username)
+    profile = safe_dict(state.get("profile") or load_user_goal_profile(username))
+    resources = safe_list(state.get("resources") or load_user_resources(username))
+    roadmap = safe_dict(state.get("roadmap") or load_user_roadmap(username))
 
     goal_name = profile.get("goal_name", "IELTS 7.0")
     current_level = profile.get("current_level", "Band 5.0")
@@ -1860,12 +1886,13 @@ def scheduler_node(state: CoachState) -> Dict[str, Any]:
 
     # 1. Lưu chính thức mục tiêu vào goals_ledger.json
     milestones = []
-    weekly_ms = roadmap.get("weekly_milestones", []) if isinstance(roadmap, dict) else []
+    weekly_ms = safe_list(roadmap.get("weekly_milestones", []))
     for w in weekly_ms[:4]:
+        w_dict = safe_dict(w)
         milestones.append({
-            "milestone": f"Tuần {w.get('week_number')}: {w.get('milestone_title')}",
-            "timeline": f"Tuần {w.get('week_number')}",
-            "status": "in_progress" if w.get("week_number") == 1 else "pending",
+            "milestone": f"Tuần {w_dict.get('week_number', 1)}: {w_dict.get('milestone_title', str(w))}",
+            "timeline": f"Tuần {w_dict.get('week_number', 1)}",
+            "status": "in_progress" if w_dict.get("week_number") == 1 else "pending",
         })
 
     add_goal(
@@ -1878,24 +1905,29 @@ def scheduler_node(state: CoachState) -> Dict[str, Any]:
     )
 
     for r in resources:
+        r_dict = safe_dict(r)
         append_resource_to_goal(
             goal_id_or_title=goal_name,
             resource={
-                "title": r.get("title", ""),
-                "url": r.get("url", "#"),
-                "type": r.get("type", "Tài liệu"),
+                "title": r_dict.get("title", str(r)),
+                "url": r_dict.get("url", "#"),
+                "type": r_dict.get("type", "Tài liệu"),
             },
             username=username,
         )
 
     # 2. Xây dựng lịch trình hành động ngày 1
-    w1_tasks = weekly_ms[0].get("daily_tasks", []) if weekly_ms else []
-    day1_task = w1_tasks[0] if w1_tasks else {
-        "task_title": f"Bắt đầu bài tập khởi động cho mục tiêu {goal_name}",
-        "duration_minutes": int(daily_hours * 60),
-        "time_slot": preferred_slots,
-        "attached_resource": resources[0].get("title", "") if resources else "Tài liệu chính thức",
-    }
+    w1 = safe_dict(weekly_ms[0]) if weekly_ms else {}
+    w1_tasks = safe_list(w1.get("daily_tasks", []))
+    day1_task = safe_dict(w1_tasks[0]) if w1_tasks else {}
+    if not day1_task:
+        first_r = safe_dict(resources[0]) if resources else {}
+        day1_task = {
+            "task_title": f"Bắt đầu bài tập khởi động cho mục tiêu {goal_name}",
+            "duration_minutes": int(daily_hours * 60),
+            "time_slot": preferred_slots,
+            "attached_resource": first_r.get("title", "Tài liệu chính thức"),
+        }
 
     schedule_items = [
         {
@@ -1908,15 +1940,19 @@ def scheduler_node(state: CoachState) -> Dict[str, Any]:
     ]
 
     # 3. Tạo Bản Báo cáo Huấn luyện Điều hành (Executive Coaching Briefing)
-    res_text = "\n".join([
-        f"- **[{r.get('title')}]({r.get('url')})** ({r.get('type')}) - *Ước tính: {r.get('estimated_hours')}h*\n  *Hướng dẫn:* {r.get('how_to_use')}"
-        for r in resources
-    ])
+    res_lines = []
+    for r in resources:
+        r_dict = safe_dict(r)
+        res_lines.append(
+            f"- **[{r_dict.get('title', 'Tài liệu')}]({r_dict.get('url', '#')})** ({r_dict.get('type', 'Tài liệu')}) - *Ước tính: {r_dict.get('estimated_hours', 'N/A')}h*\n  *Hướng dẫn:* {r_dict.get('how_to_use', 'Học theo lộ trình.')}"
+        )
+    res_text = "\n".join(res_lines)
 
-    ms_text = "\n".join([
-        f"- **Tuần {w.get('week_number')}:** {w.get('milestone_title')}"
-        for w in weekly_ms[:4]
-    ])
+    ms_lines = []
+    for w in weekly_ms[:4]:
+        w_dict = safe_dict(w)
+        ms_lines.append(f"- **Tuần {w_dict.get('week_number', 1)}:** {w_dict.get('milestone_title', '')}")
+    ms_text = "\n".join(ms_lines)
 
     briefing = f"""🎯 **HỒ SƠ MỤC TIÊU ĐÃ ĐƯỢC THIẾT LẬP THÀNH CÔNG!**
 

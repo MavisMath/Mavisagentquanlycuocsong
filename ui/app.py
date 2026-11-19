@@ -1,6 +1,10 @@
 import os
 import sys
-from typing import List, Dict, Any
+import json
+import uuid
+import urllib.parse
+from datetime import datetime, timedelta
+from typing import List, Dict, Any, Optional
 
 # Đảm bảo đường dẫn import tương thích khi chạy streamlit từ mọi thư mục
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -22,9 +26,133 @@ except Exception:
     pass
 
 from langchain_core.messages import HumanMessage, AIMessage
-from agents.graph import mavis_agent
+from agents.graph import build_graph, mavis_agent
 from memory.goals import load_goals, CATEGORY_LABELS, load_historical_insights
 from memory.auth import get_authenticator, register_user
+
+
+def safe_dict(val: Any) -> Dict[str, Any]:
+    """Chuyển đổi an toàn mọi giá trị sang dict, tránh lỗi AttributeError khi parse JSON từ LLM."""
+    if isinstance(val, dict):
+        return val
+    if isinstance(val, str):
+        try:
+            parsed = json.loads(val)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+    return {}
+
+
+def safe_list(val: Any) -> List[Any]:
+    """Chuyển đổi an toàn mọi giá trị sang list, tránh lỗi khi lặp hoặc parse JSON."""
+    if isinstance(val, list):
+        return val
+    if isinstance(val, str):
+        try:
+            parsed = json.loads(val)
+            if isinstance(parsed, list):
+                return parsed
+        except Exception:
+            pass
+    return []
+
+
+def generate_gcal_link(task_title: str, time_slot: str, duration_minutes: int = 120, resource_info: str = "") -> str:
+    """Tạo liên kết mở trực tiếp Google Calendar Web để thêm sự kiện 1 chạm."""
+    now = datetime.now()
+    now_str = now.strftime("%Y%m%d")
+    start_h = 20
+    start_m = 0
+    t_slot_lower = str(time_slot).lower()
+    if "sáng" in t_slot_lower or "08" in t_slot_lower:
+        start_h = 8
+    elif "06" in t_slot_lower:
+        start_h = 6
+
+    end_total_m = start_h * 60 + start_m + int(duration_minutes or 120)
+    end_h = (end_total_m // 60) % 24
+    end_m = end_total_m % 60
+
+    dates_str = f"{now_str}T{start_h:02d}{start_m:02d}00/{now_str}T{end_h:02d}{end_m:02d}00"
+    params = {
+        "action": "TEMPLATE",
+        "text": f"🎯 Mavis Coach: {task_title}",
+        "dates": dates_str,
+        "details": f"Lịch hành động từ Mavis Executive Coach.\nKhung giờ: {time_slot} ({duration_minutes} phút)\nTài liệu: {resource_info}",
+    }
+    return f"https://calendar.google.com/calendar/render?{urllib.parse.urlencode(params)}"
+
+
+def generate_ics_calendar(roadmap: Dict[str, Any], goal_name: str, preferred_slots: str) -> str:
+    """Tạo file lịch chuẩn .ics (iCalendar) tải về để import một chạm vào Google Calendar, Outlook, Apple Calendar."""
+    now = datetime.now()
+    now_str = now.strftime("%Y%m%d")
+    events = []
+    weekly_ms = safe_list(roadmap.get("weekly_milestones", []))
+    day_count = 0
+
+    for w in weekly_ms[:2]:
+        w_dict = safe_dict(w)
+        daily_tasks = safe_list(w_dict.get("daily_tasks", []))
+        for t in daily_tasks:
+            t_dict = safe_dict(t)
+            t_title = t_dict.get("task_title", f"Học tập {goal_name}")
+            t_duration = t_dict.get("duration_minutes", 120)
+            t_slot = t_dict.get("time_slot", preferred_slots)
+            t_res = t_dict.get("attached_resource", "")
+
+            event_date = (now + timedelta(days=day_count)).strftime("%Y%m%d")
+            day_count += 1
+
+            start_h = 20
+            start_m = 0
+            if "sáng" in str(t_slot).lower() or "08" in str(t_slot):
+                start_h = 8
+            elif "06" in str(t_slot):
+                start_h = 6
+
+            end_tot = start_h * 60 + start_m + int(t_duration or 120)
+            end_h = (end_tot // 60) % 24
+            end_m = end_tot % 60
+
+            uid = f"mavis_{uuid.uuid4().hex[:8]}@maviscoach.ai"
+            events.extend([
+                "BEGIN:VEVENT",
+                f"UID:{uid}",
+                f"DTSTAMP:{now_str}T000000Z",
+                f"DTSTART:{event_date}T{start_h:02d}{start_m:02d}00",
+                f"DTEND:{event_date}T{end_h:02d}{end_m:02d}00",
+                f"SUMMARY:🎯 Mavis: {t_title}",
+                f"DESCRIPTION:Khung giờ: {t_slot} | Thời lượng: {t_duration} phút | Tài liệu: {t_res}",
+                "STATUS:CONFIRMED",
+                "END:VEVENT",
+            ])
+
+    if not events:
+        uid = f"mavis_{uuid.uuid4().hex[:8]}@maviscoach.ai"
+        events.extend([
+            "BEGIN:VEVENT",
+            f"UID:{uid}",
+            f"DTSTAMP:{now_str}T000000Z",
+            f"DTSTART:{now_str}T200000",
+            f"DTEND:{now_str}T220000",
+            f"SUMMARY:🎯 Mavis: Bắt đầu mục tiêu {goal_name}",
+            f"DESCRIPTION:Khung giờ học tập tối ưu nhịp sinh học cùng Mavis Coach",
+            "STATUS:CONFIRMED",
+            "END:VEVENT",
+        ])
+
+    ics_content = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Mavis Executive Life Coach//VN",
+        "CALSCALE:GREGORIAN",
+        *events,
+        "END:VCALENDAR",
+    ]
+    return "\r\n".join(ics_content)
 
 
 def extract_text_from_content(content: Any) -> str:
@@ -343,6 +471,11 @@ if roadmap_key not in st.session_state:
     from memory.goals import load_user_roadmap
     st.session_state[roadmap_key] = load_user_roadmap(current_username)
 
+# Khởi tạo graph = build_graph() trong st.session_state duy nhất 1 lần
+if "mavis_graph" not in st.session_state:
+    st.session_state["mavis_graph"] = build_graph()
+mavis_agent = st.session_state["mavis_graph"]
+
 
 # ==========================================
 # 4. SIDEBAR: BẢNG ĐIỀU KHIỂN RIÊNG BIỆT CỦA USER
@@ -375,15 +508,38 @@ with st.sidebar:
     st.markdown("---")
 
     # Hồ sơ mục tiêu có cấu trúc (Goal Profile - Phase 11 Multi-Agent)
-    current_gp = st.session_state.get(goal_profile_key) or {}
-    if current_gp and current_gp.get("goal_name"):
-        with st.expander("🎯 Mục Tiêu Đang Thực Hiện", expanded=True):
-            st.markdown(f"**Mục tiêu:** {current_gp.get('goal_name')}")
-            st.markdown(f"**Vạch xuất phát:** {current_gp.get('current_level', 'Chưa rõ')}")
-            st.markdown(f"**Thời hạn:** {current_gp.get('duration_days', 'N/A')} ngày")
-            st.markdown(f"**Quỹ thời gian:** {current_gp.get('daily_hours', 'N/A')}h/ngày ({current_gp.get('preferred_slots', 'Linh hoạt')})")
-            status_text = "✅ ĐÃ KHÓA CHIẾN LƯỢC" if current_gp.get("is_complete") else "⏳ ĐANG THU THẬP"
-            st.markdown(f"**Trạng thái:** `{status_text}`")
+    current_gp = safe_dict(st.session_state.get(goal_profile_key))
+    with st.expander("🎯 Hồ Sơ Mục Tiêu (Real-time)", expanded=True):
+        if current_gp.get("goal_name"):
+            st.markdown(f"**Mục tiêu:** `{current_gp.get('goal_name')}`")
+            st.markdown(f"**Vạch xuất phát:** {current_gp.get('current_level') or 'Chưa rõ'}")
+            st.markdown(f"**Thời hạn:** {current_gp.get('duration_days') or 'N/A'} ngày")
+            st.markdown(f"**Quỹ thời gian:** {current_gp.get('daily_hours') or 'N/A'}h/ngày")
+            st.markdown(f"**Khung giờ:** {current_gp.get('preferred_slots') or 'Linh hoạt'}")
+
+            if current_gp.get("is_complete"):
+                st.success("✅ **ĐÃ CHỐT HOÀN THIỆN**")
+            else:
+                missing = []
+                if not current_gp.get("goal_name"): missing.append("Mục tiêu")
+                if not current_gp.get("current_level"): missing.append("Trình độ hiện tại")
+                if not current_gp.get("duration_days"): missing.append("Thời gian thực hiện")
+                if not current_gp.get("daily_hours"): missing.append("Số giờ rảnh mỗi ngày")
+                if not current_gp.get("preferred_slots"): missing.append("Khung giờ học")
+                st.warning(f"⚠️ **Đang thiếu:** {', '.join(missing)}")
+        else:
+            st.caption("Chưa có hồ sơ mục tiêu. Nhập vào ô chat để bắt đầu!")
+
+    # Kho tài liệu (resources) trên Sidebar
+    current_res = safe_list(st.session_state.get(resources_key))
+    if current_res:
+        with st.expander("📚 Kho Tài Liệu (Link nhanh)", expanded=False):
+            for r in current_res:
+                r_dict = safe_dict(r)
+                title = r_dict.get("title", "Tài liệu")
+                url = r_dict.get("url", "#")
+                rtype = r_dict.get("type", "Tài liệu")
+                st.markdown(f"- 🔗 [{title}]({url}) *({rtype})*")
 
     # Hồ sơ cá nhân đa khía cạnh (User Profile)
     user_prof = st.session_state[profile_key]
@@ -631,35 +787,158 @@ with st.sidebar:
 
 
 # ==========================================
-# 5. MAIN PANEL: GIAO DIỆN CHAT RIÊNG BIỆT
+# 5. MAIN PANEL: BẢNG CHỈ HUY & GIAO DIỆN HỘI THOẠI
 # ==========================================
 st.title("🤖 Mavis AI Executive & Life Coach")
 st.markdown(
     f"**Không gian làm việc:** `{current_name}` (`@{current_username}`) | Tối ưu hóa nhịp sinh học • Phản biện chi phí cơ hội • Đa người dùng SaaS"
 )
 
-# Hiển thị các tin nhắn cũ trong lịch sử của riêng user này
-for msg in st.session_state[msg_key]:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+# 4 Tab Trực quan hiển thị dữ liệu real-time từ State
+tab_chat, tab_profile, tab_resources, tab_roadmap = st.tabs([
+    "💬 Trò Chuyện & Coaching",
+    "🎯 Hồ Sơ Mục Tiêu",
+    "📚 Kho Tài Liệu Thẩm Định",
+    "🗺️ Lộ Trình Backcasting",
+])
 
-# Khung nhập tin nhắn
+with tab_chat:
+    # Hiển thị các tin nhắn trong phiên trò chuyện
+    for msg in st.session_state[msg_key]:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+with tab_profile:
+    st.markdown("### 🎯 Hồ Sơ Mục Tiêu Cốt Lõi (Goal Profile)")
+    p_dict = safe_dict(st.session_state.get(goal_profile_key))
+    if p_dict.get("goal_name"):
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric("Mục Tiêu", p_dict.get("goal_name"))
+        with c2:
+            st.metric("Vạch Xuất Phát", p_dict.get("current_level") or "Chưa rõ")
+        with c3:
+            st.metric("Thời Gian", f"{p_dict.get('duration_days', 'N/A')} ngày")
+        with c4:
+            st.metric("Cam Kết", f"{p_dict.get('daily_hours', 'N/A')} h/ngày")
+
+        st.markdown(f"**Khung giờ ưu tiên trong ngày:** `{p_dict.get('preferred_slots', 'Chưa thiết lập')}`")
+
+        if p_dict.get("is_complete"):
+            st.success("✅ **Trạng thái:** Hồ sơ mục tiêu đã được xác thực đầy đủ và khóa chiến lược vào hệ thống.")
+        else:
+            missing = []
+            if not p_dict.get("goal_name"): missing.append("Tên mục tiêu cụ thể")
+            if not p_dict.get("current_level"): missing.append("Trình độ / vạch xuất phát hiện tại")
+            if not p_dict.get("duration_days"): missing.append("Tổng số ngày dự kiến hoàn thành")
+            if not p_dict.get("daily_hours"): missing.append("Quỹ thời gian rảnh mỗi ngày")
+            if not p_dict.get("preferred_slots"): missing.append("Khung giờ ưu tiên trong ngày")
+            st.warning(f"⚠️ **Hồ sơ chưa hoàn thiện!** Đang thiếu thông tin: **{', '.join(missing)}**. Bạn hãy phản hồi thêm trong tab **Trò Chuyện & Coaching** để Coach chốt hồ sơ!")
+    else:
+        st.info("💡 Bạn chưa thiết lập mục tiêu nào. Hãy vào tab **Trò Chuyện & Coaching** và chia sẻ mục tiêu của bạn (ví dụ: *'Tôi muốn học IELTS trong 3 tháng lên 7.0'*).")
+
+with tab_resources:
+    st.markdown("### 📚 Kho Tài Liệu & Công Cụ Thực Tế Đã Thẩm Định")
+    res_list = safe_list(st.session_state.get(resources_key))
+    if res_list:
+        for idx, r in enumerate(res_list, 1):
+            r_dict = safe_dict(r)
+            title = r_dict.get("title", f"Tài liệu {idx}")
+            url = r_dict.get("url", "#")
+            rtype = r_dict.get("type", "Tài liệu học tập")
+            hours = r_dict.get("estimated_hours", "N/A")
+            how_to = r_dict.get("how_to_use", "Học tập và giải bài tập theo lộ trình đề ra.")
+
+            with st.container(border=True):
+                st.markdown(f"#### 🔗 [{title}]({url})")
+                c1, c2 = st.columns([1, 2])
+                with c1:
+                    st.caption(f"🏷️ Phân loại: **{rtype}** | ⏳ Thời lượng: **{hours}h**")
+                with c2:
+                    st.caption(f"💡 Hướng dẫn: {how_to}")
+    else:
+        st.info("💡 Chưa có tài liệu nào được trích xuất. Khi hồ sơ mục tiêu được chốt đầy đủ 5 thông số, Agent Research sẽ tự động tìm kiếm các bộ đề, giáo trình uy tín kèm link trực tiếp tại đây!")
+
+with tab_roadmap:
+    st.markdown("### 🗺️ Lộ Trình Backcasting & Kế Hoạch Phân Cấp")
+    roadmap_dict = safe_dict(st.session_state.get(roadmap_key))
+    p_dict = safe_dict(st.session_state.get(goal_profile_key))
+    goal_name = p_dict.get("goal_name", "Mục tiêu Mavis")
+    slots = p_dict.get("preferred_slots", "Tối 20:00 - 22:00")
+
+    if roadmap_dict and (roadmap_dict.get("target_vision") or roadmap_dict.get("weekly_milestones")):
+        st.info(f"🎯 **Tầm nhìn Chiến lược:** {roadmap_dict.get('target_vision', f'Cán đích {goal_name}')}")
+        if roadmap_dict.get("total_phases"):
+            st.markdown(f"**Phân kỳ Quý / Tháng:** {roadmap_dict.get('total_phases')}")
+
+        st.markdown("---")
+
+        # Nút Đồng bộ Google Calendar
+        st.subheader("📅 Đồng Bộ Lên Google Calendar")
+        w_ms = safe_list(roadmap_dict.get("weekly_milestones", []))
+        w1_tasks = safe_list(safe_dict(w_ms[0]).get("daily_tasks", [])) if w_ms else []
+        d1 = safe_dict(w1_tasks[0]) if w1_tasks else {}
+        d1_title = d1.get("task_title", f"Bắt đầu mục tiêu {goal_name}")
+        d1_dur = d1.get("duration_minutes", 120)
+        d1_res = d1.get("attached_resource", "")
+
+        col_gcal, col_ics = st.columns(2)
+        with col_gcal:
+            gcal_url = generate_gcal_link(d1_title, slots, d1_dur, d1_res)
+            st.link_button("🌐 Mở Google Calendar (Thêm Ngày 1)", url=gcal_url, use_container_width=True)
+
+        with col_ics:
+            ics_data = generate_ics_calendar(roadmap_dict, goal_name, slots)
+            st.download_button(
+                label="📥 Tải File Lịch (.ics) Cho Google / Apple / Outlook",
+                data=ics_data,
+                file_name=f"mavis_schedule_{current_username}.ics",
+                mime="text/calendar",
+                use_container_width=True,
+            )
+
+        st.markdown("---")
+        st.markdown("#### 🚩 Chi Tiết Cột Mốc Từng Tuần & Nhiệm Vụ Hàng Ngày:")
+
+        for w in w_ms:
+            w_dict = safe_dict(w)
+            w_num = w_dict.get("week_number", 1)
+            w_title = w_dict.get("milestone_title", f"Tuần {w_num}")
+            daily_tasks = safe_list(w_dict.get("daily_tasks", []))
+
+            with st.expander(f"📌 Tuần {w_num}: {w_title}", expanded=(w_num == 1)):
+                if daily_tasks:
+                    for t in daily_tasks:
+                        t_dict = safe_dict(t)
+                        day_num = t_dict.get("day_number", 1)
+                        t_title = t_dict.get("task_title", "")
+                        t_dur = t_dict.get("duration_minutes", 120)
+                        t_slot = t_dict.get("time_slot", slots)
+                        t_res = t_dict.get("attached_resource", "Tài liệu chuẩn")
+                        cog = t_dict.get("cognitive_load", "medium")
+
+                        cog_badge = "🔥 High Load" if cog == "high" else ("⚡ Medium" if cog == "medium" else "🌱 Low Load")
+                        st.markdown(
+                            f"- **Ngày {day_num}:** {t_title}\n"
+                            f"  *Khung giờ:* `{t_slot}` ({t_dur} phút) | `{cog_badge}` | 📖 *Tài liệu:* {t_res}"
+                        )
+                else:
+                    st.caption("Chưa có danh sách task chi tiết cho tuần này.")
+    else:
+        st.info("💡 Lộ trình Backcasting chưa được khởi tạo. Sau khi bạn cung cấp đủ 5 thông số mục tiêu, Agent Strategic Planner sẽ tự động phân rã lộ trình tại đây!")
+
+# Khung nhập tin nhắn (nằm bên dưới các tab để điều hướng mượt mà)
 if user_input := st.chat_input("Nhập mục tiêu hoặc trao đổi cùng Coach (VD: 'Tôi muốn học Data Science trong 3 tháng', 'Thiết lập mục tiêu chạy bộ')..."):
     # 1. Thêm tin nhắn của User vào giao diện
     st.session_state[msg_key].append({"role": "user", "content": user_input})
-    with st.chat_message("user"):
-        st.markdown(user_input)
 
     # 2. Chuẩn bị input cho LangGraph Agent với định danh username
-    # QUY TẮC PHÒNG NGỪA NHÂN BẢN:
-    # LangGraph State Reducer (add_messages) tự động nối tin nhắn mới vào phiên trò chuyện.
-    # Chỉ truyền duy nhất tin nhắn mới [HumanMessage(content=user_input)], tuyệt đối KHÔNG truyền lại mảng cũ!
     active_username = (st.session_state.get("username") or current_username or "mavis").strip().lower()
     input_state = {
         "messages": [HumanMessage(content=user_input)],
-        "profile": st.session_state.get(goal_profile_key) or load_user_goal_profile(active_username),
-        "resources": st.session_state.get(resources_key) or load_user_resources(active_username),
-        "roadmap": st.session_state.get(roadmap_key) or load_user_roadmap(active_username),
+        "profile": safe_dict(st.session_state.get(goal_profile_key) or load_user_goal_profile(active_username)),
+        "resources": safe_list(st.session_state.get(resources_key) or load_user_resources(active_username)),
+        "roadmap": safe_dict(st.session_state.get(roadmap_key) or load_user_roadmap(active_username)),
         "current_energy_level": st.session_state[energy_key],
         "detected_emotion": st.session_state[emotion_key],
         "intent": st.session_state[intent_key],
@@ -680,8 +959,9 @@ if user_input := st.chat_input("Nhập mục tiêu hoặc trao đổi cùng Coac
     with st.chat_message("assistant"):
         with st.spinner(f"Executive Coach đang phân tích dữ liệu cho {current_name}..."):
             try:
-                # Cấu hình thread_id cố định theo phiên người dùng (thread_{active_username})
-                config = {"configurable": {"thread_id": f"thread_{active_username}"}}
+                # Cấu hình thread_id cố định theo phiên người dùng (st.session_state.username)
+                thread_user = getattr(st.session_state, "username", None) or active_username
+                config = {"configurable": {"thread_id": thread_user}}
                 output_state = mavis_agent.invoke(input_state, config=config)
 
                 # Dọn dẹp hiển thị UI: Gom tất cả các phản hồi AI mới được sinh ra trong lượt này (sau tin nhắn của user)

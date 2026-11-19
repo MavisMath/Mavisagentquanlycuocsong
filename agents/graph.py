@@ -89,64 +89,13 @@ def route_after_profiler(state: CoachState) -> str:
 
 
 # ==============================================================================
-# KHỞI TẠO STATEGRAPH MULTI-AGENT
+# HÀM XÂY DỰNG VÀ BIÊN DỊCH ĐỒ THỊ LANGGRAPH MULTI-AGENT
 # ==============================================================================
-workflow = StateGraph(CoachState)
-
-# 1. Đăng ký 4 Multi-Agent Nodes cốt lõi + Chat Node
-workflow.add_node("profiler", profiler_node)
-workflow.add_node("research", research_node)
-workflow.add_node("strategic_planner", strategic_planner_node)
-workflow.add_node("scheduler", scheduler_node)
-workflow.add_node("chat", chat_node)
-
-# Các node hỗ trợ tương thích
-workflow.add_node("motivate", motivate_node)
-workflow.add_node("trend", trend_node)
-workflow.add_node("retrospective", retrospective_node)
-
-# 2. Thiết lập Conditional Edge từ START
-workflow.add_conditional_edges(
-    START,
-    route_entry,
-    {
-        "profiler": "profiler",
-        "chat": "chat",
-        "motivate": "motivate",
-        "trend": "trend",
-        "retrospective": "retrospective",
-    },
-)
-
-# 3. Thiết lập Conditional Edge sau profiler_node
-workflow.add_conditional_edges(
-    "profiler",
-    route_after_profiler,
-    {
-        "research": "research",
-        END: END,
-    },
-)
-
-# 4. Chuỗi phối hợp tuần tự giữa các Agent Nodes:
-# research_node -> strategic_planner_node -> scheduler_node -> END
-workflow.add_edge("research", "strategic_planner")
-workflow.add_edge("strategic_planner", "scheduler")
-workflow.add_edge("scheduler", END)
-workflow.add_edge("chat", END)
-workflow.add_edge("motivate", END)
-workflow.add_edge("trend", END)
-workflow.add_edge("retrospective", END)
-
-# 5. Bộ nhớ kiểm tra trạng thái phiên làm việc (Checkpointer)
-memory_checkpointer = MemorySaver()
-compiled_graph = workflow.compile(checkpointer=memory_checkpointer)
-
 
 class MavisAgentWrapper:
     """
     Wrapper tích hợp MemorySaver quản lý chat_history và State xuyên suốt phiên làm việc.
-    Tự động gắn thread_id cố định theo username (thread_{username}) để bảo toàn ngữ cảnh và mục tiêu.
+    Tự động gắn thread_id cố định theo username để bảo toàn ngữ cảnh và mục tiêu qua mọi lượt chat.
     """
     def __init__(self, graph):
         self.graph = graph
@@ -170,9 +119,9 @@ class MavisAgentWrapper:
             state["username"] = user
             state["user_id"] = user
 
-        # 2. Cố định thread_id theo user (không đổi theo thread_ver ngẫu nhiên)
-        if "thread_id" not in configurable:
-            configurable["thread_id"] = f"thread_{user}"
+        # 2. Cố định thread_id theo user
+        if "thread_id" not in configurable or not configurable["thread_id"]:
+            configurable["thread_id"] = user
         config["configurable"] = configurable
         return state, config
 
@@ -188,5 +137,65 @@ class MavisAgentWrapper:
         return getattr(self.graph, name)
 
 
-mavis_agent = MavisAgentWrapper(compiled_graph)
+def build_graph(checkpointer=None) -> MavisAgentWrapper:
+    """
+    Khởi tạo và biên dịch đồ thị LangGraph Multi-Agent hoàn chỉnh.
+    Tích hợp MemorySaver checkpointer để lưu trữ trạng thái phiên làm việc theo từng user.
+    """
+    if checkpointer is None:
+        checkpointer = MemorySaver()
+
+    workflow = StateGraph(CoachState)
+
+    # 1. Đăng ký 4 Multi-Agent Nodes cốt lõi + Chat Node
+    workflow.add_node("profiler", profiler_node)
+    workflow.add_node("research", research_node)
+    workflow.add_node("strategic_planner", strategic_planner_node)
+    workflow.add_node("scheduler", scheduler_node)
+    workflow.add_node("chat", chat_node)
+
+    # Các node hỗ trợ tương thích
+    workflow.add_node("motivate", motivate_node)
+    workflow.add_node("trend", trend_node)
+    workflow.add_node("retrospective", retrospective_node)
+
+    # 2. Thiết lập Conditional Edge từ START
+    workflow.add_conditional_edges(
+        START,
+        route_entry,
+        {
+            "profiler": "profiler",
+            "chat": "chat",
+            "motivate": "motivate",
+            "trend": "trend",
+            "retrospective": "retrospective",
+        },
+    )
+
+    # 3. Thiết lập Conditional Edge sau profiler_node
+    workflow.add_conditional_edges(
+        "profiler",
+        route_after_profiler,
+        {
+            "research": "research",
+            END: END,
+        },
+    )
+
+    # 4. Chuỗi phối hợp tuần tự giữa các Agent Nodes:
+    # research_node -> strategic_planner_node -> scheduler_node -> END
+    workflow.add_edge("research", "strategic_planner")
+    workflow.add_edge("strategic_planner", "scheduler")
+    workflow.add_edge("scheduler", END)
+    workflow.add_edge("chat", END)
+    workflow.add_edge("motivate", END)
+    workflow.add_edge("trend", END)
+    workflow.add_edge("retrospective", END)
+
+    compiled_graph = workflow.compile(checkpointer=checkpointer)
+    return MavisAgentWrapper(compiled_graph)
+
+
+# Khởi tạo instance mặc định
+mavis_agent = build_graph()
 
