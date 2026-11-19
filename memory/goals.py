@@ -272,6 +272,73 @@ def load_user_profile(username: str = "mavis") -> Dict[str, Any]:
     return all_data.get(username, {}).get("user_profile", {})
 
 
+def save_user_goal_profile(profile: Dict[str, Any], username: str = "mavis") -> bool:
+    """Lưu hồ sơ mục tiêu có cấu trúc (GoalProfile) vào goals_ledger.json."""
+    username = (username or DEFAULT_USER).strip().lower()
+    all_data = load_all_users_data()
+    if username not in all_data or not isinstance(all_data[username], dict):
+        all_data[username] = get_blank_tree()
+    existing_prof = all_data[username].get("goal_profile", {})
+    if isinstance(existing_prof, dict):
+        existing_prof.update(profile)
+        all_data[username]["goal_profile"] = existing_prof
+    else:
+        all_data[username]["goal_profile"] = profile
+
+    # Đồng bộ sang user_profile để tương thích với các view khác
+    if "user_profile" not in all_data[username] or not isinstance(all_data[username]["user_profile"], dict):
+        all_data[username]["user_profile"] = {}
+    if profile.get("goal_name"):
+        all_data[username]["user_profile"]["current_situation"] = f"Mục tiêu: {profile.get('goal_name')} (Trình độ: {profile.get('current_level', 'N/A')})"
+    if profile.get("preferred_slots") or profile.get("daily_hours"):
+        all_data[username]["user_profile"]["time_constraints"] = f"{profile.get('daily_hours', 2.0)}h/ngày ({profile.get('preferred_slots', 'Linh hoạt')})"
+    if profile.get("is_complete"):
+        all_data[username]["user_profile"]["is_onboarded"] = True
+        all_data[username]["user_profile"]["coaching_stage"] = "action"
+    return save_all_users_data(all_data)
+
+
+def load_user_goal_profile(username: str = "mavis") -> Dict[str, Any]:
+    """Tải hồ sơ mục tiêu GoalProfile từ goals_ledger.json."""
+    username = (username or DEFAULT_USER).strip().lower()
+    all_data = load_all_users_data()
+    return all_data.get(username, {}).get("goal_profile", {})
+
+
+def save_user_resources(resources: List[Dict[str, Any]], username: str = "mavis") -> bool:
+    """Lưu danh sách tài nguyên và công cụ thẩm định vào goals_ledger.json."""
+    username = (username or DEFAULT_USER).strip().lower()
+    all_data = load_all_users_data()
+    if username not in all_data or not isinstance(all_data[username], dict):
+        all_data[username] = get_blank_tree()
+    all_data[username]["curated_resources"] = resources
+    return save_all_users_data(all_data)
+
+
+def load_user_resources(username: str = "mavis") -> List[Dict[str, Any]]:
+    """Tải danh sách tài nguyên từ goals_ledger.json."""
+    username = (username or DEFAULT_USER).strip().lower()
+    all_data = load_all_users_data()
+    return all_data.get(username, {}).get("curated_resources", [])
+
+
+def save_user_roadmap(roadmap: Dict[str, Any], username: str = "mavis") -> bool:
+    """Lưu lộ trình Backcasting phân cấp vào goals_ledger.json."""
+    username = (username or DEFAULT_USER).strip().lower()
+    all_data = load_all_users_data()
+    if username not in all_data or not isinstance(all_data[username], dict):
+        all_data[username] = get_blank_tree()
+    all_data[username]["backcasting_roadmap"] = roadmap
+    return save_all_users_data(all_data)
+
+
+def load_user_roadmap(username: str = "mavis") -> Dict[str, Any]:
+    """Tải lộ trình Backcasting từ goals_ledger.json."""
+    username = (username or DEFAULT_USER).strip().lower()
+    all_data = load_all_users_data()
+    return all_data.get(username, {}).get("backcasting_roadmap", {})
+
+
 def load_categorized_goals(username: str = "mavis") -> Dict[str, Any]:
     """
     Truy xuất vào đúng nhánh dữ liệu của tài khoản đó từ memory/goals_ledger.json (Phase 8 Multi-Tenant).

@@ -328,6 +328,21 @@ thread_ver_key = f"thread_ver_{current_username}"
 if thread_ver_key not in st.session_state:
     st.session_state[thread_ver_key] = 1
 
+goal_profile_key = f"goal_profile_{current_username}"
+if goal_profile_key not in st.session_state:
+    from memory.goals import load_user_goal_profile
+    st.session_state[goal_profile_key] = load_user_goal_profile(current_username)
+
+resources_key = f"resources_{current_username}"
+if resources_key not in st.session_state:
+    from memory.goals import load_user_resources
+    st.session_state[resources_key] = load_user_resources(current_username)
+
+roadmap_key = f"roadmap_{current_username}"
+if roadmap_key not in st.session_state:
+    from memory.goals import load_user_roadmap
+    st.session_state[roadmap_key] = load_user_roadmap(current_username)
+
 
 # ==========================================
 # 4. SIDEBAR: BẢNG ĐIỀU KHIỂN RIÊNG BIỆT CỦA USER
@@ -358,6 +373,17 @@ with st.sidebar:
             st.rerun()
 
     st.markdown("---")
+
+    # Hồ sơ mục tiêu có cấu trúc (Goal Profile - Phase 11 Multi-Agent)
+    current_gp = st.session_state.get(goal_profile_key) or {}
+    if current_gp and current_gp.get("goal_name"):
+        with st.expander("🎯 Mục Tiêu Đang Thực Hiện", expanded=True):
+            st.markdown(f"**Mục tiêu:** {current_gp.get('goal_name')}")
+            st.markdown(f"**Vạch xuất phát:** {current_gp.get('current_level', 'Chưa rõ')}")
+            st.markdown(f"**Thời hạn:** {current_gp.get('duration_days', 'N/A')} ngày")
+            st.markdown(f"**Quỹ thời gian:** {current_gp.get('daily_hours', 'N/A')}h/ngày ({current_gp.get('preferred_slots', 'Linh hoạt')})")
+            status_text = "✅ ĐÃ KHÓA CHIẾN LƯỢC" if current_gp.get("is_complete") else "⏳ ĐANG THU THẬP"
+            st.markdown(f"**Trạng thái:** `{status_text}`")
 
     # Hồ sơ cá nhân đa khía cạnh (User Profile)
     user_prof = st.session_state[profile_key]
@@ -592,6 +618,9 @@ with st.sidebar:
         st.session_state[plan_key] = []
         st.session_state[pending_goal_key] = None
         st.session_state[awaiting_confirmation_key] = False
+        st.session_state[goal_profile_key] = {}
+        st.session_state[resources_key] = []
+        st.session_state[roadmap_key] = {}
         st.session_state[profile_key] = {
             "current_situation": "",
             "financial_status": "",
@@ -628,6 +657,9 @@ if user_input := st.chat_input("Nhập mục tiêu hoặc trao đổi cùng Coac
     active_username = (st.session_state.get("username") or current_username or "mavis").strip().lower()
     input_state = {
         "messages": [HumanMessage(content=user_input)],
+        "profile": st.session_state.get(goal_profile_key) or load_user_goal_profile(active_username),
+        "resources": st.session_state.get(resources_key) or load_user_resources(active_username),
+        "roadmap": st.session_state.get(roadmap_key) or load_user_roadmap(active_username),
         "current_energy_level": st.session_state[energy_key],
         "detected_emotion": st.session_state[emotion_key],
         "intent": st.session_state[intent_key],
@@ -639,6 +671,7 @@ if user_input := st.chat_input("Nhập mục tiêu hoặc trao đổi cùng Coac
         "is_info_sufficient": False,
         "uploaded_context": st.session_state.get(rag_key),
         "username": active_username,
+        "user_id": active_username,
         "pending_goal": st.session_state.get(pending_goal_key),
         "awaiting_confirmation": st.session_state.get(awaiting_confirmation_key, False),
     }
@@ -647,9 +680,8 @@ if user_input := st.chat_input("Nhập mục tiêu hoặc trao đổi cùng Coac
     with st.chat_message("assistant"):
         with st.spinner(f"Executive Coach đang phân tích dữ liệu cho {current_name}..."):
             try:
-                # Cấu hình thread_id cho MemorySaver phân tách phiên trò chuyện theo user & phiên làm việc
-                current_ver = st.session_state.get(thread_ver_key, 1)
-                config = {"configurable": {"thread_id": f"thread_{active_username}_{current_ver}"}}
+                # Cấu hình thread_id cố định theo phiên người dùng (thread_{active_username})
+                config = {"configurable": {"thread_id": f"thread_{active_username}"}}
                 output_state = mavis_agent.invoke(input_state, config=config)
 
                 # Dọn dẹp hiển thị UI: Gom tất cả các phản hồi AI mới được sinh ra trong lượt này (sau tin nhắn của user)
@@ -697,6 +729,18 @@ if user_input := st.chat_input("Nhập mục tiêu hoặc trao đổi cùng Coac
                 )
 
                 # Cập nhật các trạng thái của Agent vào session_state của user
+                if "profile" in output_state and output_state["profile"]:
+                    st.session_state[goal_profile_key] = output_state["profile"]
+
+                if "resources" in output_state and output_state["resources"]:
+                    st.session_state[resources_key] = output_state["resources"]
+
+                if "roadmap" in output_state and output_state["roadmap"]:
+                    st.session_state[roadmap_key] = output_state["roadmap"]
+
+                if "schedule" in output_state and output_state["schedule"]:
+                    st.session_state[f"schedule_{active_username}"] = output_state["schedule"]
+
                 if "user_profile" in output_state and output_state["user_profile"]:
                     st.session_state[profile_key] = output_state["user_profile"]
 

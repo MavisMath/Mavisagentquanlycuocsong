@@ -1,34 +1,35 @@
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import HumanMessage
-from agents.state import AgentState
+from agents.state import CoachState, AgentState
 from agents.brain import (
+    profiler_node,
+    research_node,
+    strategic_planner_node,
+    scheduler_node,
+    chat_node,
+    # Hỗ trợ tương thích ngược cho các node mở rộng
+    motivate_node,
+    trend_node,
+    retrospective_node,
     onboarding_node,
     analyze_input_node,
-    motivate_node,
     schedule_node,
-    trend_node,
     goal_manager_node,
     resource_finder_node,
-    strategic_planner_node,
     opportunity_scout_node,
     holistic_scheduler_node,
-    chat_node,
-    retrospective_node,
 )
 
 
-def check_profile_router(state: AgentState) -> str:
+def route_entry(state: CoachState) -> str:
     """
-    Conditional Edge đầu tiên của đồ thị:
-    Kiểm tra xem người dùng đã hoàn thành onboarding / có thông tin nền tảng chưa.
-    - Nếu người dùng đang hỏi tư vấn / chiến lược / thắc mắc thực thi (How/Why/Làm thế nào/Được không/VinUni...):
-      Bỏ qua onboarding để chuyển thẳng vào 'analyze' -> 'chat' (Coaching node) giải đáp chuyên sâu.
-    - Nếu user_profile trống hoặc is_onboarded == False:
-      Kiểm tra thêm trong goals_ledger.json của username. Nếu đã hoàn tất onboarding -> 'analyze', ngược lại -> 'onboarding'.
-    - Nếu đã có đầy đủ hồ sơ nền tảng: Cho phép đi tiếp vào 'analyze'.
+    Bộ định tuyến khởi đầu (Entry Router):
+    - Nếu người dùng đặt câu hỏi tư vấn / chiến lược / thắc mắc thực thi (Làm sao/Tại sao/Được không/VinUni...):
+      VÀ người dùng đã có mục tiêu hoàn chỉnh -> chuyển thẳng vào 'chat' (Coaching node) tư vấn chuyên sâu.
+    - Nếu có intent đặc thù (motivate, trend, retrospective) -> điều hướng tương ứng.
+    - Mặc định: Chuyển vào 'profiler' (Node 1) để khai thác, tích lũy và chốt hồ sơ mục tiêu có cấu trúc.
     """
-    username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
     messages = state.get("messages", [])
     last_msg = ""
     for msg in reversed(messages):
@@ -43,188 +44,109 @@ def check_profile_router(state: AgentState) -> str:
     advice_triggers = [
         "làm sao", "làm thế nào", "tại sao", "thế nào", "được không", "có nên",
         "tư vấn", "lời khuyên", "chiến lược", "song song", "how", "why",
-        "cách nào", "khả thi", "vinuni", "đỗ", "kinh nghiệm", "liệu", "cân bằng"
+        "cách nào", "khả thi", "vinuni", "đỗ", "kinh nghiệm", "liệu", "cân bằng",
+        "speaking", "writing", "reading", "listening", "mẹo", "phương pháp"
     ]
-    if any(w in last_lower for w in advice_triggers):
-        return "analyze"
+    is_advice = any(w in last_lower for w in advice_triggers)
 
-    profile = state.get("user_profile")
-    if not profile or not profile.get("is_onboarded", False):
+    username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
+    profile = state.get("profile") or {}
+    if not profile or not profile.get("goal_name"):
         try:
-            from memory.goals import load_user_profile
-            saved_prof = load_user_profile(username)
-            if saved_prof and isinstance(saved_prof, dict) and saved_prof.get("is_onboarded"):
-                return "analyze"
+            from memory.goals import load_user_goal_profile
+            saved = load_user_goal_profile(username)
+            if saved and isinstance(saved, dict) and saved.get("goal_name"):
+                profile = saved
         except Exception:
             pass
-        return "onboarding"
-    return "analyze"
 
-
-def route_by_intent(state: AgentState) -> str:
-    """
-    Hàm định tuyến điều kiện dựa trên ý định (intent) được phân tích từ câu chat của Mavis.
-    Cấu trúc lại Router dạng Agentic Coach (Phase 9):
-    - Phân biệt rõ giữa tin nhắn 'tâm sự / chia sẻ dự định' (coach_dialogue), 'xác nhận kích hoạt' (confirm_goal)
-      và 'lệnh thực thi'.
-    - 'coach_dialogue', 'chat', 'confirm_goal': Điều hướng vào node giao tiếp (chat_node) để đối thoại coaching.
-    - 'set_goal': Điều hướng sang node Quản lý & Phân rã mục tiêu (Goal Manager).
-    - 'schedule': Điều hướng sang node Lập lịch tối ưu nhịp sinh học.
-    - 'holistic_schedule': Điều hướng sang node Cân bằng Sinh học Toàn diện (Dynamic Equilibrium).
-    - 'explore_trend': Điều hướng sang node Trinh sát xu hướng & Dòng tiền công nghệ (Tavily).
-    - 'find_resources': Điều hướng sang node Trinh sát & Tuyển chọn tài nguyên học tập (Resource Finder).
-    - 'strategic_plan': Điều hướng sang node Lập kế hoạch ngược Backcasting & Xung đột ưu tiên.
-    - 'opportunity_scout': Điều hướng sang node Trinh sát cơ hội thực chiến & Networking Protocol.
-    """
-    intent = state.get("intent", "chat")
-    if intent in ["coach_dialogue", "chat", "confirm_goal"]:
+    # Nếu người dùng đang hỏi tư vấn và đã có mục tiêu hoặc profile đầy đủ
+    if is_advice and profile.get("is_complete"):
         return "chat"
-    elif intent == "motivate":
+
+    # Kiểm tra intent đặc thù
+    intent = state.get("intent")
+    if intent == "motivate":
         return "motivate"
-    elif intent in ["schedule", "reschedule"]:
-        return "schedule"
-    elif intent in ["holistic_schedule", "balance", "dynamic_equilibrium", "can_bang"]:
-        return "holistic_scheduler"
     elif intent in ["explore_trend", "search"]:
         return "trend"
-    elif intent == "set_goal":
-        return "goal_manager"
-    elif intent == "find_resources":
-        return "resource_finder"
-    elif intent in ["strategic_plan", "backcasting", "conflict"]:
-        return "strategic_planner"
-    elif intent in ["opportunity_scout", "scout", "networking"]:
-        return "opportunity_scout"
-    elif intent in ["retrospective", "review", "hoi_cuu"]:
+    elif intent in ["retrospective", "review"]:
         return "retrospective"
-    return "chat"
+
+    return "profiler"
 
 
-def route_from_chat(state: AgentState) -> str:
+def route_after_profiler(state: CoachState) -> str:
     """
-    Conditional Edge từ node giao tiếp (chat_node - Phase 9):
-    Cơ chế Kích hoạt Hành động & Điều hướng Kế hoạch:
-    - Nếu người dùng trả lời 'Đồng ý' (is_confirmed == True):
-      Rẽ nhánh truyền dữ liệu sang goal_manager_node.
-    - Nếu đã thu thập đầy đủ thông tin rào cản / mục tiêu (is_info_sufficient == True hoặc coaching_stage in ["planning"]):
-      Rẽ nhánh sang strategic_planner_node để lập kế hoạch ngược (Backcasting) và giải quyết rào cản.
-    - Ngược lại (đang trò chuyện coaching bình thường):
-      Kết thúc luồng tại END.
+    Conditional Edge sau profiler_node:
+    - Nếu is_complete == True: Đã thu thập đủ 5 thông số cốt lõi -> Kích hoạt research_node (Node 2)
+      để thẩm định tài nguyên thực tế.
+    - Nếu is_complete == False: Còn thiếu dữ liệu -> Dừng tại END để người dùng trả lời câu hỏi còn thiếu.
     """
-    if state.get("is_confirmed"):
-        return "goal_manager"
-    if state.get("is_info_sufficient") or state.get("coaching_stage") in ["planning"]:
-        return "strategic_planner"
+    if state.get("is_complete") is True:
+        return "research"
     return END
 
 
-def route_from_strategic_planner(state: AgentState) -> str:
-    """
-    Conditional Edge nối từ strategic_planner sang opportunity_scout (Phase 7.3):
-    - Nếu có target_milestone (từ thuật toán Backcasting) -> Tự động chuyển tiếp sang opportunity_scout
-      để trinh sát cơ hội thực chiến (VinUni AI Bootcamp) và sinh task nhỏ trong tuần.
-    - Nếu không có milestone -> chuyển tiếp sang holistic_scheduler để cập nhật nhịp sinh học.
-    """
-    if state.get("target_milestone"):
-        return "opportunity_scout"
-    return "holistic_scheduler"
+# ==============================================================================
+# KHỞI TẠO STATEGRAPH MULTI-AGENT
+# ==============================================================================
+workflow = StateGraph(CoachState)
 
-
-# 1. Khởi tạo StateGraph với schema AgentState
-workflow = StateGraph(AgentState)
-
-# 2. Đăng ký các node chức năng vào đồ thị
-workflow.add_node("onboarding", onboarding_node)
-workflow.add_node("analyze", analyze_input_node)
-workflow.add_node("motivate", motivate_node)
-workflow.add_node("schedule", schedule_node)
-workflow.add_node("trend", trend_node)
-workflow.add_node("goal_manager", goal_manager_node)
-workflow.add_node("resource_finder", resource_finder_node)
+# 1. Đăng ký 4 Multi-Agent Nodes cốt lõi + Chat Node
+workflow.add_node("profiler", profiler_node)
+workflow.add_node("research", research_node)
 workflow.add_node("strategic_planner", strategic_planner_node)
-workflow.add_node("opportunity_scout", opportunity_scout_node)
-workflow.add_node("holistic_scheduler", holistic_scheduler_node)
+workflow.add_node("scheduler", scheduler_node)
 workflow.add_node("chat", chat_node)
+
+# Các node hỗ trợ tương thích
+workflow.add_node("motivate", motivate_node)
+workflow.add_node("trend", trend_node)
 workflow.add_node("retrospective", retrospective_node)
 
-# 3. THIẾT LẬP CONDITIONAL EDGE ĐẦU TIÊN TỪ START:
-# Nếu thiếu thông tin nền tảng (user_profile trống) -> bắt buộc rẽ nhánh vào onboarding trước.
+# 2. Thiết lập Conditional Edge từ START
 workflow.add_conditional_edges(
     START,
-    check_profile_router,
+    route_entry,
     {
-        "onboarding": "onboarding",
-        "analyze": "analyze",
-    },
-)
-
-# 4. Thiết lập Conditional Edges từ node analyze
-workflow.add_conditional_edges(
-    "analyze",
-    route_by_intent,
-    {
-        "motivate": "motivate",
-        "schedule": "schedule",
-        "holistic_scheduler": "holistic_scheduler",
-        "trend": "trend",
-        "goal_manager": "goal_manager",
-        "resource_finder": "resource_finder",
-        "strategic_planner": "strategic_planner",
-        "opportunity_scout": "opportunity_scout",
+        "profiler": "profiler",
         "chat": "chat",
+        "motivate": "motivate",
+        "trend": "trend",
         "retrospective": "retrospective",
     },
 )
 
-# 5. Thiết lập Normal & Conditional Edges từ các node:
-# goal_manager tự động móc nối sang resource_finder để quét tài liệu & báo giá ngay sau khi phê duyệt mục tiêu
-workflow.add_edge("onboarding", END)
+# 3. Thiết lập Conditional Edge sau profiler_node
+workflow.add_conditional_edges(
+    "profiler",
+    route_after_profiler,
+    {
+        "research": "research",
+        END: END,
+    },
+)
+
+# 4. Chuỗi phối hợp tuần tự giữa các Agent Nodes:
+# research_node -> strategic_planner_node -> scheduler_node -> END
+workflow.add_edge("research", "strategic_planner")
+workflow.add_edge("strategic_planner", "scheduler")
+workflow.add_edge("scheduler", END)
+workflow.add_edge("chat", END)
 workflow.add_edge("motivate", END)
-workflow.add_edge("schedule", END)
-workflow.add_edge("holistic_scheduler", END)
 workflow.add_edge("trend", END)
 workflow.add_edge("retrospective", END)
-# Node giao tiếp (chat) rẽ nhánh có điều kiện:
-# - Nếu user trả lời 'Đồng ý' (is_confirmed == True) -> truyền dữ liệu sang goal_manager
-# - Nếu đã thu thập đủ thông tin rào cản -> truyền dữ liệu sang strategic_planner
-# - Ngược lại: kết thúc tại END
-workflow.add_conditional_edges(
-    "chat",
-    route_from_chat,
-    {
-        "goal_manager": "goal_manager",
-        "strategic_planner": "strategic_planner",
-        END: END,
-    },
-)
 
-# goal_manager truyền dữ liệu sang holistic_scheduler để bóc tách checklist và tạo lịch (Phase 9)
-workflow.add_edge("goal_manager", "holistic_scheduler")
-workflow.add_edge("resource_finder", END)
-
-# strategic_planner tự động móc nối sang opportunity_scout khi nhận diện Milestone trung gian cần trinh sát
-workflow.add_conditional_edges(
-    "strategic_planner",
-    route_from_strategic_planner,
-    {
-        "opportunity_scout": "opportunity_scout",
-        "holistic_scheduler": "holistic_scheduler",
-        END: END,
-    },
-)
-workflow.add_edge("opportunity_scout", "holistic_scheduler")
-
-# 6. CẤU HÌNH BỘ NHỚ HỘI THOẠI (MEMORYSAVER CHECKPOINTER)
-# Tích hợp MemorySaver giúp đồ thị LangGraph ghi nhớ ngữ cảnh hội thoại liên tục
+# 5. Bộ nhớ kiểm tra trạng thái phiên làm việc (Checkpointer)
 memory_checkpointer = MemorySaver()
 compiled_graph = workflow.compile(checkpointer=memory_checkpointer)
 
 
 class MavisAgentWrapper:
     """
-    Wrapper tích hợp MemorySaver quản lý chat_history xuyên suốt phiên làm việc.
-    Tự động gắn thread_id theo username để cô lập phiên trò chuyện từng người dùng.
-    Đảm bảo 100% username luôn hiện diện trong AgentState ở cả invoke() và stream().
+    Wrapper tích hợp MemorySaver quản lý chat_history và State xuyên suốt phiên làm việc.
+    Tự động gắn thread_id cố định theo username (thread_{username}) để bảo toàn ngữ cảnh và mục tiêu.
     """
     def __init__(self, graph):
         self.graph = graph
@@ -233,7 +155,7 @@ class MavisAgentWrapper:
         config = dict(config or {})
         configurable = dict(config.get("configurable", {}))
 
-        # 1. Trích xuất username chuẩn mực từ state hoặc config
+        # 1. Trích xuất username chuẩn xác từ state hoặc config
         user = "mavis"
         if isinstance(state, dict):
             raw_user = state.get("username")
@@ -244,11 +166,11 @@ class MavisAgentWrapper:
             if tid_parts and tid_parts[0].strip():
                 user = tid_parts[0].strip().lower()
 
-        # 2. Đảm bảo state dict luôn mang username chính xác
         if isinstance(state, dict):
             state["username"] = user
+            state["user_id"] = user
 
-        # 3. Đồng bộ thread_id
+        # 2. Cố định thread_id theo user (không đổi theo thread_ver ngẫu nhiên)
         if "thread_id" not in configurable:
             configurable["thread_id"] = f"thread_{user}"
         config["configurable"] = configurable

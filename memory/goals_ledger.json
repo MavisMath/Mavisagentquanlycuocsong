@@ -239,33 +239,6 @@
       "productivity_patterns": []
     }
   },
-  "test_flow_user": {
-    "career": {
-      "label": "💼 Sự nghiệp & Học tập (Career)",
-      "description": "Học tập, Công việc, Quan hệ đối tác & Sự nghiệp",
-      "children": []
-    },
-    "relationships": {
-      "label": "🤝 Mối quan hệ (Relationships)",
-      "description": "Gia đình, Bạn bè, Tình yêu & Mạng lưới kết nối",
-      "children": []
-    },
-    "health": {
-      "label": "🧘 Sức khỏe & Thể chất (Health)",
-      "description": "Thể chất, Tinh thần, Dinh dưỡng & Nhịp sinh học",
-      "children": []
-    },
-    "beauty": {
-      "label": "✨ Sắc vóc & Làm đẹp (Beauty)",
-      "description": "Vóc dáng, Làm đẹp, Skincare & Phong thái Executive",
-      "children": []
-    },
-    "historical_insights": {
-      "failed_methods": [],
-      "effective_methods": [],
-      "productivity_patterns": []
-    }
-  },
   "new_user_test": {
     "career": {
       "label": "💼 Sự nghiệp & Học tập (Career)",

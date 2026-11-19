@@ -11,8 +11,13 @@ from langchain_core.messages import (
     BaseMessage,
 )
 from langchain_google_genai import ChatGoogleGenerativeAI
-from agents.state import AgentState
-from tools.search import execute_trend_search, tavily_search, execute_opportunity_scout
+from agents.state import AgentState, CoachState
+from tools.search import (
+    execute_trend_search,
+    tavily_search,
+    execute_opportunity_scout,
+    execute_resource_search,
+)
 from memory.goals import (
     load_goals,
     save_goals,
@@ -33,6 +38,12 @@ from memory.goals import (
     save_historical_insights,
     append_insight,
     get_historical_insights_summary_text,
+    save_user_goal_profile,
+    load_user_goal_profile,
+    save_user_resources,
+    load_user_resources,
+    save_user_roadmap,
+    load_user_roadmap,
 )
 from agents.task_estimator import analyze_and_estimate_goal
 from tools.document_ingestor import scan_and_retrieve_context
@@ -66,6 +77,113 @@ def extract_text_from_content(content: Any) -> str:
                 parts.append(str(part))
         return "".join(parts)
     return str(content)
+
+
+# ==============================================================================
+# PYDANTIC SCHEMAS CHO MULTI-AGENT COACHING SYSTEM (PHASE 11)
+# ==============================================================================
+
+class GoalProfile(BaseModel):
+    """Mô hình hồ sơ mục tiêu cốt lõi với Structured Output."""
+    goal_name: Optional[str] = Field(None, description="Tên mục tiêu cụ thể, VD: 'IELTS 7.0' hoặc 'Đỗ Thạc sĩ AI VinUni'")
+    current_level: Optional[str] = Field(None, description="Trình độ hoặc trạng thái xuất phát hiện tại của người dùng, VD: 'Band 5.0', 'Mất gốc', 'Đã biết Python cơ bản'")
+    duration_days: Optional[int] = Field(None, description="Tổng số ngày dự kiến hoàn thành mục tiêu, VD: 90 ngày (3 tháng), 180 ngày")
+    daily_hours: Optional[float] = Field(None, description="Số giờ rảnh mỗi ngày có thể cam kết thực hiện, VD: 2.0")
+    preferred_slots: Optional[str] = Field(None, description="Khung giờ ưu tiên trong ngày, VD: 'Tối (20:00 - 22:00)', 'Sáng sớm (06:00 - 08:00)'")
+    is_complete: bool = Field(False, description="True nếu ĐÃ ĐẦY ĐỦ 5 thông số cốt lõi: goal_name, current_level, duration_days, daily_hours, preferred_slots. False nếu còn thiếu ít nhất 1 thông số.")
+    missing_info_question: Optional[str] = Field(None, description="Nếu is_complete là False: Đặt đúng 1 câu hỏi ngắn gọn, tự nhiên và trực tiếp hỏi thông tin còn thiếu. Tuyệt đối không chào hỏi dài dòng, không nói 'đã ghi nhận', không dùng văn mẫu. Nếu is_complete là True: để trống hoặc None.")
+
+
+class ResourceItem(BaseModel):
+    """Mô hình tài nguyên học tập, giáo trình hoặc công cụ thực tế."""
+    title: str = Field(description="Tên tài liệu, giáo trình, công cụ hoặc bộ đề thực tế uy tín")
+    url: str = Field(description="Đường link thật, chính thức hoặc trang tra cứu uy tín")
+    type: str = Field(description="Phân loại: Sách/Giáo trình, Web/Công cụ, Khóa học, Video, hoặc Bộ đề")
+    estimated_hours: float = Field(description="Thời lượng ước tính cần thiết để hoàn thành hoặc nghiên cứu")
+    how_to_use: str = Field(description="Hướng dẫn ngắn gọn cách ứng dụng tài nguyên này hiệu quả nhất theo quỹ thời gian của khách")
+
+
+class CuratedResources(BaseModel):
+    """Danh sách các tài nguyên thực tế đã thẩm định."""
+    resources: List[ResourceItem] = Field(description="Danh sách 3-5 tài nguyên thực tế, uy tín và khả thi nhất")
+
+
+class DailyTask(BaseModel):
+    """Kế hoạch hành động cụ thể cho từng ngày."""
+    day_number: int = Field(description="Ngày thứ mấy (1, 2, 3...)")
+    task_title: str = Field(description="Hành động cụ thể cần làm trong ngày (không viết chung chung)")
+    duration_minutes: int = Field(description="Thời lượng thực hiện tính bằng phút, phải khớp với daily_hours của người dùng")
+    time_slot: str = Field(description="Khung giờ thực hiện khớp với preferred_slots, VD: '20:00 - 22:00'")
+    attached_resource: str = Field(description="Tên và đường link của tài liệu đính kèm từ danh sách resources")
+    cognitive_load: str = Field("medium", description="Mức độ tải nhận thức: high, medium, hoặc low")
+
+
+class WeeklyMilestone(BaseModel):
+    """Cột mốc mục tiêu tuần."""
+    week_number: int = Field(description="Tuần thứ mấy (Tuần 1, 2, 3...)")
+    milestone_title: str = Field(description="Mục tiêu trọng tâm cần đạt được của tuần")
+    daily_tasks: List[DailyTask] = Field(description="Kế hoạch chi tiết từng ngày trong tuần")
+
+
+class StrategicRoadmap(BaseModel):
+    """Lộ trình phân cấp Backcasting toàn diện."""
+    target_vision: str = Field(description="Tầm nhìn mục tiêu tối thượng")
+    total_phases: str = Field(description="Tổng quan phân kỳ Quý / Tháng theo tư duy Backcasting")
+    weekly_milestones: List[WeeklyMilestone] = Field(description="Lộ trình chi tiết từng tuần")
+
+
+def invoke_llm_resilient(
+    preferred_model: str,
+    messages: List[BaseMessage],
+    structured_schema: Optional[type] = None,
+    temperature: float = 0.2,
+) -> Any:
+    """
+    Gọi Gemini API một cách kiên cường (Resilient LLM Invocation).
+    Tự động thử model ưu tiên (VD: gemini-2.5-flash / gemini-2.5-pro),
+    nếu gặp 404 (model retired) hoặc lỗi kết nối, tự động chuyển tiếp sang các model thế hệ mới
+    (gemini-3.8-flash -> gemini-3.5-flash-lite -> gemini-3.1-flash-lite)
+    đảm bảo hệ thống luôn hoạt động ổn định và tin cậy.
+    """
+    current_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if not current_key:
+        raise ValueError("Chưa tìm thấy GEMINI_API_KEY trong file .env hoặc biến môi trường.")
+
+    models_to_try = [
+        preferred_model,
+        "gemini-3.8-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+    ]
+    seen = set()
+    candidate_models = []
+    for m in models_to_try:
+        if m and m not in seen:
+            seen.add(m)
+            candidate_models.append(m)
+
+    last_err = None
+    for model_name in candidate_models:
+        try:
+            llm = ChatGoogleGenerativeAI(
+                model=model_name,
+                google_api_key=current_key,
+                temperature=temperature,
+            )
+            if structured_schema is not None:
+                structured_llm = llm.with_structured_output(structured_schema)
+                return structured_llm.invoke(messages)
+            else:
+                return llm.invoke(messages)
+        except Exception as e:
+            last_err = e
+            err_str = str(e).lower()
+            if any(term in err_str for term in ["not found", "404", "no longer available", "resource_exhausted", "not supported", "model not found"]):
+                continue
+            # Nếu còn candidate khác thì thử tiếp
+            continue
+
+    raise RuntimeError(f"Tất cả model Gemini đều không phản hồi: {last_err}")
 
 
 # SYSTEM PROMPT CỐT LÕI (Từ Section 7 của PRD)
@@ -564,13 +682,13 @@ QUY TẮC RÀNG BUỘC BẮT BUỘC TỪ EXECUTIVE COACH:
 2. BẮT BUỘC ưu tiên áp dụng các phương pháp và quy luật năng suất trong effective_methods ({effective_methods}) và productivity_patterns ({productivity_patterns}).
 """
 
-    # KIỂM TRA HỒ SƠ MỤC TIÊU TRỐNG (PHASE ONBOARDING GUARD):
-    # Nếu hồ sơ chưa có mục tiêu nào trong goals_ledger, TUYỆT ĐỐI KHÔNG sinh lịch trình giả định!
-    if not active_tasks:
+    # KIỂM TRA HỒ SƠ MỤC TIÊU TRỐNG:
+    # Nếu hồ sơ chưa có mục tiêu nào trong goals_ledger, kiểm tra thêm trong Goal Profile
+    user_goal_prof = state.get("profile") or load_user_goal_profile(username)
+    if not active_tasks and not user_goal_prof.get("goal_name"):
         reply_text = (
-            "Hiện tại hồ sơ chiến lược của bạn đang hoàn toàn trống và chưa có mục tiêu nào trong hệ thống.\n\n"
-            "Từ góc độ Executive Life Coach, tôi KHÔNG sinh lịch trình khi bạn chưa xác lập mục tiêu cụ thể. "
-            "Bạn muốn chúng ta bắt đầu bằng việc xây dựng khía cạnh nào trước (Sự nghiệp, Sức khỏe, Tài chính...), và mục tiêu lớn nhất hiện tại của bạn là gì?"
+            "Hiện tại hệ thống chưa ghi nhận mục tiêu hành động cụ thể nào. "
+            "Bạn muốn chúng ta cùng thiết lập mục tiêu nào trước (như chứng chỉ IELTS, chuyên môn AI, hoặc nâng cao thể lực)?"
         )
         return {
             "messages": [AIMessage(content=reply_text)],
@@ -810,13 +928,12 @@ def holistic_scheduler_node(state: AgentState) -> Dict[str, Any]:
 
     active_tasks = get_active_tasks_and_milestones(username=username)
 
-    # KIỂM TRA HỒ SƠ MỤC TIÊU TRỐNG (PHASE ONBOARDING GUARD):
-    # Nếu hồ sơ chưa có mục tiêu nào trong goals_ledger, TUYỆT ĐỐI KHÔNG sinh lịch trình giả định!
-    if not active_tasks:
+    # KIỂM TRA HỒ SƠ MỤC TIÊU TRỐNG:
+    user_goal_prof = state.get("profile") or load_user_goal_profile(username)
+    if not active_tasks and not user_goal_prof.get("goal_name"):
         reply_text = (
-            "Hồ sơ chiến lược của bạn hiện tại đang hoàn toàn trống và chưa có mục tiêu nào trong 4 Root Nodes (Sự nghiệp, Sức khỏe, Mối quan hệ, Sắc vóc).\n\n"
-            "Từ góc độ Executive Life Coach, tôi KHÔNG sinh lịch trình khi bạn chưa xác lập mục tiêu cụ thể. "
-            "Bạn muốn chúng ta bắt đầu bằng việc xây dựng khía cạnh nào trước (Sự nghiệp, Sức khỏe, Tài chính...), và mục tiêu lớn nhất hiện tại của bạn là gì?"
+            "Hiện tại hệ thống chưa ghi nhận mục tiêu hành động cụ thể nào trong 4 khía cạnh cuộc sống. "
+            "Bạn muốn chúng ta bắt đầu bằng việc xây dựng mục tiêu trọng tâm nào trước?"
         )
         return {
             "messages": [AIMessage(content=reply_text)],
@@ -1295,7 +1412,213 @@ Nhiệm vụ:
     }
 
 
-def strategic_planner_node(state: AgentState) -> Dict[str, Any]:
+# ==============================================================================
+# 4 AGENT NODES CỐT LÕI (MULTI-AGENT ARCHITECTURE - PHASE 11)
+# ==============================================================================
+
+def profiler_node(state: CoachState) -> Dict[str, Any]:
+    """
+    Node 1: Profiler Agent (Khai thác & Chốt hồ sơ mục tiêu - Dùng gemini-2.5-flash với resilient fallback).
+    - Sử dụng with_structured_output(GoalProfile) để trích xuất và cập nhật cộng dồn:
+      goal_name, current_level, duration_days, daily_hours, preferred_slots, is_complete.
+    - is_complete = True chỉ khi đủ cả 5 thông số cốt lõi.
+    - Nếu thiếu thông số: sinh đúng 1 câu hỏi Socratic ngắn gọn hỏi đúng thông tin còn thiếu,
+      tuyệt đối không nói 'đã ghi nhận', dừng ở END chờ lượt chat sau.
+    """
+    username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
+    
+    # 1. Đọc hồ sơ hiện có từ State hoặc Disk
+    current_profile = state.get("profile") or {}
+    if not isinstance(current_profile, dict) or not current_profile.get("goal_name"):
+        saved_prof = load_user_goal_profile(username)
+        if saved_prof and isinstance(saved_prof, dict) and saved_prof.get("goal_name"):
+            current_profile = dict(saved_prof)
+        else:
+            current_profile = {}
+
+    # 2. Lấy tin nhắn người dùng mới nhất
+    messages = state.get("messages", [])
+    last_user_message = ""
+    for msg in reversed(messages):
+        if isinstance(msg, HumanMessage) or getattr(msg, "type", "") == "human":
+            last_user_message = msg.content
+            break
+        elif isinstance(msg, dict) and msg.get("role") == "user":
+            last_user_message = msg.get("content", "")
+            break
+
+    user_lower = (last_user_message or "").strip().lower()
+
+    # Lời chào ban đầu nếu chưa hề có thông tin gì
+    if not current_profile.get("goal_name") and (not user_lower or user_lower in ["hi", "hello", "xin chào", "chào", "start", "bắt đầu", "alo", "hey", "test"]):
+        welcome_prompt = (
+            "Chào bạn! Tôi là Elite Executive & Life Coach của bạn. "
+            "Hiện tại bạn đang muốn tập trung chinh phục mục tiêu quan trọng nào nhất (ví dụ: chứng chỉ IELTS, nâng cao chuyên môn AI/Data, hay rèn luyện sức khỏe)?"
+        )
+        return {
+            "messages": [AIMessage(content=welcome_prompt)],
+            "profile": current_profile,
+            "is_complete": False,
+            "username": username,
+        }
+
+    # Prompt trích xuất và cộng dồn thông số mục tiêu
+    extraction_prompt = f"""Bạn là Hệ thống Khai thác & Chốt hồ sơ mục tiêu (Goal Profiler Agent).
+Dưới đây là hồ sơ hiện tại đã thu thập được từ các lượt trước (nếu có):
+{json.dumps(current_profile, ensure_ascii=False, indent=2)}
+
+Tin nhắn mới nhất từ người dùng:
+"{last_user_message}"
+
+Toàn bộ lịch sử trao đổi gần nhất:
+{chr(10).join([f"- {getattr(m, 'type', 'msg')}: {getattr(m, 'content', str(m))}" for m in messages[-4:]])}
+
+NHIỆM VỤ:
+1. Trích xuất và CỘNG DỒN các thông số mục tiêu. Nếu thông số nào đã có trong hồ sơ cũ và người dùng không đổi, hãy giữ nguyên. Nếu người dùng cung cấp thông tin mới, hãy cập nhật:
+   - goal_name: Tên mục tiêu cụ thể (VD: 'IELTS 7.0', 'Luyện Python', 'Giảm 5kg').
+   - current_level: Trình độ hoặc trạng thái xuất phát hiện tại (VD: 'Band 5.0', 'Mất gốc', 'Người mới').
+   - duration_days: Tổng thời gian thực hiện (chuyển đổi ra số ngày, VD: 3 tháng -> 90, 2 tháng -> 60, 6 tháng -> 180).
+   - daily_hours: Quỹ thời gian rảnh mỗi ngày (số thực, VD: 2.0).
+   - preferred_slots: Khung giờ ưu tiên trong ngày (VD: 'Tối 20:00 - 22:00', 'Sáng 06:00 - 08:00').
+2. Đánh giá is_complete:
+   - CHỈ ĐẶT is_complete = True KHI VÀ CHỈ KHI CẢ 5 THÔNG SỐ TRÊN ĐỀU ĐÃ ĐƯỢC ĐIỀN ĐẦY ĐỦ VÀ HỢP LỆ!
+   - Nếu còn thiếu dù chỉ 1 thông số, BẮT BUỘC đặt is_complete = False.
+3. Sinh missing_info_question:
+   - Nếu is_complete == False: Viết đúng 1 câu hỏi Socratic ngắn gọn, tự nhiên, đi thẳng vào các thông tin còn thiếu.
+     TUYỆT ĐỐI KHÔNG nói 'đã ghi nhận', KHÔNG dùng văn mẫu, KHÔNG nhắc lại hồ sơ cũ.
+   - Nếu is_complete == True: Để None hoặc chuỗi rỗng.
+"""
+
+    try:
+        extracted: GoalProfile = invoke_llm_resilient(
+            preferred_model="gemini-2.5-flash",
+            messages=[
+                SystemMessage(content=SYSTEM_PROMPT),
+                HumanMessage(content=extraction_prompt),
+            ],
+            structured_schema=GoalProfile,
+            temperature=0.1,
+        )
+
+        updated_profile = {
+            "goal_name": extracted.goal_name or current_profile.get("goal_name"),
+            "current_level": extracted.current_level or current_profile.get("current_level"),
+            "duration_days": extracted.duration_days or current_profile.get("duration_days"),
+            "daily_hours": extracted.daily_hours or current_profile.get("daily_hours"),
+            "preferred_slots": extracted.preferred_slots or current_profile.get("preferred_slots"),
+        }
+        
+        has_all = bool(
+            updated_profile.get("goal_name")
+            and updated_profile.get("current_level")
+            and updated_profile.get("duration_days")
+            and updated_profile.get("daily_hours")
+            and updated_profile.get("preferred_slots")
+        )
+        updated_profile["is_complete"] = has_all
+
+        # Lưu hồ sơ vào disk ngay lập tức
+        save_user_goal_profile(updated_profile, username=username)
+
+        if not updated_profile["is_complete"]:
+            q = extracted.missing_info_question
+            if not q or not q.strip():
+                missing = []
+                if not updated_profile.get("goal_name"): missing.append("mục tiêu cụ thể")
+                if not updated_profile.get("current_level"): missing.append("trình độ/vạch xuất phát hiện tại")
+                if not updated_profile.get("duration_days"): missing.append("thời gian hoàn thành dự kiến")
+                if not updated_profile.get("daily_hours"): missing.append("quỹ thời gian rảnh mỗi ngày")
+                if not updated_profile.get("preferred_slots"): missing.append("khung giờ bạn muốn thực hiện")
+                q = f"Để thiết kế lộ trình chính xác và khả thi nhất, bạn có thể chia sẻ thêm về {', '.join(missing)} không?"
+
+            return {
+                "profile": updated_profile,
+                "is_complete": False,
+                "messages": [AIMessage(content=q.strip())],
+                "username": username,
+            }
+
+        return {
+            "profile": updated_profile,
+            "is_complete": True,
+            "username": username,
+        }
+
+    except Exception as e:
+        print(f"Lỗi trong profiler_node: {e}")
+        return {
+            "profile": current_profile,
+            "is_complete": False,
+            "messages": [AIMessage(content="Tôi đã lắng nghe chia sẻ của bạn. Để thiết kế lộ trình chính xác, bạn có thể cho tôi biết rõ hơn về trình độ hiện tại, thời gian dự kiến và số giờ bạn có thể dành ra mỗi ngày không?")],
+            "username": username,
+        }
+
+
+def research_node(state: CoachState) -> Dict[str, Any]:
+    """
+    Node 2: Research Node (Tìm kiếm & Thẩm định tài liệu thực tế - Dùng gemini-2.5-pro với resilient fallback).
+    Kích hoạt ngay khi is_complete == True.
+    Tìm kiếm tài liệu, giáo trình, bộ đề hoặc công cụ thực tế, uy tín và khả thi theo quỹ thời gian của khách.
+    """
+    username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
+    profile = state.get("profile") or load_user_goal_profile(username)
+
+    goal_name = profile.get("goal_name", "IELTS 7.0")
+    current_level = profile.get("current_level", "Band 5.0")
+    daily_hours = profile.get("daily_hours", 2.0)
+
+    # 1. Tìm kiếm dữ liệu thực tế
+    search_query = f"{goal_name} {current_level} tài liệu giáo trình bộ đề chính thức"
+    raw_results = execute_resource_search(search_query, max_results=4)
+
+    # 2. Dùng Gemini để thẩm định và tuyển chọn cấu trúc
+    research_prompt = f"""Bạn là Chuyên gia Thẩm định & Tuyển chọn Tài liệu Giáo trình (Curated Research Specialist).
+Khách hàng có hồ sơ:
+- Mục tiêu: {goal_name}
+- Điểm xuất phát: {current_level}
+- Quỹ thời gian: {daily_hours} giờ/ngày
+
+Dữ liệu tìm kiếm thực tế thu thập được:
+{json.dumps(raw_results, ensure_ascii=False, indent=2)}
+
+NHIỆM VỤ:
+Tuyển chọn 3 đến 4 tài liệu, bộ đề, giáo trình hoặc công cụ thực tế, uy tín và chuẩn mực nhất (dùng đường link thật từ kết quả tìm kiếm hoặc trang web chính thức uy tín).
+Phân bổ thời lượng nghiên cứu ước tính và viết hướng dẫn sử dụng súc tích, khả thi với quỹ thời gian {daily_hours}h/ngày (tránh tài liệu quá tải).
+Xuất ra danh sách tài nguyên chuẩn: title, url, type, estimated_hours, how_to_use.
+"""
+
+    try:
+        curated_obj: CuratedResources = invoke_llm_resilient(
+            preferred_model="gemini-2.5-pro",
+            messages=[
+                SystemMessage(content=SYSTEM_PROMPT),
+                HumanMessage(content=research_prompt),
+            ],
+            structured_schema=CuratedResources,
+            temperature=0.2,
+        )
+        resources_list = [r.model_dump() for r in curated_obj.resources]
+    except Exception as e:
+        print(f"Lỗi trong research_node: {e}")
+        resources_list = [
+            {
+                "title": r.get("title", f"Tài liệu {goal_name}"),
+                "url": r.get("url", "https://cambridgeenglish.org"),
+                "type": "Tài liệu chuẩn",
+                "estimated_hours": 30.0,
+                "how_to_use": f"Dành 1-1.5 giờ mỗi ngày để học và làm bài tập theo cấp độ {current_level}.",
+            }
+            for r in raw_results[:3]
+        ]
+
+    save_user_resources(resources_list, username=username)
+    return {
+        "resources": resources_list,
+        "username": username,
+    }
+
+
+def strategic_planner_node(state: CoachState) -> Dict[str, Any]:
     """
     Node 7: Strategic Planning, Backcasting & Priority Conflict Resolution (Phase 7.2).
     1. Thuật toán Backcasting (Lập kế hoạch ngược):
@@ -1323,6 +1646,92 @@ def strategic_planner_node(state: AgentState) -> Dict[str, Any]:
 
     user_lower = last_user_message.lower().strip()
     user_profile = state.get("user_profile") or {}
+
+    # MULTI-AGENT BACKCASTING (PHASE 11):
+    # Kích hoạt khi có profile mục tiêu đã chốt thông số và danh sách tài nguyên thẩm định
+    profile = state.get("profile") or load_user_goal_profile(username)
+    resources = state.get("resources") or load_user_resources(username)
+    if profile and profile.get("goal_name") and (profile.get("is_complete") or state.get("is_complete")):
+        goal_name = profile.get("goal_name", "IELTS 7.0")
+        current_level = profile.get("current_level", "Band 5.0")
+        duration_days = profile.get("duration_days", 90)
+        daily_hours = profile.get("daily_hours", 2.0)
+        preferred_slots = profile.get("preferred_slots", "Tối 20:00 - 22:00")
+        daily_minutes = int(daily_hours * 60)
+
+        planner_prompt = f"""Bạn là Giám đốc Chiến lược Huấn luyện Điều hành (Chief Strategic Planner).
+Áp dụng tư duy Backcasting (chia ngược từ Đích đến về Hiện tại) cho khách hàng:
+- Mục tiêu tối thượng: {goal_name}
+- Điểm xuất phát: {current_level}
+- Tổng thời gian thực hiện: {duration_days} ngày
+- Quỹ thời gian mỗi ngày: {daily_hours} giờ ({daily_minutes} phút)
+- Khung giờ ưu tiên: {preferred_slots}
+
+Danh sách tài nguyên thực tế đã thẩm định:
+{json.dumps(resources, ensure_ascii=False, indent=2)}
+
+NHIỆM VỤ:
+Xây dựng lộ trình Backcasting phân cấp gồm:
+1. target_vision: Tuyên ngôn mục tiêu rõ ràng.
+2. total_phases: Phân kỳ Quý / Tháng tổng quan (Giai đoạn 1: Nền tảng & Khắc phục lỗ hổng -> Giai đoạn 2: Tăng tốc chuyên sâu -> Giai đoạn 3: Thực chiến giải đề & Cán đích).
+3. weekly_milestones: Chi tiết 4 tuần đầu tiên:
+   - Mỗi tuần có milestone_title rõ ràng.
+   - Mỗi tuần có 5-7 daily_tasks:
+     * task_title: Hành động cụ thể (không viết chung chung).
+     * duration_minutes: Bắt buộc khớp với {daily_minutes} phút.
+     * time_slot: Khớp với {preferred_slots}.
+     * attached_resource: Ghi rõ tên tài liệu kèm đường link từ danh sách tài nguyên trên.
+     * cognitive_load: 'high', 'medium', hoặc 'low'.
+"""
+        try:
+            roadmap_obj: StrategicRoadmap = invoke_llm_resilient(
+                preferred_model="gemini-2.5-pro",
+                messages=[
+                    SystemMessage(content=SYSTEM_PROMPT + "\n\n" + ACHIEVEMENT_LEDGER),
+                    HumanMessage(content=planner_prompt),
+                ],
+                structured_schema=StrategicRoadmap,
+                temperature=0.2,
+            )
+            roadmap_dict = roadmap_obj.model_dump()
+        except Exception as e:
+            print(f"Lỗi trong strategic_planner_node: {e}")
+            first_res = resources[0] if resources else {"title": f"Tài liệu {goal_name}", "url": "https://cambridgeenglish.org"}
+            roadmap_dict = {
+                "target_vision": f"Cán đích xuất sắc {goal_name} trong {duration_days} ngày",
+                "total_phases": f"Giai đoạn 1: Xây nền tảng ({current_level}) -> Giai đoạn 2: Bứt phá kỹ năng cốt lõi -> Giai đoạn 3: Luyện đề thực chiến",
+                "weekly_milestones": [
+                    {
+                        "week_number": 1,
+                        "milestone_title": f"Củng cố nền tảng và phương pháp học {goal_name}",
+                        "daily_tasks": [
+                            {
+                                "day_number": 1,
+                                "task_title": f"Đánh giá chi tiết lỗ hổng xuất phát điểm {current_level} và hoàn thành bài tập khởi động",
+                                "duration_minutes": daily_minutes,
+                                "time_slot": preferred_slots,
+                                "attached_resource": f"{first_res.get('title')} ({first_res.get('url')})",
+                                "cognitive_load": "high",
+                            },
+                            {
+                                "day_number": 2,
+                                "task_title": "Thực hành bài tập kỹ năng trọng tâm và ghi chép từ vựng/công thức cốt lõi",
+                                "duration_minutes": daily_minutes,
+                                "time_slot": preferred_slots,
+                                "attached_resource": f"{first_res.get('title')} ({first_res.get('url')})",
+                                "cognitive_load": "medium",
+                            },
+                        ],
+                    }
+                ],
+            }
+
+        save_user_roadmap(roadmap_dict, username=username)
+        return {
+            "roadmap": roadmap_dict,
+            "target_goal": goal_name,
+            "username": username,
+        }
 
     # 1. KIỂM TRA TRIGGER TỰ ĐỘNG UNPAUSE:
     # Nếu user báo IELTS đã hoàn thành hoặc ngày vượt qua 11/12/2026
@@ -1428,6 +1837,129 @@ def strategic_planner_node(state: AgentState) -> Dict[str, Any]:
         "coaching_stage": "action",
         "status": "action",
         "is_info_sufficient": False,
+    }
+
+
+def scheduler_node(state: CoachState) -> Dict[str, Any]:
+    """
+    Node 4: Scheduler & Execution Briefing (Phase 11 Multi-Agent System).
+    - Xây dựng thời gian biểu chi tiết theo nhịp sinh học vào state["schedule"].
+    - Cập nhật mục tiêu và các task vào goals_ledger.json của user.
+    - Soạn thảo và trả về Bản Báo cáo Huấn luyện Điều hành (Executive Coaching Briefing).
+    """
+    username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
+    profile = state.get("profile") or load_user_goal_profile(username)
+    resources = state.get("resources") or load_user_resources(username)
+    roadmap = state.get("roadmap") or load_user_roadmap(username)
+
+    goal_name = profile.get("goal_name", "IELTS 7.0")
+    current_level = profile.get("current_level", "Band 5.0")
+    duration_days = profile.get("duration_days", 90)
+    daily_hours = profile.get("daily_hours", 2.0)
+    preferred_slots = profile.get("preferred_slots", "Tối 20:00 - 22:00")
+
+    # 1. Lưu chính thức mục tiêu vào goals_ledger.json
+    milestones = []
+    weekly_ms = roadmap.get("weekly_milestones", []) if isinstance(roadmap, dict) else []
+    for w in weekly_ms[:4]:
+        milestones.append({
+            "milestone": f"Tuần {w.get('week_number')}: {w.get('milestone_title')}",
+            "timeline": f"Tuần {w.get('week_number')}",
+            "status": "in_progress" if w.get("week_number") == 1 else "pending",
+        })
+
+    add_goal(
+        title=f"{goal_name} (Lộ trình {duration_days} ngày)",
+        deadline=f"{duration_days} ngày tới",
+        category="career",
+        milestones=milestones,
+        status="in_progress",
+        username=username,
+    )
+
+    for r in resources:
+        append_resource_to_goal(
+            goal_id_or_title=goal_name,
+            resource={
+                "title": r.get("title", ""),
+                "url": r.get("url", "#"),
+                "type": r.get("type", "Tài liệu"),
+            },
+            username=username,
+        )
+
+    # 2. Xây dựng lịch trình hành động ngày 1
+    w1_tasks = weekly_ms[0].get("daily_tasks", []) if weekly_ms else []
+    day1_task = w1_tasks[0] if w1_tasks else {
+        "task_title": f"Bắt đầu bài tập khởi động cho mục tiêu {goal_name}",
+        "duration_minutes": int(daily_hours * 60),
+        "time_slot": preferred_slots,
+        "attached_resource": resources[0].get("title", "") if resources else "Tài liệu chính thức",
+    }
+
+    schedule_items = [
+        {
+            "time": day1_task.get("time_slot", preferred_slots),
+            "task": day1_task.get("task_title"),
+            "duration": f"{day1_task.get('duration_minutes', int(daily_hours * 60))} phút",
+            "resource": day1_task.get("attached_resource"),
+            "type": "Deep Work / High Cognitive Focus",
+        }
+    ]
+
+    # 3. Tạo Bản Báo cáo Huấn luyện Điều hành (Executive Coaching Briefing)
+    res_text = "\n".join([
+        f"- **[{r.get('title')}]({r.get('url')})** ({r.get('type')}) - *Ước tính: {r.get('estimated_hours')}h*\n  *Hướng dẫn:* {r.get('how_to_use')}"
+        for r in resources
+    ])
+
+    ms_text = "\n".join([
+        f"- **Tuần {w.get('week_number')}:** {w.get('milestone_title')}"
+        for w in weekly_ms[:4]
+    ])
+
+    briefing = f"""🎯 **HỒ SƠ MỤC TIÊU ĐÃ ĐƯỢC THIẾT LẬP THÀNH CÔNG!**
+
+Chúc mừng bạn! Chúng ta đã hoàn tất việc chốt thông số và thiết lập hồ sơ chiến lược cho mục tiêu **{goal_name}**. Toàn bộ dữ liệu đã được lưu trữ bền vững vào hệ thống quản trị cuộc đời của bạn.
+
+---
+
+### 📋 **1. Tổng quan Hồ sơ Chiến lược**
+- **Mục tiêu:** {goal_name}
+- **Vạch xuất phát:** {current_level}
+- **Thời hạn cam kết:** {duration_days} ngày
+- **Quỹ thời gian:** {daily_hours} giờ/ngày | Khung giờ: {preferred_slots}
+
+---
+
+### 📚 **2. Danh mục Tài liệu & Công cụ Thực tế đã Thẩm định**
+{res_text}
+
+---
+
+### 🗺️ **3. Lộ trình Backcasting & Phân kỳ Chiến lược**
+- **Tầm nhìn:** {roadmap.get('target_vision', f'Cán mốc {goal_name}')}
+- **Phân kỳ:** {roadmap.get('total_phases', 'Tháng 1 Nền tảng -> Tháng 2 Tăng tốc -> Tháng 3 Đạt chuẩn')}
+
+**Các mốc tuần trọng tâm:**
+{ms_text}
+
+---
+
+### ⚡ **4. Kế hoạch Hành động Ngày 1 (Hôm nay)**
+- **Khung giờ:** `{day1_task.get('time_slot', preferred_slots)}` ({day1_task.get('duration_minutes')} phút)
+- **Nhiệm vụ:** {day1_task.get('task_title')}
+- **Tài liệu sử dụng:** {day1_task.get('attached_resource')}
+
+---
+
+💡 **Executive Coach Question:** Bạn đã sẵn sàng bước vào khung giờ học đầu tiên hôm nay chưa, hay cần tôi hỗ trợ làm rõ phương pháp tiếp cận tài liệu này trước?
+"""
+
+    return {
+        "schedule": schedule_items,
+        "messages": [AIMessage(content=briefing.strip())],
+        "username": username,
     }
 
 
@@ -1899,8 +2431,11 @@ CHỈ THỊ ƯU TIÊN CAO: Người dùng vừa cung cấp rào cản/thách th�
     new_pending = pending_goal
 
     try:
-        llm = get_llm(temperature=0.4)
-        response = llm.invoke(llm_messages)
+        response = invoke_llm_resilient(
+            preferred_model="gemini-2.5-pro",
+            messages=llm_messages,
+            temperature=0.4,
+        )
         reply_content = extract_text_from_content(response.content if hasattr(response, "content") else response)
 
         # Kiểm tra xem câu trả lời của LLM có chứa câu hỏi chốt không (chỉ khi không phải câu hỏi tư vấn thuần túy)
