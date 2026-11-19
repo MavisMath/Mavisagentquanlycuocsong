@@ -12,12 +12,21 @@ from langchain_core.messages import (
 )
 from langchain_google_genai import ChatGoogleGenerativeAI
 from agents.state import AgentState, CoachState
-from tools.search import (
-    execute_trend_search,
-    tavily_search,
-    execute_opportunity_scout,
-    execute_resource_search,
-)
+try:
+    from tools.search import (
+        execute_trend_search,
+        tavily_search,
+        execute_opportunity_scout,
+        execute_resource_search,
+    )
+except Exception:
+    def execute_trend_search(query: str, max_results: int = 3):
+        return []
+    tavily_search = None
+    def execute_opportunity_scout(query: str, max_results: int = 4):
+        return []
+    def execute_resource_search(query: str, max_results: int = 4):
+        return []
 from memory.goals import (
     load_goals,
     save_goals,
@@ -46,7 +55,11 @@ from memory.goals import (
     load_user_roadmap,
 )
 from agents.task_estimator import analyze_and_estimate_goal
-from tools.document_ingestor import scan_and_retrieve_context
+try:
+    from tools.document_ingestor import scan_and_retrieve_context
+except Exception:
+    def scan_and_retrieve_context(user_message: str, top_k: int = 3):
+        return None
 
 # Tải cấu hình biến môi trường từ file .env
 load_dotenv()

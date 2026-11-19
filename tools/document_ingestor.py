@@ -5,6 +5,13 @@ import uuid
 import hashlib
 from typing import List, Dict, Any, Optional
 
+# Khắc phục lỗi SQLite3 cũ trên Linux / Streamlit Community Cloud
+try:
+    __import__('pysqlite3')
+    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+except Exception:
+    pass
+
 # Tắt telemetry Chroma để tránh cảnh báo
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
@@ -30,11 +37,31 @@ try:
 except Exception:
     pass
 
-import chromadb
-from chromadb.config import Settings
-from langchain_community.document_loaders import PyPDFLoader, WebBaseLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.documents import Document
+# Import an toàn ChromaDB với fallback
+try:
+    import chromadb
+    from chromadb.config import Settings
+    CHROMA_AVAILABLE = True
+except Exception:
+    chromadb = None
+    Settings = None
+    CHROMA_AVAILABLE = False
+
+# Import an toàn Document Loaders với fallback
+try:
+    from langchain_community.document_loaders import PyPDFLoader, WebBaseLoader
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+    from langchain_core.documents import Document
+    DOC_LOADERS_AVAILABLE = True
+except Exception:
+    PyPDFLoader = None
+    WebBaseLoader = None
+    RecursiveCharacterTextSplitter = None
+    class Document:  # type: ignore
+        def __init__(self, page_content: str = "", metadata: Optional[Dict[str, Any]] = None):
+            self.page_content = page_content
+            self.metadata = metadata or {}
+    DOC_LOADERS_AVAILABLE = False
 
 # Thư mục lưu trữ vector database bền vững
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -45,7 +72,14 @@ os.makedirs(KNOWLEDGE_BASE_DIR, exist_ok=True)
 DEFAULT_COLLECTION = "mavis_knowledge"
 
 
-class MavisEmbeddingFunction(chromadb.EmbeddingFunction):
+_BaseEmbedding = (
+    chromadb.EmbeddingFunction
+    if (CHROMA_AVAILABLE and chromadb is not None and hasattr(chromadb, "EmbeddingFunction"))
+    else object
+)
+
+
+class MavisEmbeddingFunction(_BaseEmbedding):
     """
     Embedding Function đa tầng cho Mavis Knowledge Base:
     - Tầng 1: Sử dụng Google Generative AI Embeddings nếu có API Key.
@@ -64,7 +98,7 @@ class MavisEmbeddingFunction(chromadb.EmbeddingFunction):
             except Exception:
                 self._embedder = None
 
-    def __call__(self, input: chromadb.Documents) -> chromadb.Embeddings:
+    def __call__(self, input: Any) -> Any:
         if self._embedder:
             try:
                 return self._embedder.embed_documents(input)
@@ -93,23 +127,33 @@ class MavisEmbeddingFunction(chromadb.EmbeddingFunction):
         return vec
 
 
-def get_chroma_client() -> chromadb.PersistentClient:
-    """Khởi tạo hoặc kết nối Chroma Persistent Client."""
-    return chromadb.PersistentClient(
-        path=KNOWLEDGE_BASE_DIR,
-        settings=Settings(anonymized_telemetry=False, is_persistent=True),
-    )
+def get_chroma_client() -> Optional[Any]:
+    """Khởi tạo hoặc kết nối Chroma Persistent Client an toàn."""
+    if not CHROMA_AVAILABLE or chromadb is None:
+        return None
+    try:
+        return chromadb.PersistentClient(
+            path=KNOWLEDGE_BASE_DIR,
+            settings=Settings(anonymized_telemetry=False, is_persistent=True),
+        )
+    except Exception:
+        return None
 
 
-def get_or_create_collection(name: str = DEFAULT_COLLECTION):
+def get_or_create_collection(name: str = DEFAULT_COLLECTION) -> Optional[Any]:
     """Lấy hoặc tạo Collection kèm Embedding Function tối ưu."""
     client = get_chroma_client()
-    embedding_fn = MavisEmbeddingFunction()
-    return client.get_or_create_collection(
-        name=name,
-        embedding_function=embedding_fn,
-        metadata={"hnsw:space": "cosine"},
-    )
+    if client is None:
+        return None
+    try:
+        embedding_fn = MavisEmbeddingFunction()
+        return client.get_or_create_collection(
+            name=name,
+            embedding_function=embedding_fn,
+            metadata={"hnsw:space": "cosine"},
+        )
+    except Exception:
+        return None
 
 
 def extract_links_or_paths(text: str) -> List[str]:
@@ -207,48 +251,56 @@ def ingest_document(
     Động cơ RAG: Đọc tài liệu (PDF / Web URL), phân mảnh (chunking) bằng RecursiveCharacterTextSplitter,
     và lưu trữ vào Chroma Vector Database.
     """
+    if not CHROMA_AVAILABLE or not DOC_LOADERS_AVAILABLE or RecursiveCharacterTextSplitter is None:
+        return {"success": False, "source": source, "chunks_count": 0, "message": "ChromaDB hoặc Document Loaders chưa sẵn sàng trên môi trường này."}
+
     raw_docs = load_documents_from_source(source)
     if not raw_docs:
         return {"success": False, "source": source, "chunks_count": 0, "message": "Không đọc được nội dung tài liệu."}
 
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        separators=["\n\n", "\n", ". ", " ", ""],
-    )
-    split_docs = text_splitter.split_documents(raw_docs)
+    try:
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            separators=["\n\n", "\n", ". ", " ", ""],
+        )
+        split_docs = text_splitter.split_documents(raw_docs)
 
-    collection = get_or_create_collection(collection_name)
+        collection = get_or_create_collection(collection_name)
+        if collection is None:
+            return {"success": False, "source": source, "chunks_count": 0, "message": "Không thể kết nối Chroma Collection."}
 
-    ids = []
-    documents = []
-    metadatas = []
+        ids = []
+        documents = []
+        metadatas = []
 
-    for idx, chunk in enumerate(split_docs):
-        chunk_id = f"chunk_{uuid.uuid4().hex[:8]}_{idx}"
-        meta = chunk.metadata.copy()
-        meta["chunk_index"] = idx
-        meta["total_chunks"] = len(split_docs)
-        meta["source"] = str(meta.get("source", source))
+        for idx, chunk in enumerate(split_docs):
+            chunk_id = f"chunk_{uuid.uuid4().hex[:8]}_{idx}"
+            meta = chunk.metadata.copy() if hasattr(chunk, "metadata") and chunk.metadata else {}
+            meta["chunk_index"] = idx
+            meta["total_chunks"] = len(split_docs)
+            meta["source"] = str(meta.get("source", source))
 
-        ids.append(chunk_id)
-        documents.append(chunk.page_content)
-        metadatas.append(meta)
+            ids.append(chunk_id)
+            documents.append(chunk.page_content if hasattr(chunk, "page_content") else str(chunk))
+            metadatas.append(meta)
 
-    collection.add(
-        ids=ids,
-        documents=documents,
-        metadatas=metadatas,
-    )
+        collection.add(
+            ids=ids,
+            documents=documents,
+            metadatas=metadatas,
+        )
 
-    preview = split_docs[0].page_content[:200] if split_docs else ""
-    return {
-        "success": True,
-        "source": source,
-        "chunks_count": len(split_docs),
-        "preview": preview,
-        "message": f"Đã phân mảnh và lưu trữ thành công {len(split_docs)} chunks vào Chroma Knowledge Base.",
-    }
+        preview = split_docs[0].page_content[:200] if split_docs and hasattr(split_docs[0], "page_content") else ""
+        return {
+            "success": True,
+            "source": source,
+            "chunks_count": len(split_docs),
+            "preview": preview,
+            "message": f"Đã phân mảnh và lưu trữ thành công {len(split_docs)} chunks vào Chroma Knowledge Base.",
+        }
+    except Exception as e:
+        return {"success": False, "source": source, "chunks_count": 0, "message": f"Lỗi xử lý tài liệu: {str(e)}"}
 
 
 def query_knowledge_base(
@@ -257,8 +309,13 @@ def query_knowledge_base(
     collection_name: str = DEFAULT_COLLECTION,
 ) -> List[Dict[str, Any]]:
     """Truy vấn tìm kiếm ngữ cảnh liên quan trong Chroma Vector Database."""
+    if not CHROMA_AVAILABLE:
+        return []
+
     try:
         collection = get_or_create_collection(collection_name)
+        if collection is None:
+            return []
         count = collection.count()
         if count == 0:
             return []
@@ -295,6 +352,9 @@ def scan_and_retrieve_context(user_message: str, top_k: int = 3) -> Optional[str
     1. Nếu phát hiện file PDF hoặc link URL mới: Tự động phân mảnh và nạp vào Chroma Knowledge Base.
     2. Sau đó truy vấn các đoạn trích liên quan nhất từ Vector Database để nạp vào uploaded_context.
     """
+    if not CHROMA_AVAILABLE:
+        return None
+
     detected_sources = extract_links_or_paths(user_message)
     ingested_reports = []
 

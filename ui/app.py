@@ -1,5 +1,13 @@
 import os
 import sys
+
+# Khắc phục triệt để lỗi SQLite3 cũ trên Streamlit Cloud cho ChromaDB & Vector DB
+try:
+    __import__('pysqlite3')
+    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+except Exception:
+    pass
+
 import json
 import uuid
 import urllib.parse
@@ -26,7 +34,31 @@ except Exception:
     pass
 
 from langchain_core.messages import HumanMessage, AIMessage
-from agents.graph import build_graph, mavis_agent
+
+# Khởi tạo an toàn Agent Graph với cơ chế báo lỗi trực quan trên Cloud
+try:
+    from agents.graph import build_graph, mavis_agent
+except Exception as _graph_import_err:
+    import traceback
+    st.error(f"⚠️ Phát hiện cảnh báo khi khởi tạo Multi-Agent Graph: {_graph_import_err}")
+    with st.expander("Chi tiết kỹ thuật lỗi khởi tạo (Technical Traceback)"):
+        st.code(traceback.format_exc())
+
+    class FallbackAgent:
+        def invoke(self, state, config=None):
+            return {
+                "messages": [
+                    AIMessage(
+                        content="⚠️ Hệ thống đang đồng bộ cấu hình trên Cloud. Vui lòng kiểm tra lại API Key hoặc liên hệ Quản trị viên."
+                    )
+                ]
+            }
+
+    def build_graph(checkpointer=None):
+        return FallbackAgent()
+
+    mavis_agent = FallbackAgent()
+
 from memory.goals import load_goals, CATEGORY_LABELS, load_historical_insights
 from memory.auth import get_authenticator, register_user
 

@@ -1,9 +1,13 @@
 import os
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
-from langchain_community.tools.tavily_search import TavilySearchResults
 
 load_dotenv()
+
+try:
+    from langchain_community.tools.tavily_search import TavilySearchResults
+except Exception:
+    TavilySearchResults = None
 
 
 def get_tavily_search_tool(max_results: int = 3) -> Optional[Any]:
@@ -12,6 +16,9 @@ def get_tavily_search_tool(max_results: int = 3) -> Optional[Any]:
     Hỗ trợ tìm kiếm dữ liệu thời gian thực trên web.
     Bảo đảm không crash ứng dụng nếu chưa có hoặc thiếu TAVILY_API_KEY.
     """
+    if TavilySearchResults is None:
+        return None
+
     api_key = os.getenv("TAVILY_API_KEY")
     if not api_key:
         return None
