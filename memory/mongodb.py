@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 
@@ -18,6 +19,15 @@ DB_NAME = "mavis_coach_db"
 
 _mongo_client: Optional[Any] = None
 _mongo_db: Optional[Any] = None
+_mongo_connection_error: Optional[str] = None
+_last_connection_attempt: float = 0.0
+RETRY_INTERVAL_SECONDS = 30.0
+
+
+def get_mongo_connection_error() -> Optional[str]:
+    """Trả về thông báo chi tiết lỗi kết nối MongoDB gần nhất nếu có."""
+    global _mongo_connection_error
+    return _mongo_connection_error
 
 
 def get_mongo_uri() -> Optional[str]:
@@ -52,21 +62,27 @@ def get_mongo_db() -> Optional[Any]:
     Khởi tạo hoặc trả về instance Database mavis_coach_db kết nối đến MongoDB Atlas.
     Sử dụng connection pooling và timeout kiểm soát để tránh treo luồng ứng dụng.
     """
-    global _mongo_client, _mongo_db
+    global _mongo_client, _mongo_db, _mongo_connection_error, _last_connection_attempt
 
     if not PYMONGO_AVAILABLE:
+        _mongo_connection_error = "Thư viện 'pymongo' hoặc 'dnspython' chưa được cài đặt."
         return None
 
     if _mongo_db is not None:
         return _mongo_db
 
+    # Throttling kiểm tra lại nếu lần thử trước thất bại trong khoảng RETRY_INTERVAL_SECONDS
+    now = time.time()
+    if _mongo_connection_error and (now - _last_connection_attempt) < RETRY_INTERVAL_SECONDS:
+        return None
 
     uri = get_mongo_uri()
     if not uri:
-        import streamlit as st
-        st.warning("Thiếu MONGO_URI")
+        _mongo_connection_error = "Chưa cấu hình biến MONGO_URI trong Streamlit Secrets hoặc biến môi trường."
+        _last_connection_attempt = now
         return None
 
+    _last_connection_attempt = now
     try:
         _mongo_client = MongoClient(
             uri,
@@ -77,11 +93,23 @@ def get_mongo_db() -> Optional[Any]:
         # Kiểm tra nhanh kết nối bằng lệnh ping
         _mongo_client.admin.command("ping")
         _mongo_db = _mongo_client[DB_NAME]
+        _mongo_connection_error = None
         return _mongo_db
     except Exception as e:
-        import streamlit as st
-        st.error(f"Lỗi kết nối MongoDB: {e}")
-        print(f"⚠️ Cảnh báo kết nối MongoDB Atlas ({DB_NAME}): {e}")
+        err_msg = str(e)
+        _mongo_connection_error = err_msg
+        print(f"⚠️ Cảnh báo kết nối MongoDB Atlas ({DB_NAME}): {err_msg}")
+        try:
+            import streamlit as st
+            if hasattr(st, "error") and not getattr(st.session_state, "_mongo_error_shown", False):
+                st.error(f"Lỗi kết nối MongoDB: {err_msg}")
+                if hasattr(st, "session_state"):
+                    st.session_state["_mongo_error_shown"] = True
+        except Exception:
+            pass
+        _mongo_client = None
+        _mongo_db = None
+        return None
         _mongo_client = None
         _mongo_db = None
         return None

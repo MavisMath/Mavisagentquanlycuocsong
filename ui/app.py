@@ -81,7 +81,12 @@ from memory.goals import (
     save_categorized_goals,
 )
 from memory.auth import get_authenticator, register_user
-from memory.mongodb import is_mongodb_available, db_update_user_state
+from memory.mongodb import (
+    is_mongodb_available,
+    db_update_user_state,
+    get_mongo_connection_error,
+    get_mongo_uri,
+)
 
 try:
     from agents.brain import chat_node
@@ -385,6 +390,11 @@ if not auth_status:
             """,
             unsafe_allow_html=True,
         )
+
+        if get_mongo_uri() and not is_mongodb_available():
+            mongo_err = get_mongo_connection_error()
+            if mongo_err and "Chưa cấu hình" not in mongo_err:
+                st.error(f"Lỗi kết nối MongoDB: {mongo_err}")
 
         tab_login, tab_register = st.tabs(["🔑 Đăng Nhập", "📝 Đăng Ký Tài Khoản"])
 
@@ -842,6 +852,16 @@ with st.sidebar:
             "is_onboarded": False,
         }
         st.rerun()
+
+    st.markdown("---")
+    # Trạng thái kết nối Cloud Database (MongoDB Atlas)
+    if is_mongodb_available():
+        st.caption("🟢 **Đã kết nối Cloud DB (MongoDB)**")
+    else:
+        st.caption("🔴 **Chưa kết nối MongoDB**")
+        mongo_err = get_mongo_connection_error()
+        if get_mongo_uri() and mongo_err and "Chưa cấu hình" not in mongo_err:
+            st.error(f"Lỗi kết nối MongoDB: {mongo_err}")
 
 
 # ==========================================
