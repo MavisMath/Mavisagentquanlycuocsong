@@ -79,6 +79,7 @@ from memory.goals import (
     save_categorized_goals,
 )
 from memory.auth import get_authenticator, register_user
+from memory.mongodb import is_mongodb_available, db_update_user_state
 
 try:
     from agents.brain import chat_node
@@ -1060,21 +1061,25 @@ if user_input := st.chat_input("Nhập mục tiêu hoặc trao đổi cùng Coac
                     {"role": "assistant", "content": combined_reply}
                 )
 
-                # Cập nhật các trạng thái của Agent vào session_state của user
+                # Cập nhật các trạng thái của Agent vào session_state của user và MongoDB Atlas (collection 'user_states')
                 if "profile" in output_state and output_state["profile"]:
                     st.session_state[goal_profile_key] = output_state["profile"]
+                    save_user_goal_profile(output_state["profile"], username=active_username)
 
                 if "resources" in output_state and output_state["resources"]:
                     st.session_state[resources_key] = output_state["resources"]
+                    save_user_resources(output_state["resources"], username=active_username)
 
                 if "roadmap" in output_state and output_state["roadmap"]:
                     st.session_state[roadmap_key] = output_state["roadmap"]
+                    save_user_roadmap(output_state["roadmap"], username=active_username)
 
                 if "schedule" in output_state and output_state["schedule"]:
                     st.session_state[f"schedule_{active_username}"] = output_state["schedule"]
 
                 if "user_profile" in output_state and output_state["user_profile"]:
                     st.session_state[profile_key] = output_state["user_profile"]
+                    save_user_profile(output_state["user_profile"], username=active_username)
 
                 if "coaching_stage" in output_state and output_state["coaching_stage"]:
                     st.session_state[stage_key] = output_state["coaching_stage"]

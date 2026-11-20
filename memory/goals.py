@@ -5,6 +5,12 @@ import re
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
+from memory.mongodb import (
+    is_mongodb_available,
+    db_update_user_state,
+    db_get_user_state,
+)
+
 LEDGER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "goals_ledger.json")
 
 # 4 Root Nodes chuẩn hóa theo yêu cầu Phase 7.1
@@ -251,8 +257,14 @@ def save_tree_goals(data: Dict[str, Any], username: str = "mavis") -> bool:
 
 
 def save_user_profile(profile: Dict[str, Any], username: str = "mavis") -> bool:
-    """Lưu hồ sơ người dùng, các rào cản và trạng thái coaching vào goals_ledger.json."""
+    """Lưu hồ sơ người dùng vào MongoDB Atlas (collection 'user_states') và goals_ledger.json."""
     username = (username or DEFAULT_USER).strip().lower()
+
+    # 1. Lưu vào MongoDB Atlas nếu khả dụng
+    if is_mongodb_available():
+        db_update_user_state(username, {"user_profile": profile})
+
+    # 2. Lưu dự phòng vào goals_ledger.json
     all_data = load_all_users_data()
     if username not in all_data or not isinstance(all_data[username], dict):
         all_data[username] = get_blank_tree()
@@ -266,15 +278,36 @@ def save_user_profile(profile: Dict[str, Any], username: str = "mavis") -> bool:
 
 
 def load_user_profile(username: str = "mavis") -> Dict[str, Any]:
-    """Tải hồ sơ người dùng từ goals_ledger.json."""
+    """Tải hồ sơ người dùng từ MongoDB Atlas hoặc goals_ledger.json."""
     username = (username or DEFAULT_USER).strip().lower()
+
+    if is_mongodb_available():
+        state = db_get_user_state(username)
+        if state and "user_profile" in state and isinstance(state["user_profile"], dict):
+            return state["user_profile"]
+
     all_data = load_all_users_data()
     return all_data.get(username, {}).get("user_profile", {})
 
 
 def save_user_goal_profile(profile: Dict[str, Any], username: str = "mavis") -> bool:
-    """Lưu hồ sơ mục tiêu có cấu trúc (GoalProfile) vào goals_ledger.json."""
+    """
+    Lưu hồ sơ mục tiêu (GoalProfile) vào collection 'user_states' trên MongoDB Atlas
+    với update_one(..., upsert=True) và đồng bộ dự phòng vào goals_ledger.json.
+    """
     username = (username or DEFAULT_USER).strip().lower()
+
+    # 1. Tự động lưu bền vững lên MongoDB Atlas
+    if is_mongodb_available():
+        db_update_user_state(
+            username=username,
+            state_update={
+                "profile": profile,
+                "goal_profile": profile,
+            },
+        )
+
+    # 2. Đồng bộ dự phòng vào goals_ledger.json
     all_data = load_all_users_data()
     if username not in all_data or not isinstance(all_data[username], dict):
         all_data[username] = get_blank_tree()
@@ -299,15 +332,37 @@ def save_user_goal_profile(profile: Dict[str, Any], username: str = "mavis") -> 
 
 
 def load_user_goal_profile(username: str = "mavis") -> Dict[str, Any]:
-    """Tải hồ sơ mục tiêu GoalProfile từ goals_ledger.json."""
+    """Tải hồ sơ mục tiêu GoalProfile từ MongoDB Atlas hoặc goals_ledger.json."""
     username = (username or DEFAULT_USER).strip().lower()
+
+    # 1. Ưu tiên tải từ MongoDB Atlas
+    if is_mongodb_available():
+        state = db_get_user_state(username)
+        if state:
+            p = state.get("profile") or state.get("goal_profile")
+            if p and isinstance(p, dict) and p.get("goal_name"):
+                return p
+
+    # 2. Fallback về goals_ledger.json
     all_data = load_all_users_data()
     return all_data.get(username, {}).get("goal_profile", {})
 
 
 def save_user_resources(resources: List[Dict[str, Any]], username: str = "mavis") -> bool:
-    """Lưu danh sách tài nguyên và công cụ thẩm định vào goals_ledger.json."""
+    """Lưu danh sách tài nguyên và công cụ thẩm định vào MongoDB Atlas và goals_ledger.json."""
     username = (username or DEFAULT_USER).strip().lower()
+
+    # 1. Lưu lên MongoDB Atlas
+    if is_mongodb_available():
+        db_update_user_state(
+            username=username,
+            state_update={
+                "resources": resources,
+                "curated_resources": resources,
+            },
+        )
+
+    # 2. Lưu dự phòng vào goals_ledger.json
     all_data = load_all_users_data()
     if username not in all_data or not isinstance(all_data[username], dict):
         all_data[username] = get_blank_tree()
@@ -316,15 +371,40 @@ def save_user_resources(resources: List[Dict[str, Any]], username: str = "mavis"
 
 
 def load_user_resources(username: str = "mavis") -> List[Dict[str, Any]]:
-    """Tải danh sách tài nguyên từ goals_ledger.json."""
+    """Tải danh sách tài nguyên từ MongoDB Atlas hoặc goals_ledger.json."""
     username = (username or DEFAULT_USER).strip().lower()
+
+    # 1. Ưu tiên tải từ MongoDB Atlas
+    if is_mongodb_available():
+        state = db_get_user_state(username)
+        if state and "resources" in state and isinstance(state["resources"], list):
+            return state["resources"]
+        if state and "curated_resources" in state and isinstance(state["curated_resources"], list):
+            return state["curated_resources"]
+
+    # 2. Fallback về goals_ledger.json
     all_data = load_all_users_data()
     return all_data.get(username, {}).get("curated_resources", [])
 
 
 def save_user_roadmap(roadmap: Dict[str, Any], username: str = "mavis") -> bool:
-    """Lưu lộ trình Backcasting phân cấp vào goals_ledger.json."""
+    """
+    Lưu lộ trình Backcasting phân cấp vào collection 'user_states' trên MongoDB Atlas
+    với update_one(..., upsert=True) và đồng bộ dự phòng vào goals_ledger.json.
+    """
     username = (username or DEFAULT_USER).strip().lower()
+
+    # 1. Tự động lưu bền vững lên MongoDB Atlas
+    if is_mongodb_available():
+        db_update_user_state(
+            username=username,
+            state_update={
+                "roadmap": roadmap,
+                "backcasting_roadmap": roadmap,
+            },
+        )
+
+    # 2. Lưu dự phòng vào goals_ledger.json
     all_data = load_all_users_data()
     if username not in all_data or not isinstance(all_data[username], dict):
         all_data[username] = get_blank_tree()
@@ -333,8 +413,18 @@ def save_user_roadmap(roadmap: Dict[str, Any], username: str = "mavis") -> bool:
 
 
 def load_user_roadmap(username: str = "mavis") -> Dict[str, Any]:
-    """Tải lộ trình Backcasting từ goals_ledger.json."""
+    """Tải lộ trình Backcasting từ MongoDB Atlas hoặc goals_ledger.json."""
     username = (username or DEFAULT_USER).strip().lower()
+
+    # 1. Ưu tiên tải từ MongoDB Atlas
+    if is_mongodb_available():
+        state = db_get_user_state(username)
+        if state:
+            rm = state.get("roadmap") or state.get("backcasting_roadmap")
+            if rm and isinstance(rm, dict) and rm.get("weekly_milestones"):
+                return rm
+
+    # 2. Fallback về goals_ledger.json
     all_data = load_all_users_data()
     return all_data.get(username, {}).get("backcasting_roadmap", {})
 
