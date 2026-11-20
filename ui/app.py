@@ -14,11 +14,15 @@ import urllib.parse
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 
-# Đảm bảo đường dẫn import tương thích khi chạy streamlit từ mọi thư mục
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+# Đảm bảo đường dẫn import tương thích khi chạy streamlit từ mọi thư mục (Local, Docker, Streamlit Cloud)
+CURRENT_FILE = os.path.abspath(__file__)
+CURRENT_DIR = os.path.dirname(CURRENT_FILE)
 PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, ".."))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
+CWD = os.path.abspath(os.getcwd())
+
+for p in [PROJECT_ROOT, CWD, CURRENT_DIR]:
+    if p and os.path.exists(p) and p not in sys.path:
+        sys.path.insert(0, p)
 
 import streamlit as st
 
@@ -62,42 +66,99 @@ except Exception as _graph_import_err:
 
     mavis_agent = FallbackAgent()
 
-from memory.goals import (
-    load_goals,
-    save_goals,
-    add_goal,
-    update_goal,
-    CATEGORY_LABELS,
-    load_historical_insights,
-    save_historical_insights,
-    load_user_profile,
-    save_user_profile,
-    load_user_goal_profile,
-    save_user_goal_profile,
-    load_user_goals,
-    save_user_goals,
-    load_user_resources,
-    save_user_resources,
-    load_user_roadmap,
-    save_user_roadmap,
-    load_categorized_goals,
-    save_categorized_goals,
-    load_master_schedule,
-    save_master_schedule,
-    update_master_schedule_task_status,
-    load_retrospective_logs,
-    save_retrospective_logs,
-    append_retrospective_log,
-    get_user_state_full,
-)
-from memory.auth import get_authenticator, register_user
-from memory.mongodb import (
-    is_mongodb_available,
-    db_update_user_state,
-    get_mongo_connection_error,
-    get_mongo_uri,
-)
+# Nạp an toàn module memory.goals với cơ chế bắt lỗi không làm sập ứng dụng
+try:
+    from memory.goals import (
+        load_goals,
+        save_goals,
+        add_goal,
+        update_goal,
+        CATEGORY_LABELS,
+        load_historical_insights,
+        save_historical_insights,
+        load_user_profile,
+        save_user_profile,
+        load_user_goal_profile,
+        save_user_goal_profile,
+        load_user_goals,
+        save_user_goals,
+        load_user_resources,
+        save_user_resources,
+        load_user_roadmap,
+        save_user_roadmap,
+        load_categorized_goals,
+        save_categorized_goals,
+        load_master_schedule,
+        save_master_schedule,
+        update_master_schedule_task_status,
+        load_retrospective_logs,
+        save_retrospective_logs,
+        append_retrospective_log,
+        get_user_state_full,
+    )
+except Exception as _goals_import_err:
+    import traceback
+    st.error(f"⚠️ Cảnh báo nạp module `memory.goals`: {_goals_import_err}")
+    with st.expander("Chi tiết kỹ thuật lỗi nạp memory.goals"):
+        st.code(traceback.format_exc())
 
+    def load_goals(*args, **kwargs): return []
+    def save_goals(*args, **kwargs): return True
+    def add_goal(*args, **kwargs): return True
+    def update_goal(*args, **kwargs): return True
+    CATEGORY_LABELS = {}
+    def load_historical_insights(*args, **kwargs): return {}
+    def save_historical_insights(*args, **kwargs): return True
+    def load_user_profile(*args, **kwargs): return {}
+    def save_user_profile(*args, **kwargs): return True
+    def load_user_goal_profile(*args, **kwargs): return {}
+    def save_user_goal_profile(*args, **kwargs): return True
+    def load_user_goals(*args, **kwargs): return []
+    def save_user_goals(*args, **kwargs): return True
+    def load_user_resources(*args, **kwargs): return []
+    def save_user_resources(*args, **kwargs): return True
+    def load_user_roadmap(*args, **kwargs): return {}
+    def save_user_roadmap(*args, **kwargs): return True
+    def load_categorized_goals(*args, **kwargs): return {}
+    def save_categorized_goals(*args, **kwargs): return True
+    def load_master_schedule(*args, **kwargs): return []
+    def save_master_schedule(*args, **kwargs): return True
+    def update_master_schedule_task_status(*args, **kwargs): return True
+    def load_retrospective_logs(*args, **kwargs): return []
+    def save_retrospective_logs(*args, **kwargs): return True
+    def append_retrospective_log(*args, **kwargs): return True
+    def get_user_state_full(*args, **kwargs): return {}
+
+# Nạp an toàn module memory.auth
+try:
+    from memory.auth import get_authenticator, register_user
+except Exception as _auth_import_err:
+    import traceback
+    st.error(f"⚠️ Cảnh báo nạp module `memory.auth`: {_auth_import_err}")
+    with st.expander("Chi tiết kỹ thuật lỗi nạp memory.auth"):
+        st.code(traceback.format_exc())
+    get_authenticator = None
+    register_user = None
+
+# Nạp an toàn module memory.mongodb
+try:
+    from memory.mongodb import (
+        is_mongodb_available,
+        db_update_user_state,
+        get_mongo_connection_error,
+        get_mongo_uri,
+    )
+except Exception as _mongo_import_err:
+    import traceback
+    st.error(f"⚠️ Cảnh báo nạp module `memory.mongodb`: {_mongo_import_err}")
+    with st.expander("Chi tiết kỹ thuật lỗi nạp memory.mongodb"):
+        st.code(traceback.format_exc())
+    def is_mongodb_available(): return False
+    def db_update_user_state(*args, **kwargs): return False
+    def get_mongo_connection_error(): return str(_mongo_import_err)
+    def get_mongo_uri(): return None
+
+# Nạp an toàn 4 Chatbot functions từ agents.brain
 try:
     from agents.brain import (
         chat_node,
@@ -106,7 +167,11 @@ try:
         scheduler_chat,
         retrospective_chat,
     )
-except Exception:
+except Exception as _brain_err:
+    import traceback
+    st.error(f"⚠️ Cảnh báo nạp các Chatbot từ `agents.brain`: {_brain_err}")
+    with st.expander("Chi tiết kỹ thuật lỗi nạp agents.brain"):
+        st.code(traceback.format_exc())
     chat_node = None
     ceo_coach_chat = None
     architect_chat = None
