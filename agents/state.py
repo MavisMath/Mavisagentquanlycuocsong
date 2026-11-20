@@ -15,7 +15,10 @@ class CoachState(TypedDict):
     # Lịch sử hội thoại (tự động gộp message mới qua add_messages reducer)
     messages: Annotated[List[BaseMessage], add_messages]
     
-    # Hồ sơ mục tiêu cốt lõi (GoalProfile: goal_name, current_level, duration_days, daily_hours, preferred_slots, is_complete)
+    # Danh sách các mục tiêu song song (GoalProfile: goal_id, category, goal_name, current_level, duration_days, daily_hours, preferred_slots, priority, is_complete)
+    goals: Optional[List[Dict[str, Any]]]
+    
+    # Hồ sơ mục tiêu đơn lẻ / mục tiêu trọng tâm (Tương thích ngược)
     profile: Optional[Dict[str, Any]]
     
     # Danh sách tài nguyên/công cụ thực tế đã thẩm định (title, url, type, estimated_hours, how_to_use)

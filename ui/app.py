@@ -71,6 +71,8 @@ from memory.goals import (
     save_user_profile,
     load_user_goal_profile,
     save_user_goal_profile,
+    load_user_goals,
+    save_user_goals,
     load_user_resources,
     save_user_resources,
     load_user_roadmap,
@@ -510,6 +512,10 @@ thread_ver_key = f"thread_ver_{current_username}"
 if thread_ver_key not in st.session_state:
     st.session_state[thread_ver_key] = 1
 
+goals_key = f"goals_{current_username}"
+if goals_key not in st.session_state:
+    st.session_state[goals_key] = load_user_goals(current_username)
+
 goal_profile_key = f"goal_profile_{current_username}"
 if goal_profile_key not in st.session_state:
     st.session_state[goal_profile_key] = load_user_goal_profile(current_username)
@@ -826,6 +832,7 @@ with st.sidebar:
         st.session_state[pending_goal_key] = None
         st.session_state[awaiting_confirmation_key] = False
         st.session_state[goal_profile_key] = {}
+        st.session_state[goals_key] = []
         st.session_state[resources_key] = []
         st.session_state[roadmap_key] = {}
         st.session_state[profile_key] = {
@@ -860,33 +867,77 @@ with tab_chat:
             st.markdown(msg["content"])
 
 with tab_profile:
-    st.markdown("### 🎯 Hồ Sơ Mục Tiêu Cốt Lõi (Goal Profile)")
-    p_dict = safe_dict(st.session_state.get(goal_profile_key))
-    if p_dict.get("goal_name"):
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            st.metric("Mục Tiêu", p_dict.get("goal_name"))
-        with c2:
-            st.metric("Vạch Xuất Phát", p_dict.get("current_level") or "Chưa rõ")
-        with c3:
-            st.metric("Thời Gian", f"{p_dict.get('duration_days', 'N/A')} ngày")
-        with c4:
-            st.metric("Cam Kết", f"{p_dict.get('daily_hours', 'N/A')} h/ngày")
+    st.markdown("### 🎯 Hồ Sơ Đa Mục Tiêu Song Song (Multi-Goal Portfolio)")
+    goals_list = safe_list(st.session_state.get(goals_key) or load_user_goals(current_username))
+    if not goals_list:
+        p_dict = safe_dict(st.session_state.get(goal_profile_key))
+        if p_dict.get("goal_name"):
+            goals_list = [p_dict]
 
-        st.markdown(f"**Khung giờ ưu tiên trong ngày:** `{p_dict.get('preferred_slots', 'Chưa thiết lập')}`")
+    if goals_list:
+        # Hàng thống kê tổng quan
+        total_g = len(goals_list)
+        comp_g = sum(1 for g in goals_list if safe_dict(g).get("is_complete"))
+        total_hrs = sum(float(safe_dict(g).get("daily_hours") or 0) for g in goals_list)
+        cats = list(set(safe_dict(g).get("category", "Học tập") for g in goals_list))
 
-        if p_dict.get("is_complete"):
-            st.success("✅ **Trạng thái:** Hồ sơ mục tiêu đã được xác thực đầy đủ và khóa chiến lược vào hệ thống.")
-        else:
-            missing = []
-            if not p_dict.get("goal_name"): missing.append("Tên mục tiêu cụ thể")
-            if not p_dict.get("current_level"): missing.append("Trình độ / vạch xuất phát hiện tại")
-            if not p_dict.get("duration_days"): missing.append("Tổng số ngày dự kiến hoàn thành")
-            if not p_dict.get("daily_hours"): missing.append("Quỹ thời gian rảnh mỗi ngày")
-            if not p_dict.get("preferred_slots"): missing.append("Khung giờ ưu tiên trong ngày")
-            st.warning(f"⚠️ **Hồ sơ chưa hoàn thiện!** Đang thiếu thông tin: **{', '.join(missing)}**. Bạn hãy phản hồi thêm trong tab **Trò Chuyện & Coaching** để Coach chốt hồ sơ!")
+        m1, m2, m3, m4 = st.columns(4)
+        with m1:
+            st.metric("Tổng Số Mục Tiêu", f"{total_g} mục tiêu")
+        with m2:
+            st.metric("Mục Tiêu Đã Chốt", f"{comp_g}/{total_g}")
+        with m3:
+            st.metric("Tổng Quỹ Thời Gian", f"{total_hrs:.1f} h/ngày")
+        with m4:
+            st.metric("Lĩnh Vực", ", ".join(cats) if cats else "Đa lĩnh vực")
+
+        st.markdown("---")
+        st.markdown("#### 📋 Danh Sách Mục Tiêu Chi Tiết:")
+
+        for idx, g in enumerate(goals_list, 1):
+            g_dict = safe_dict(g)
+            g_name = g_dict.get("goal_name", f"Mục tiêu {idx}")
+            cat = g_dict.get("category", "Học tập")
+            prio = g_dict.get("priority", "medium")
+            level = g_dict.get("current_level") or "Chưa rõ"
+            days = g_dict.get("duration_days") or "N/A"
+            hrs = g_dict.get("daily_hours") or "N/A"
+            slots = g_dict.get("preferred_slots") or "Tối ưu theo nhịp sinh học"
+            is_comp = g_dict.get("is_complete", False)
+
+            prio_badge = "🔥 High Priority" if prio == "high" else ("⚡ Medium" if prio == "medium" else "🌱 Low Priority")
+            status_badge = "✅ ĐÃ CHỐT CHIẾN LƯỢC" if is_comp else "⚠️ CHƯA HOÀN THIỆN"
+
+            with st.container(border=True):
+                col_title, col_status = st.columns([3, 2])
+                with col_title:
+                    st.markdown(f"### 🎯 #{idx}: {g_name} `({cat})`")
+                    st.caption(f"Mức ưu tiên: `{prio_badge}`")
+                with col_status:
+                    if is_comp:
+                        st.success(f"{status_badge}")
+                    else:
+                        st.warning(f"{status_badge}")
+
+                c1, c2, c3, c4 = st.columns(4)
+                with c1:
+                    st.metric("Vạch Xuất Phát", level)
+                with c2:
+                    st.metric("Thời Hạn", f"{days} ngày" if days != "N/A" else "Chưa rõ")
+                with c3:
+                    st.metric("Cam Kết", f"{hrs} h/ngày" if hrs != "N/A" else "Chưa rõ")
+                with c4:
+                    st.metric("Khung Giờ", slots[:18] + "..." if len(str(slots)) > 18 else str(slots))
+
+                if not is_comp:
+                    missing = []
+                    if not g_dict.get("goal_name"): missing.append("Tên mục tiêu cụ thể")
+                    if not g_dict.get("current_level"): missing.append("Trình độ / vạch xuất phát")
+                    if not g_dict.get("duration_days"): missing.append("Thời gian hoàn thành (ngày)")
+                    if not g_dict.get("daily_hours"): missing.append("Số giờ cam kết mỗi ngày")
+                    st.info(f"💡 Đang thiếu thông số: **{', '.join(missing)}**. Bạn hãy trao đổi thêm trong tab **Trò Chuyện & Coaching** để Coach chốt mục tiêu này!")
     else:
-        st.info("💡 Bạn chưa thiết lập mục tiêu nào. Hãy vào tab **Trò Chuyện & Coaching** và chia sẻ mục tiêu của bạn (ví dụ: *'Tôi muốn học IELTS trong 3 tháng lên 7.0'*).")
+        st.info("💡 Bạn chưa thiết lập mục tiêu nào. Hãy vào tab **Trò Chuyện & Coaching** và chia sẻ các mục tiêu của bạn (ví dụ: *'Tôi vừa muốn học IELTS 7.0 trong 3 tháng, vừa muốn học HSK 4 trong 6 tháng, vừa build dự án AI'*).")
 
 with tab_resources:
     st.markdown("### 📚 Kho Tài Liệu & Công Cụ Thực Tế Đã Thẩm Định")
@@ -899,47 +950,67 @@ with tab_resources:
             rtype = r_dict.get("type", "Tài liệu học tập")
             hours = r_dict.get("estimated_hours", "N/A")
             how_to = r_dict.get("how_to_use", "Học tập và giải bài tập theo lộ trình đề ra.")
+            g_tag = f"🎯 `[{r_dict.get('goal_name')}]` " if r_dict.get("goal_name") else ""
 
             with st.container(border=True):
-                st.markdown(f"#### 🔗 [{title}]({url})")
+                st.markdown(f"#### 🔗 {g_tag}[{title}]({url})")
                 c1, c2 = st.columns([1, 2])
                 with c1:
                     st.caption(f"🏷️ Phân loại: **{rtype}** | ⏳ Thời lượng: **{hours}h**")
                 with c2:
                     st.caption(f"💡 Hướng dẫn: {how_to}")
     else:
-        st.info("💡 Chưa có tài liệu nào được trích xuất. Khi hồ sơ mục tiêu được chốt đầy đủ 5 thông số, Agent Research sẽ tự động tìm kiếm các bộ đề, giáo trình uy tín kèm link trực tiếp tại đây!")
+        st.info("💡 Chưa có tài liệu nào được trích xuất. Khi các mục tiêu được chốt đầy đủ 4 thông số cốt lõi, Agent Research sẽ tự động tìm kiếm các bộ đề, giáo trình uy tín kèm link trực tiếp tại đây!")
 
 with tab_roadmap:
-    st.markdown("### 🗺️ Lộ Trình Backcasting & Kế Hoạch Phân Cấp")
+    st.markdown("### 🗺️ Lộ Trình Backcasting & Kế Hoạch Đa Mục Tiêu")
     roadmap_dict = safe_dict(st.session_state.get(roadmap_key))
-    p_dict = safe_dict(st.session_state.get(goal_profile_key))
-    goal_name = p_dict.get("goal_name", "Mục tiêu Mavis")
-    slots = p_dict.get("preferred_slots", "Tối 20:00 - 22:00")
+    goals_list = safe_list(st.session_state.get(goals_key) or load_user_goals(current_username))
+    if not goals_list:
+        p_dict = safe_dict(st.session_state.get(goal_profile_key))
+        if p_dict.get("goal_name"):
+            goals_list = [p_dict]
 
     if roadmap_dict and (roadmap_dict.get("target_vision") or roadmap_dict.get("weekly_milestones")):
-        st.info(f"🎯 **Tầm nhìn Chiến lược:** {roadmap_dict.get('target_vision', f'Cán đích {goal_name}')}")
+        st.info(f"🎯 **Tầm nhìn Chiến lược:** {roadmap_dict.get('target_vision', 'Chinh phục toàn diện các mục tiêu')}")
         if roadmap_dict.get("total_phases"):
             st.markdown(f"**Phân kỳ Quý / Tháng:** {roadmap_dict.get('total_phases')}")
+
+        if roadmap_dict.get("balance_strategy"):
+            st.success(f"⚖️ **Chiến lược cân bằng nhịp sinh học & Quỹ thời gian ({roadmap_dict.get('total_daily_hours', 'N/A')}h/ngày):** {roadmap_dict.get('balance_strategy')}")
+
+        st.markdown("---")
+
+        # Bộ lọc mục tiêu cho Lộ trình Backcasting
+        goal_names = [safe_dict(g).get("goal_name") for g in goals_list if safe_dict(g).get("goal_name")]
+        filter_options = ["🎯 Tất cả mục tiêu"] + goal_names
+        selected_goal_filter = st.selectbox(
+            "🔍 Lọc Lộ Trình & Nhiệm Vụ Theo Mục Tiêu:",
+            options=filter_options,
+            index=0,
+            help="Chọn mục tiêu cụ thể để theo dõi chi tiết các task hành động của mục tiêu đó mà không bị phân tán."
+        )
 
         st.markdown("---")
 
         # Nút Đồng bộ Google Calendar
-        st.subheader("📅 Đồng Bộ Lên Google Calendar")
+        st.subheader("📅 Đồng Bộ Lịch Trình (Google Calendar & iCal)")
         w_ms = safe_list(roadmap_dict.get("weekly_milestones", []))
         w1_tasks = safe_list(safe_dict(w_ms[0]).get("daily_tasks", [])) if w_ms else []
         d1 = safe_dict(w1_tasks[0]) if w1_tasks else {}
-        d1_title = d1.get("task_title", f"Bắt đầu mục tiêu {goal_name}")
-        d1_dur = d1.get("duration_minutes", 120)
+        d1_title = d1.get("task_title", "Bắt đầu kế hoạch hành động")
+        d1_dur = d1.get("duration_minutes", 90)
         d1_res = d1.get("attached_resource", "")
+        d1_slot = d1.get("time_slot", "08:00 - 10:00")
 
         col_gcal, col_ics = st.columns(2)
         with col_gcal:
-            gcal_url = generate_gcal_link(d1_title, slots, d1_dur, d1_res)
+            gcal_url = generate_gcal_link(d1_title, d1_slot, d1_dur, d1_res)
             st.link_button("🌐 Mở Google Calendar (Thêm Ngày 1)", url=gcal_url, use_container_width=True)
 
         with col_ics:
-            ics_data = generate_ics_calendar(roadmap_dict, goal_name, slots)
+            goal_label = selected_goal_filter if selected_goal_filter != "🎯 Tất cả mục tiêu" else "Đa Mục Tiêu"
+            ics_data = generate_ics_calendar(roadmap_dict, goal_label, d1_slot)
             st.download_button(
                 label="📥 Tải File Lịch (.ics) Cho Google / Apple / Outlook",
                 data=ics_data,
@@ -949,34 +1020,47 @@ with tab_roadmap:
             )
 
         st.markdown("---")
-        st.markdown("#### 🚩 Chi Tiết Cột Mốc Từng Tuần & Nhiệm Vụ Hàng Ngày:")
+        st.markdown(f"#### 🚩 Chi Tiết Cột Mốc Từng Tuần & Nhiệm Vụ Hàng Ngày ({selected_goal_filter}):")
 
         for w in w_ms:
             w_dict = safe_dict(w)
             w_num = w_dict.get("week_number", 1)
             w_title = w_dict.get("milestone_title", f"Tuần {w_num}")
-            daily_tasks = safe_list(w_dict.get("daily_tasks", []))
+            all_daily_tasks = safe_list(w_dict.get("daily_tasks", []))
 
-            with st.expander(f"📌 Tuần {w_num}: {w_title}", expanded=(w_num == 1)):
-                if daily_tasks:
-                    for t in daily_tasks:
+            # Áp dụng bộ lọc mục tiêu
+            if selected_goal_filter != "🎯 Tất cả mục tiêu":
+                target_norm = selected_goal_filter.lower().strip()
+                filtered_daily_tasks = [
+                    t for t in all_daily_tasks
+                    if target_norm in safe_dict(t).get("goal_name", "").lower()
+                    or target_norm in safe_dict(t).get("task_title", "").lower()
+                ]
+            else:
+                filtered_daily_tasks = all_daily_tasks
+
+            with st.expander(f"📌 Tuần {w_num}: {w_title} ({len(filtered_daily_tasks)} nhiệm vụ)", expanded=(w_num == 1)):
+                if filtered_daily_tasks:
+                    for t in filtered_daily_tasks:
                         t_dict = safe_dict(t)
                         day_num = t_dict.get("day_number", 1)
+                        t_goal = t_dict.get("goal_name", "")
                         t_title = t_dict.get("task_title", "")
-                        t_dur = t_dict.get("duration_minutes", 120)
-                        t_slot = t_dict.get("time_slot", slots)
+                        t_dur = t_dict.get("duration_minutes", 60)
+                        t_slot = t_dict.get("time_slot", "08:00 - 10:00")
                         t_res = t_dict.get("attached_resource", "Tài liệu chuẩn")
                         cog = t_dict.get("cognitive_load", "medium")
 
                         cog_badge = "🔥 High Load" if cog == "high" else ("⚡ Medium" if cog == "medium" else "🌱 Low Load")
+                        goal_tag = f"`[🎯 {t_goal}]` " if t_goal else ""
                         st.markdown(
-                            f"- **Ngày {day_num}:** {t_title}\n"
+                            f"- **Ngày {day_num}:** {goal_tag}**{t_title}**\n"
                             f"  *Khung giờ:* `{t_slot}` ({t_dur} phút) | `{cog_badge}` | 📖 *Tài liệu:* {t_res}"
                         )
                 else:
-                    st.caption("Chưa có danh sách task chi tiết cho tuần này.")
+                    st.caption(f"Không có nhiệm vụ nào thuộc mục tiêu '{selected_goal_filter}' trong tuần này.")
     else:
-        st.info("💡 Lộ trình Backcasting chưa được khởi tạo. Sau khi bạn cung cấp đủ 5 thông số mục tiêu, Agent Strategic Planner sẽ tự động phân rã lộ trình tại đây!")
+        st.info("💡 Lộ trình Backcasting chưa được khởi tạo. Sau khi bạn cung cấp đủ thông số các mục tiêu, Agent Strategic Planner sẽ tự động phân rã lộ trình cân bằng tại đây!")
 
 # Khung nhập tin nhắn (nằm bên dưới các tab để điều hướng mượt mà)
 if user_input := st.chat_input("Nhập mục tiêu hoặc trao đổi cùng Coach (VD: 'Tôi muốn học Data Science trong 3 tháng', 'Thiết lập mục tiêu chạy bộ')..."):
@@ -1000,6 +1084,7 @@ if user_input := st.chat_input("Nhập mục tiêu hoặc trao đổi cùng Coac
 
     input_state = {
         "messages": full_messages,
+        "goals": safe_list(st.session_state.get(goals_key) or load_user_goals(active_username)),
         "profile": safe_dict(st.session_state.get(goal_profile_key) or load_user_goal_profile(active_username)),
         "resources": safe_list(st.session_state.get(resources_key) or load_user_resources(active_username)),
         "roadmap": safe_dict(st.session_state.get(roadmap_key) or load_user_roadmap(active_username)),
@@ -1075,6 +1160,12 @@ if user_input := st.chat_input("Nhập mục tiêu hoặc trao đổi cùng Coac
                 )
 
                 # Cập nhật các trạng thái của Agent vào session_state của user và MongoDB Atlas (collection 'user_states')
+                if "goals" in output_state and output_state["goals"]:
+                    st.session_state[goals_key] = output_state["goals"]
+                    save_user_goals(output_state["goals"], username=active_username)
+                    if output_state["goals"]:
+                        st.session_state[goal_profile_key] = output_state["goals"][0]
+
                 if "profile" in output_state and output_state["profile"]:
                     st.session_state[goal_profile_key] = output_state["profile"]
                     save_user_goal_profile(output_state["profile"], username=active_username)

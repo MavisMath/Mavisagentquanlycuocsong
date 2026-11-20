@@ -290,6 +290,84 @@ def load_user_profile(username: str = "mavis") -> Dict[str, Any]:
     return all_data.get(username, {}).get("user_profile", {})
 
 
+def save_user_goals(goals: List[Dict[str, Any]], username: str = "mavis") -> bool:
+    """
+    Lưu danh sách đa mục tiêu song song (goals: List[GoalProfile]) vào collection 'user_states'
+    trên MongoDB Atlas với update_one(..., upsert=True) và đồng bộ dự phòng vào goals_ledger.json.
+    """
+    username = (username or DEFAULT_USER).strip().lower()
+    clean_goals = [g for g in goals if isinstance(g, dict) and g.get("goal_name")]
+
+    # 1. Tự động lưu bền vững lên MongoDB Atlas
+    if is_mongodb_available():
+        db_update_user_state(
+            username=username,
+            state_update={
+                "goals": clean_goals,
+                "profile": clean_goals[0] if clean_goals else {},
+                "goal_profile": clean_goals[0] if clean_goals else {},
+            },
+        )
+
+    # 2. Đồng bộ dự phòng vào goals_ledger.json
+    all_data = load_all_users_data()
+    if username not in all_data or not isinstance(all_data[username], dict):
+        all_data[username] = get_blank_tree()
+    all_data[username]["goals"] = clean_goals
+    if clean_goals:
+        all_data[username]["goal_profile"] = clean_goals[0]
+
+    # Đồng bộ sang user_profile để tương thích với các view khác
+    if "user_profile" not in all_data[username] or not isinstance(all_data[username]["user_profile"], dict):
+        all_data[username]["user_profile"] = {}
+    if clean_goals:
+        goal_names = [g.get("goal_name") for g in clean_goals if g.get("goal_name")]
+        all_data[username]["user_profile"]["current_situation"] = f"Đa mục tiêu: {', '.join(goal_names)}"
+        total_h = sum(float(g.get("daily_hours") or 0) for g in clean_goals)
+        all_data[username]["user_profile"]["time_constraints"] = f"{total_h}h/ngày trên {len(clean_goals)} mục tiêu"
+        if all(g.get("is_complete") for g in clean_goals):
+            all_data[username]["user_profile"]["is_onboarded"] = True
+            all_data[username]["user_profile"]["coaching_stage"] = "action"
+    return save_all_users_data(all_data)
+
+
+def load_user_goals(username: str = "mavis") -> List[Dict[str, Any]]:
+    """Tải danh sách đa mục tiêu từ MongoDB Atlas hoặc goals_ledger.json."""
+    username = (username or DEFAULT_USER).strip().lower()
+
+    # 1. Ưu tiên tải từ MongoDB Atlas
+    if is_mongodb_available():
+        state = db_get_user_state(username)
+        if state:
+            goals = state.get("goals")
+            if isinstance(goals, list) and len(goals) > 0:
+                return goals
+            p = state.get("profile") or state.get("goal_profile")
+            if p and isinstance(p, dict) and p.get("goal_name"):
+                copy_p = dict(p)
+                if "goal_id" not in copy_p: copy_p["goal_id"] = "g1"
+                if "category" not in copy_p: copy_p["category"] = "Học tập"
+                if "priority" not in copy_p: copy_p["priority"] = "high"
+                return [copy_p]
+
+    # 2. Fallback về goals_ledger.json
+    all_data = load_all_users_data()
+    user_entry = all_data.get(username, {})
+    if isinstance(user_entry, dict):
+        goals = user_entry.get("goals")
+        if isinstance(goals, list) and len(goals) > 0:
+            return goals
+        p = user_entry.get("goal_profile", {})
+        if isinstance(p, dict) and p.get("goal_name"):
+            copy_p = dict(p)
+            if "goal_id" not in copy_p: copy_p["goal_id"] = "g1"
+            if "category" not in copy_p: copy_p["category"] = "Học tập"
+            if "priority" not in copy_p: copy_p["priority"] = "high"
+            return [copy_p]
+
+    return []
+
+
 def save_user_goal_profile(profile: Dict[str, Any], username: str = "mavis") -> bool:
     """
     Lưu hồ sơ mục tiêu (GoalProfile) vào collection 'user_states' trên MongoDB Atlas
@@ -339,13 +417,22 @@ def load_user_goal_profile(username: str = "mavis") -> Dict[str, Any]:
     if is_mongodb_available():
         state = db_get_user_state(username)
         if state:
+            goals = state.get("goals")
+            if isinstance(goals, list) and len(goals) > 0 and goals[0].get("goal_name"):
+                return goals[0]
             p = state.get("profile") or state.get("goal_profile")
             if p and isinstance(p, dict) and p.get("goal_name"):
                 return p
 
     # 2. Fallback về goals_ledger.json
     all_data = load_all_users_data()
-    return all_data.get(username, {}).get("goal_profile", {})
+    user_entry = all_data.get(username, {})
+    if isinstance(user_entry, dict):
+        goals = user_entry.get("goals")
+        if isinstance(goals, list) and len(goals) > 0 and goals[0].get("goal_name"):
+            return goals[0]
+        return user_entry.get("goal_profile", {})
+    return {}
 
 
 def save_user_resources(resources: List[Dict[str, Any]], username: str = "mavis") -> bool:

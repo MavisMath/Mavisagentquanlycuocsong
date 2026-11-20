@@ -49,6 +49,8 @@ from memory.goals import (
     get_historical_insights_summary_text,
     save_user_goal_profile,
     load_user_goal_profile,
+    save_user_goals,
+    load_user_goals,
     save_user_resources,
     load_user_resources,
     save_user_roadmap,
@@ -125,52 +127,101 @@ def safe_list(val: Any) -> List[Any]:
 # ==============================================================================
 
 class GoalProfile(BaseModel):
-    """Mô hình hồ sơ mục tiêu cốt lõi với Structured Output (Chỉ cần 4 thông số cốt lõi để hoàn thành)."""
-    goal_name: Optional[str] = Field(None, description="Tên mục tiêu cụ thể, VD: 'IELTS 7.0' hoặc 'Đỗ Thạc sĩ AI VinUni'")
-    current_level: Optional[str] = Field(None, description="Trình độ hoặc trạng thái xuất phát hiện tại của người dùng, VD: 'Band 5.0', 'Mất gốc', 'Đã biết Python cơ bản'")
-    duration_days: Optional[int] = Field(None, description="Tổng số ngày dự kiến hoàn thành mục tiêu, VD: 90 ngày (3 tháng), 180 ngày")
-    daily_hours: Optional[float] = Field(None, description="Số giờ rảnh mỗi ngày có thể cam kết thực hiện, VD: 2.0")
-    preferred_slots: Optional[str] = Field(None, description="Khung giờ ưu tiên trong ngày (nếu có nhắc đến). Nếu người dùng không nói, để None và hệ thống sẽ tự động gán mặc định.")
-    is_complete: bool = Field(False, description="True nếu ĐÃ ĐẦY ĐỦ 4 thông số cốt lõi: goal_name, current_level, duration_days, daily_hours. False nếu còn thiếu ít nhất 1 trong 4 thông số này.")
-    missing_info_question: Optional[str] = Field(None, description="Nếu is_complete là False: Đặt đúng 1 câu hỏi ngắn gọn, tự nhiên và trực tiếp hỏi thông tin còn thiếu trong 4 thông số cốt lõi (goal_name, current_level, duration_days, daily_hours). TUYỆT ĐỐI KHÔNG hỏi về preferred_slots. Tuyệt đối không chào hỏi dài dòng, không nói 'đã ghi nhận', không dùng văn mẫu. Nếu is_complete là True: để trống hoặc None.")
+    """Mô hình hồ sơ mục tiêu chi tiết với Structured Output (Hỗ trợ đa mục tiêu song song)."""
+    goal_id: str = Field(
+        default_factory=lambda: f"g_{uuid.uuid4().hex[:6]}",
+        description="Mã định danh duy nhất của mục tiêu (VD: 'g_ielts7', 'g_hsk4', 'g_ai')"
+    )
+    category: str = Field(
+        "Học tập",
+        description="Phân loại lĩnh vực: 'Học tập', 'Sự nghiệp', 'Sức khỏe', 'Tài chính', hoặc 'Phát triển cá nhân'"
+    )
+    goal_name: str = Field(
+        ...,
+        description="Tên mục tiêu cụ thể, VD: 'IELTS 7.0', 'HSK 4', 'Build dự án AI Agent', 'Chạy bộ Half-Marathon'"
+    )
+    current_level: Optional[str] = Field(
+        None,
+        description="Trình độ hoặc vạch xuất phát hiện tại của người dùng, VD: 'Band 5.0', 'Mất gốc', 'Đã biết Python cơ bản', 'Mới bắt đầu'"
+    )
+    duration_days: Optional[int] = Field(
+        None,
+        description="Tổng số ngày dự kiến hoàn thành mục tiêu, VD: 90 ngày (3 tháng), 180 ngày"
+    )
+    daily_hours: Optional[float] = Field(
+        None,
+        description="Số giờ rảnh mỗi ngày có thể cam kết thực hiện cho mục tiêu này, VD: 1.5, 2.0"
+    )
+    preferred_slots: Optional[str] = Field(
+        None,
+        description="Khung giờ ưu tiên trong ngày (nếu có nhắc đến). Mặc định là Tối ưu theo nhịp sinh học."
+    )
+    priority: str = Field(
+        "medium",
+        description="Mức độ ưu tiên chiến lược: 'high' (ưu tiên cao/gấp rút), 'medium' (bình thường), hoặc 'low' (dài hạn/thong thả)"
+    )
+    is_complete: bool = Field(
+        False,
+        description="True nếu ĐÃ ĐẦY ĐỦ 4 thông số cốt lõi: goal_name, current_level, duration_days, daily_hours. False nếu còn thiếu ít nhất 1 trong 4 thông số này."
+    )
+    missing_info_question: Optional[str] = Field(
+        None,
+        description="Nếu mục tiêu này chưa hoàn thiện: Câu hỏi làm rõ thông số còn thiếu."
+    )
+
+
+class MultiGoalExtraction(BaseModel):
+    """Mô hình trích xuất danh sách đa mục tiêu song song từ hội thoại."""
+    goals: List[GoalProfile] = Field(
+        default_factory=list,
+        description="Danh sách các mục tiêu song song được trích xuất hoặc cập nhật cộng dồn từ hội thoại"
+    )
+    missing_info_question: Optional[str] = Field(
+        None,
+        description="Nếu có mục tiêu nào chưa hoàn thiện (is_complete == False): Đặt đúng 1 câu hỏi ngắn gọn, tự nhiên, nhắm thẳng vào các thông số còn thiếu của mục tiêu chưa đủ thông tin. Tuyệt đối không hỏi về khung giờ, không dùng văn mẫu. Nếu tất cả đều hoàn thiện: để trống hoặc None."
+    )
 
 
 class ResourceItem(BaseModel):
     """Mô hình tài nguyên học tập, giáo trình hoặc công cụ thực tế."""
+    goal_name: str = Field(default="", description="Tên mục tiêu tương ứng (VD: 'IELTS 7.0', 'HSK 4')")
     title: str = Field(description="Tên tài liệu, giáo trình, công cụ hoặc bộ đề thực tế uy tín")
     url: str = Field(description="Đường link thật, chính thức hoặc trang tra cứu uy tín")
     type: str = Field(description="Phân loại: Sách/Giáo trình, Web/Công cụ, Khóa học, Video, hoặc Bộ đề")
     estimated_hours: float = Field(description="Thời lượng ước tính cần thiết để hoàn thành hoặc nghiên cứu")
-    how_to_use: str = Field(description="Hướng dẫn ngắn gọn cách ứng dụng tài nguyên này hiệu quả nhất theo quỹ thời gian của khách")
+    how_to_use: str = Field(description="Hướng dẫn ngắn gọn cách ứng dụng tài nguyên này hiệu quả nhất")
 
 
 class CuratedResources(BaseModel):
-    """Danh sách các tài nguyên thực tế đã thẩm định."""
-    resources: List[ResourceItem] = Field(description="Danh sách 3-5 tài nguyên thực tế, uy tín và khả thi nhất")
+    """Danh sách các tài nguyên thực tế đã thẩm định cho các mục tiêu."""
+    resources: List[ResourceItem] = Field(description="Danh sách tài nguyên thực tế, uy tín và khả thi nhất cho các mục tiêu")
 
 
 class DailyTask(BaseModel):
     """Kế hoạch hành động cụ thể cho từng ngày."""
     day_number: int = Field(description="Ngày thứ mấy (1, 2, 3...)")
+    goal_name: str = Field(default="", description="Tên mục tiêu mà task này phục vụ (VD: 'IELTS 7.0', 'HSK 4')")
     task_title: str = Field(description="Hành động cụ thể cần làm trong ngày (không viết chung chung)")
-    duration_minutes: int = Field(description="Thời lượng thực hiện tính bằng phút, phải khớp với daily_hours của người dùng")
-    time_slot: str = Field(description="Khung giờ thực hiện khớp với preferred_slots, VD: '20:00 - 22:00'")
+    duration_minutes: int = Field(description="Thời lượng thực hiện tính bằng phút")
+    time_slot: str = Field(description="Khung giờ thực hiện không bị trùng lặp giữa các mục tiêu, VD: '08:00 - 09:30' hoặc '20:00 - 21:00'")
     attached_resource: str = Field(description="Tên và đường link của tài liệu đính kèm từ danh sách resources")
     cognitive_load: str = Field("medium", description="Mức độ tải nhận thức: high, medium, hoặc low")
 
 
 class WeeklyMilestone(BaseModel):
-    """Cột mốc mục tiêu tuần."""
+    """Cột mốc mục tiêu tuần tích hợp đa mục tiêu."""
     week_number: int = Field(description="Tuần thứ mấy (Tuần 1, 2, 3...)")
-    milestone_title: str = Field(description="Mục tiêu trọng tâm cần đạt được của tuần")
+    milestone_title: str = Field(description="Mục tiêu trọng tâm cần đạt được của tuần tích hợp các mục tiêu")
     daily_tasks: List[DailyTask] = Field(description="Kế hoạch chi tiết từng ngày trong tuần")
 
 
 class StrategicRoadmap(BaseModel):
-    """Lộ trình phân cấp Backcasting toàn diện."""
-    target_vision: str = Field(description="Tầm nhìn mục tiêu tối thượng")
-    total_phases: str = Field(description="Tổng quan phân kỳ Quý / Tháng theo tư duy Backcasting")
-    weekly_milestones: List[WeeklyMilestone] = Field(description="Lộ trình chi tiết từng tuần")
+    """Lộ trình phân cấp Backcasting toàn diện cho tất cả các mục tiêu."""
+    target_vision: str = Field(description="Tầm nhìn mục tiêu tổng hợp kết hợp các mục tiêu")
+    total_phases: str = Field(description="Tổng quan phân kỳ Quý / Tháng theo tư duy Backcasting kết hợp đa mục tiêu")
+    balance_strategy: Optional[str] = Field(None, description="Chiến lược phân bổ nhịp sinh học và phòng ngừa quá tải giữa các mục tiêu")
+    total_daily_hours: Optional[float] = Field(None, description="Tổng số giờ học/làm việc mỗi ngày trên tất cả mục tiêu")
+    weekly_milestones: List[WeeklyMilestone] = Field(description="Lộ trình chi tiết từng tuần với các task được phân bổ không xung đột thời gian")
 
 
 def invoke_llm_resilient(
@@ -1460,21 +1511,26 @@ Nhiệm vụ:
 
 def profiler_node(state: CoachState) -> Dict[str, Any]:
     """
-    Node 1: Profiler Agent (Khai thác & Chốt hồ sơ mục tiêu - Dùng gemini-2.5-flash với resilient fallback).
-    - Sử dụng with_structured_output(GoalProfile) để trích xuất và cập nhật cộng dồn:
-      goal_name, current_level, duration_days, daily_hours, preferred_slots, is_complete.
-    - is_complete = True chỉ khi đủ cả 5 thông số cốt lõi.
-    - Nếu thiếu thông số: sinh đúng 1 câu hỏi Socratic ngắn gọn hỏi đúng thông tin còn thiếu,
+    Node 1: Multi-Goal Profiler Agent (Khai thác & Chốt hồ sơ ĐA MỤC TIÊU song song).
+    - Sử dụng with_structured_output(MultiGoalExtraction) để trích xuất và cập nhật cộng dồn:
+      goals: List[GoalProfile] gồm (goal_id, category, goal_name, current_level, duration_days, daily_hours, preferred_slots, priority, is_complete).
+    - Một mục tiêu hoàn thiện khi có đủ 4 thông số cốt lõi: goal_name, current_level, duration_days, daily_hours.
+    - is_complete = True khi và chỉ khi TẤT CẢ các mục tiêu trong danh sách đều đã hoàn thiện.
+    - Nếu còn mục tiêu chưa hoàn thiện: sinh đúng 1 câu hỏi Socratic ngắn gọn hỏi đúng thông tin còn thiếu của mục tiêu đó,
       tuyệt đối không nói 'đã ghi nhận', dừng ở END chờ lượt chat sau.
     """
     username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
     
-    # 1. Đọc hồ sơ hiện có từ State hoặc Disk
-    current_profile = safe_dict(state.get("profile"))
-    if not current_profile.get("goal_name"):
-        saved_prof = safe_dict(load_user_goal_profile(username))
-        if saved_prof.get("goal_name"):
-            current_profile = dict(saved_prof)
+    # 1. Đọc danh sách đa mục tiêu hiện có từ State hoặc MongoDB / Disk
+    current_goals = safe_list(state.get("goals") or load_user_goals(username))
+    if not current_goals:
+        single_p = safe_dict(state.get("profile") or load_user_goal_profile(username))
+        if single_p.get("goal_name"):
+            copy_p = dict(single_p)
+            if "goal_id" not in copy_p: copy_p["goal_id"] = "g1"
+            if "category" not in copy_p: copy_p["category"] = "Học tập"
+            if "priority" not in copy_p: copy_p["priority"] = "high"
+            current_goals = [copy_p]
 
     # 2. Lấy tin nhắn người dùng mới nhất
     messages = state.get("messages", [])
@@ -1490,14 +1546,16 @@ def profiler_node(state: CoachState) -> Dict[str, Any]:
     user_lower = (last_user_message or "").strip().lower()
 
     # Lời chào ban đầu nếu chưa hề có thông tin gì
-    if not current_profile.get("goal_name") and (not user_lower or user_lower in ["hi", "hello", "xin chào", "chào", "start", "bắt đầu", "alo", "hey", "test"]):
+    if not current_goals and (not user_lower or user_lower in ["hi", "hello", "xin chào", "chào", "start", "bắt đầu", "alo", "hey", "test"]):
         welcome_prompt = (
             "Chào bạn! Tôi là Elite Executive & Life Coach của bạn. "
-            "Hiện tại bạn đang muốn tập trung chinh phục mục tiêu quan trọng nào nhất (ví dụ: chứng chỉ IELTS, nâng cao chuyên môn AI/Data, hay rèn luyện sức khỏe)?"
+            "Hiện tại bạn đang muốn đồng thời chinh phục các mục tiêu trọng tâm nào nhất "
+            "(ví dụ: vừa học IELTS 7.0, vừa học HSK, vừa build dự án AI, hay rèn luyện sức khỏe)?"
         )
         return {
             "messages": [AIMessage(content=welcome_prompt)],
-            "profile": current_profile,
+            "goals": [],
+            "profile": {},
             "is_complete": False,
             "username": username,
         }
@@ -1510,10 +1568,10 @@ def profiler_node(state: CoachState) -> Dict[str, Any]:
         history_lines.append(f"- {m_type}: {m_content}")
     history_str = "\n".join(history_lines) if history_lines else f"- user: {last_user_message}"
 
-    # Prompt trích xuất và cộng dồn thông số mục tiêu
-    extraction_prompt = f"""Bạn là Hệ thống Khai thác & Chốt hồ sơ mục tiêu (Goal Profiler Agent).
-Dưới đây là hồ sơ hiện tại đã thu thập được từ các lượt trước (nếu có):
-{json.dumps(current_profile, ensure_ascii=False, indent=2)}
+    # Prompt trích xuất và cộng dồn đa mục tiêu
+    extraction_prompt = f"""Bạn là Hệ thống Khai thác & Chốt hồ sơ ĐA MỤC TIÊU (Multi-Goal Profiler Agent).
+Dưới đây là danh sách các mục tiêu hiện tại đã ghi nhận được từ các lượt trước (nếu có):
+{json.dumps(current_goals, ensure_ascii=False, indent=2)}
 
 Tin nhắn mới nhất từ người dùng:
 "{last_user_message}"
@@ -1522,79 +1580,122 @@ Toàn bộ lịch sử trao đổi từ đầu phiên:
 {history_str}
 
 NHIỆM VỤ:
-1. Trích xuất và CỘNG DỒN các thông số mục tiêu từ toàn bộ lịch sử trao đổi kết hợp với hồ sơ cũ. Tuyệt đối không làm mất thông tin đã thu thập ở các lượt trước:
-   - goal_name: Tên mục tiêu cụ thể (VD: 'IELTS 7.0', 'Luyện Python', 'Giảm 5kg').
-   - current_level: Trình độ hoặc trạng thái xuất phát hiện tại (VD: 'Band 5.0', 'Mất gốc', 'Người mới').
-   - duration_days: Tổng thời gian thực hiện (chuyển đổi ra số ngày, VD: 3 tháng -> 90, 2 tháng -> 60, 6 tháng -> 180).
-   - daily_hours: Quỹ thời gian rảnh mỗi ngày (số thực, VD: 2.0).
-   - preferred_slots: Khung giờ ưu tiên trong ngày (VD: 'Tối 20:00 - 22:00'). Nếu người dùng không nói, để None.
-2. Đánh giá is_complete:
-   - CHỈ CẦN THU THẬP ĐỦ 4 THÔNG SỐ CỐT LÕI: goal_name, current_level, duration_days, daily_hours LÀ BẮT BUỘC ĐẶT is_complete = True!
+1. Trích xuất và CỘNG DỒN TẤT CẢ các mục tiêu mà người dùng muốn thực hiện song song (Học tập, Sự nghiệp, Sức khỏe, Tài chính, Dự án...):
+   - Nếu người dùng nhắc mục tiêu mới: tạo mục tiêu mới với goal_id riêng (VD: 'g_ielts', 'g_hsk', 'g_ai').
+   - Nếu người dùng bổ sung thông tin cho mục tiêu đã có: cập nhật vào mục tiêu tương ứng, giữ nguyên goal_id, không làm mất dữ liệu lượt trước.
+2. Với TỪNG mục tiêu, trích xuất:
+   - goal_id: Mã định danh mục tiêu.
+   - category: 'Học tập', 'Sự nghiệp', 'Sức khỏe', 'Tài chính', hoặc 'Phát triển cá nhân'.
+   - goal_name: Tên mục tiêu cụ thể (VD: 'IELTS 7.0', 'HSK 4', 'Build dự án AI', 'Chạy bộ 21km').
+   - current_level: Trình độ hoặc vạch xuất phát hiện tại (VD: 'Band 5.0', 'Mất gốc', 'Đã biết Python cơ bản').
+   - duration_days: Tổng thời gian thực hiện (chuyển đổi ra số ngày, VD: 3 tháng -> 90, 6 tháng -> 180).
+   - daily_hours: Quỹ thời gian rảnh mỗi ngày cam kết cho mục tiêu này (số thực, VD: 1.5, 2.0).
+     Nếu người dùng chỉ nói tổng thời gian rảnh (ví dụ 'tôi rảnh 3 tiếng mỗi ngày cho cả 2 việc'), hãy tự động phân bổ hợp lý giữa các mục tiêu.
+   - preferred_slots: Khung giờ ưu tiên trong ngày nếu có nói. Nếu không nói, để None.
+   - priority: 'high', 'medium', hoặc 'low'.
+3. Đánh giá is_complete cho TỪNG mục tiêu:
+   - CHỈ CẦN THU THẬP ĐỦ 4 THÔNG SỐ CỐT LÕI (goal_name, current_level, duration_days, daily_hours) LÀ ĐẶT is_complete = True CHO MỤC TIÊU ĐÓ.
    - Tuyệt đối KHÔNG bắt người dùng phải nói khung giờ (preferred_slots) mới cho hoàn thành.
-3. Sinh missing_info_question:
-   - Nếu is_complete == False: Viết đúng 1 câu hỏi Socratic ngắn gọn, tự nhiên, đi thẳng vào đúng các thông số còn thiếu trong 4 thông số cốt lõi. TUYỆT ĐỐI KHÔNG hỏi về khung giờ.
-     TUYỆT ĐỐI KHÔNG nói 'đã ghi nhận', KHÔNG dùng văn mẫu, KHÔNG nhắc lại hồ sơ cũ.
-   - Nếu is_complete == True: Để None hoặc chuỗi rỗng.
+4. Sinh missing_info_question:
+   - Nếu TẤT CẢ các mục tiêu đều đã đủ 4 thông số cốt lõi: để None hoặc chuỗi rỗng.
+   - Nếu còn ít nhất 1 mục tiêu chưa hoàn thiện: Viết đúng 1 câu hỏi Socratic ngắn gọn, tự nhiên, nhắm thẳng vào các thông số còn thiếu của (các) mục tiêu đó. Tuyệt đối KHÔNG hỏi về khung giờ, KHÔNG nói 'đã ghi nhận', KHÔNG dùng văn mẫu.
 """
 
     try:
-        extracted: GoalProfile = invoke_llm_resilient(
+        extracted: MultiGoalExtraction = invoke_llm_resilient(
             preferred_model="gemini-2.5-flash",
             messages=[
                 SystemMessage(content=SYSTEM_PROMPT),
                 HumanMessage(content=extraction_prompt),
             ],
-            structured_schema=GoalProfile,
+            structured_schema=MultiGoalExtraction,
             temperature=0.1,
         )
 
-        new_goal = extracted.goal_name or current_profile.get("goal_name")
-        new_level = extracted.current_level or current_profile.get("current_level")
-        new_duration = extracted.duration_days or current_profile.get("duration_days")
-        new_hours = extracted.daily_hours or current_profile.get("daily_hours")
-        new_slots = extracted.preferred_slots or current_profile.get("preferred_slots")
-        if not new_slots or not str(new_slots).strip():
-            new_slots = "Tối ưu theo nhịp sinh học (08:00 - 10:00 sáng & tối linh hoạt)"
+        extracted_goals_dict = [g.model_dump() for g in extracted.goals] if extracted.goals else []
+        merged_goals = []
 
-        has_4_core = bool(
-            new_goal
-            and new_level
-            and new_duration
-            and new_hours
-        )
+        def find_existing(name, gid):
+            name_norm = (name or "").lower().strip()
+            for eg in current_goals:
+                eg_id = eg.get("goal_id", "")
+                eg_name = eg.get("goal_name", "").lower().strip()
+                if (gid and gid == eg_id) or (name_norm and (name_norm in eg_name or eg_name in name_norm)):
+                    return eg
+            return None
 
-        updated_profile = {
-            "goal_name": new_goal,
-            "current_level": new_level,
-            "duration_days": int(new_duration) if new_duration else None,
-            "daily_hours": float(new_hours) if new_hours else None,
-            "preferred_slots": new_slots,
-            "is_complete": has_4_core,
-        }
+        seen_ids = set()
+        for g in extracted_goals_dict:
+            g_name = g.get("goal_name")
+            if not g_name or not str(g_name).strip():
+                continue
+            eg = find_existing(g_name, g.get("goal_id"))
+            g_id = g.get("goal_id") or (eg.get("goal_id") if eg else None) or f"g_{uuid.uuid4().hex[:6]}"
+            category = g.get("category") or (eg.get("category") if eg else "Học tập")
+            level = g.get("current_level") or (eg.get("current_level") if eg else None)
+            duration = g.get("duration_days") or (eg.get("duration_days") if eg else None)
+            hours = g.get("daily_hours") or (eg.get("daily_hours") if eg else None)
+            slots = g.get("preferred_slots") or (eg.get("preferred_slots") if eg else None)
+            if not slots or not str(slots).strip():
+                slots = "Tối ưu theo nhịp sinh học (08:00 - 10:00 sáng & tối linh hoạt)"
+            priority = g.get("priority") or (eg.get("priority") if eg else "medium")
 
-        # Lưu hồ sơ vào disk & MongoDB ngay lập tức
-        save_user_goal_profile(updated_profile, username=username)
+            has_4_core = bool(g_name and level and duration and hours)
 
-        if not updated_profile["is_complete"]:
+            goal_item = {
+                "goal_id": g_id,
+                "category": category,
+                "goal_name": g_name,
+                "current_level": level,
+                "duration_days": int(duration) if duration else None,
+                "daily_hours": float(hours) if hours else None,
+                "preferred_slots": slots,
+                "priority": priority,
+                "is_complete": has_4_core,
+            }
+            seen_ids.add(g_id)
+            merged_goals.append(goal_item)
+
+        # Giữ lại các mục tiêu cũ nếu chưa được cập nhật trong lượt này
+        for eg in current_goals:
+            eg_id = eg.get("goal_id")
+            if eg_id not in seen_ids and eg.get("goal_name"):
+                merged_goals.append(eg)
+                seen_ids.add(eg_id)
+
+        if not merged_goals and current_goals:
+            merged_goals = current_goals
+
+        # Lưu toàn bộ mảng goals vào MongoDB collection user_states và goals_ledger.json
+        save_user_goals(merged_goals, username=username)
+
+        # Kiểm tra điều kiện hoàn thiện toàn diện
+        all_complete = bool(merged_goals and all(g.get("is_complete") for g in merged_goals))
+
+        if not all_complete:
+            incomplete_goals = [g for g in merged_goals if not g.get("is_complete")]
             q = extracted.missing_info_question
-            missing = []
-            if not updated_profile.get("goal_name"): missing.append("mục tiêu cụ thể")
-            if not updated_profile.get("current_level"): missing.append("trình độ/vạch xuất phát hiện tại")
-            if not updated_profile.get("duration_days"): missing.append("thời gian hoàn thành dự kiến (ví dụ: 3 tháng)")
-            if not updated_profile.get("daily_hours"): missing.append("quỹ thời gian rảnh bạn có thể dành ra mỗi ngày")
-
             if not q or not q.strip() or "khung giờ" in q.lower() or "thời gian trong ngày" in q.lower():
-                q = f"Để thiết kế lộ trình chính xác và khả thi nhất, bạn có thể chia sẻ thêm về {', '.join(missing)} không?"
+                missing_prompts = []
+                for g in incomplete_goals:
+                    m_items = []
+                    if not g.get("current_level"): m_items.append("trình độ hiện tại")
+                    if not g.get("duration_days"): m_items.append("thời gian hoàn thành")
+                    if not g.get("daily_hours"): m_items.append("quỹ thời gian rảnh mỗi ngày")
+                    missing_prompts.append(f"mục tiêu '{g.get('goal_name')}' ({', '.join(m_items)})")
+                q = f"Để thiết kế lộ trình phân bổ thời gian tối ưu, bạn có thể chia sẻ thêm về: {'; '.join(missing_prompts)} không?"
 
             return {
-                "profile": updated_profile,
+                "goals": merged_goals,
+                "profile": merged_goals[0] if merged_goals else {},
                 "is_complete": False,
                 "messages": [AIMessage(content=q.strip())],
                 "username": username,
             }
 
         return {
-            "profile": updated_profile,
+            "goals": merged_goals,
+            "profile": merged_goals[0] if merged_goals else {},
             "is_complete": True,
             "username": username,
         }
@@ -1602,408 +1703,311 @@ NHIỆM VỤ:
     except Exception as e:
         print(f"Lỗi trong profiler_node: {e}")
         return {
-            "profile": current_profile,
+            "goals": current_goals,
+            "profile": current_goals[0] if current_goals else {},
             "is_complete": False,
-            "messages": [AIMessage(content="Tôi đã lắng nghe chia sẻ của bạn. Để thiết kế lộ trình chính xác, bạn có thể cho tôi biết rõ hơn về trình độ hiện tại, thời gian dự kiến và số giờ bạn có thể dành ra mỗi ngày không?")],
+            "messages": [AIMessage(content="Tôi đã lắng nghe chia sẻ của bạn. Để thiết kế lộ trình cân bằng cho các mục tiêu, bạn có thể cho tôi biết rõ hơn về trình độ hiện tại, thời gian dự kiến và số giờ bạn có thể dành ra mỗi ngày không?")],
             "username": username,
         }
 
 
 def research_node(state: CoachState) -> Dict[str, Any]:
     """
-    Node 2: Research Node (Tìm kiếm & Thẩm định tài liệu thực tế - Dùng gemini-2.5-pro với resilient fallback).
-    Kích hoạt ngay khi is_complete == True.
-    Tìm kiếm tài liệu, giáo trình, bộ đề hoặc công cụ thực tế, uy tín và khả thi theo quỹ thời gian của khách.
+    Node 2: Research Node (Tìm kiếm & Thẩm định tài liệu thực tế cho ĐA MỤC TIÊU).
+    Kích hoạt ngay khi tất cả mục tiêu is_complete == True.
+    Tìm kiếm tài liệu, giáo trình, bộ đề hoặc công cụ thực tế cho từng mục tiêu song song.
     """
     username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
-    profile = safe_dict(state.get("profile") or load_user_goal_profile(username))
+    goals = safe_list(state.get("goals") or load_user_goals(username))
+    if not goals:
+        single_p = safe_dict(state.get("profile") or load_user_goal_profile(username))
+        if single_p.get("goal_name"):
+            goals = [single_p]
 
-    goal_name = profile.get("goal_name", "IELTS 7.0")
-    current_level = profile.get("current_level", "Band 5.0")
-    daily_hours = profile.get("daily_hours", 2.0)
+    all_resources = []
+    for g in goals:
+        g_name = g.get("goal_name", "IELTS 7.0")
+        g_level = g.get("current_level", "Cơ bản")
+        g_hours = g.get("daily_hours", 1.5)
 
-    # 1. Tìm kiếm dữ liệu thực tế
-    search_query = f"{goal_name} {current_level} tài liệu giáo trình bộ đề chính thức"
-    raw_results = execute_resource_search(search_query, max_results=4)
+        # 1. Tìm kiếm dữ liệu thực tế
+        search_query = f"{g_name} {g_level} tài liệu giáo trình bộ đề chính thức"
+        raw_results = execute_resource_search(search_query, max_results=3)
 
-    # 2. Dùng Gemini để thẩm định và tuyển chọn cấu trúc
-    research_prompt = f"""Bạn là Chuyên gia Thẩm định & Tuyển chọn Tài liệu Giáo trình (Curated Research Specialist).
-Khách hàng có hồ sơ:
-- Mục tiêu: {goal_name}
-- Điểm xuất phát: {current_level}
-- Quỹ thời gian: {daily_hours} giờ/ngày
+        # 2. Dùng Gemini để thẩm định và tuyển chọn cấu trúc
+        research_prompt = f"""Bạn là Chuyên gia Thẩm định & Tuyển chọn Tài liệu Giáo trình (Curated Research Specialist).
+Khách hàng có mục tiêu:
+- Tên mục tiêu: {g_name}
+- Điểm xuất phát: {g_level}
+- Quỹ thời gian: {g_hours} giờ/ngày
 
 Dữ liệu tìm kiếm thực tế thu thập được:
 {json.dumps(raw_results, ensure_ascii=False, indent=2)}
 
 NHIỆM VỤ:
-Tuyển chọn 3 đến 4 tài liệu, bộ đề, giáo trình hoặc công cụ thực tế, uy tín và chuẩn mực nhất (dùng đường link thật từ kết quả tìm kiếm hoặc trang web chính thức uy tín).
-Phân bổ thời lượng nghiên cứu ước tính và viết hướng dẫn sử dụng súc tích, khả thi với quỹ thời gian {daily_hours}h/ngày (tránh tài liệu quá tải).
-Xuất ra danh sách tài nguyên chuẩn: title, url, type, estimated_hours, how_to_use.
+Tuyển chọn 2 đến 3 tài liệu, bộ đề, giáo trình hoặc công cụ thực tế, uy tín và chuẩn mực nhất (dùng đường link thật từ kết quả tìm kiếm hoặc trang web chính thức uy tín).
+Phân bổ thời lượng nghiên cứu ước tính và viết hướng dẫn sử dụng súc tích, khả thi với quỹ thời gian {g_hours}h/ngày.
+Xuất ra danh sách tài nguyên chuẩn: goal_name, title, url, type, estimated_hours, how_to_use.
 """
+        try:
+            curated_obj: CuratedResources = invoke_llm_resilient(
+                preferred_model="gemini-2.5-pro",
+                messages=[
+                    SystemMessage(content=SYSTEM_PROMPT),
+                    HumanMessage(content=research_prompt),
+                ],
+                structured_schema=CuratedResources,
+                temperature=0.2,
+            )
+            for r in curated_obj.resources:
+                r_dict = r.model_dump()
+                r_dict["goal_name"] = g_name
+                all_resources.append(r_dict)
+        except Exception as e:
+            print(f"Lỗi trong research_node cho {g_name}: {e}")
+            for r in raw_results[:2]:
+                all_resources.append({
+                    "goal_name": g_name,
+                    "title": r.get("title", f"Tài liệu chuẩn cho {g_name}"),
+                    "url": r.get("url", "https://cambridgeenglish.org"),
+                    "type": "Tài liệu học tập",
+                    "estimated_hours": 30.0,
+                    "how_to_use": f"Dành 1-1.5 giờ mỗi ngày để học theo cấp độ {g_level}.",
+                })
 
-    try:
-        curated_obj: CuratedResources = invoke_llm_resilient(
-            preferred_model="gemini-2.5-pro",
-            messages=[
-                SystemMessage(content=SYSTEM_PROMPT),
-                HumanMessage(content=research_prompt),
-            ],
-            structured_schema=CuratedResources,
-            temperature=0.2,
-        )
-        resources_list = [r.model_dump() for r in curated_obj.resources]
-    except Exception as e:
-        print(f"Lỗi trong research_node: {e}")
-        resources_list = [
-            {
-                "title": r.get("title", f"Tài liệu {goal_name}"),
-                "url": r.get("url", "https://cambridgeenglish.org"),
-                "type": "Tài liệu chuẩn",
-                "estimated_hours": 30.0,
-                "how_to_use": f"Dành 1-1.5 giờ mỗi ngày để học và làm bài tập theo cấp độ {current_level}.",
-            }
-            for r in raw_results[:3]
-        ]
-
-    save_user_resources(resources_list, username=username)
+    save_user_resources(all_resources, username=username)
     return {
-        "resources": resources_list,
+        "resources": all_resources,
+        "goals": goals,
         "username": username,
     }
 
 
 def strategic_planner_node(state: CoachState) -> Dict[str, Any]:
     """
-    Node 7: Strategic Planning, Backcasting & Priority Conflict Resolution (Phase 7.2).
-    1. Thuật toán Backcasting (Lập kế hoạch ngược):
-       - Nhận diện mục tiêu dài hạn (Thạc sĩ AI VinUni / Học bổng Quốc tế mốc Q3/2028).
-       - Đối chiếu user_profile (Trái ngành FTU, cựu Purchasing, thế mạnh Vibe Coding Python, Top 20 SIL Leader).
-       - Nhận diện khoảng trống (Gap): Thiếu bằng CS chính quy -> Bắt buộc cần 2 năm kinh nghiệm thực chiến/Thực tập AI Engineer và Portfolio AI Agent thực tế.
-       - Sinh ra các Milestone trung gian đảo ngược và lưu vào memory/goals_ledger.json.
-    2. Thuật toán Priority Conflict (Xung đột ưu tiên):
-       - Quét mục tiêu IELTS 7.0/7.5 có deadline gấp vào ngày 11/12/2026.
-       - Tự động đổi status mục tiêu HSK trong goals_ledger.json thành 'paused_until_ielts_done'.
-    3. Trigger tự động (Automatic Unpause):
-       - Khi nhận tín hiệu IELTS hoàn thành hoặc ngày hệ thống vượt qua 11/12/2026,
-         tự động giải phóng lịch trình và kích hoạt lại mục tiêu HSK sang 'in_progress'.
+    Node 3: Strategic Planning & Multi-Goal Backcasting (Phase 11+).
+    Áp dụng tư duy Backcasting cho TẤT CẢ các mục tiêu trong state["goals"]:
+    - Tính toán tổng quỹ thời gian mỗi ngày (total_daily_hours).
+    - Phân bổ lịch trình cân bằng, tránh xung đột giờ giấc giữa các mục tiêu.
+    - Phân rã theo phân cấp: Tuyên ngôn tổng hợp -> Phân kỳ Quý/Tháng -> Tuần -> Nhiệm vụ từng ngày (daily_tasks tagged goal_name).
+    - Lưu toàn bộ mảng goals + roadmap vào MongoDB collection user_states.
     """
     username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
-    messages = state.get("messages", [])
-    last_user_message = ""
-    for msg in reversed(messages):
-        if isinstance(msg, HumanMessage) or getattr(msg, "type", "") == "human":
-            last_user_message = msg.content
-            break
-        elif isinstance(msg, dict) and msg.get("role") == "user":
-            last_user_message = msg.get("content", "")
-            break
+    goals = safe_list(state.get("goals") or load_user_goals(username))
+    if not goals:
+        single_p = safe_dict(state.get("profile") or load_user_goal_profile(username))
+        if single_p.get("goal_name"):
+            goals = [single_p]
 
-    user_lower = last_user_message.lower().strip()
-    user_profile = state.get("user_profile") or {}
-
-    # MULTI-AGENT BACKCASTING (PHASE 11):
-    # Kích hoạt khi có profile mục tiêu đã chốt thông số và danh sách tài nguyên thẩm định
-    profile = safe_dict(state.get("profile") or load_user_goal_profile(username))
     resources = safe_list(state.get("resources") or load_user_resources(username))
-    if profile and profile.get("goal_name") and (profile.get("is_complete") or state.get("is_complete")):
-        goal_name = profile.get("goal_name", "IELTS 7.0")
-        current_level = profile.get("current_level", "Band 5.0")
-        duration_days = profile.get("duration_days", 90)
-        daily_hours = profile.get("daily_hours", 2.0)
-        preferred_slots = profile.get("preferred_slots", "Tối 20:00 - 22:00")
-        daily_minutes = int(daily_hours * 60)
 
-        planner_prompt = f"""Bạn là Giám đốc Chiến lược Huấn luyện Điều hành (Chief Strategic Planner).
-Áp dụng tư duy Backcasting (chia ngược từ Đích đến về Hiện tại) cho khách hàng:
-- Mục tiêu tối thượng: {goal_name}
-- Điểm xuất phát: {current_level}
-- Tổng thời gian thực hiện: {duration_days} ngày
-- Quỹ thời gian mỗi ngày: {daily_hours} giờ ({daily_minutes} phút)
-- Khung giờ ưu tiên: {preferred_slots}
+    # Tính toán tổng quỹ thời gian mỗi ngày trên tất cả các mục tiêu
+    total_daily_hours = sum(float(g.get("daily_hours", 1.5)) for g in goals)
+    total_daily_minutes = int(total_daily_hours * 60)
 
-Danh sách tài nguyên thực tế đã thẩm định:
+    planner_prompt = f"""Bạn là Giám đốc Chiến lược Huấn luyện Điều hành (Chief Strategic Planner).
+Áp dụng tư duy Backcasting (chia ngược từ Đích đến về Hiện tại) cho khách hàng có {len(goals)} MỤC TIÊU SONG SONG:
+{json.dumps(goals, ensure_ascii=False, indent=2)}
+
+TỔNG QUỸ THỜI GIAN CAM KẾT: {total_daily_hours} giờ/ngày ({total_daily_minutes} phút/ngày).
+Danh mục tài nguyên thực tế đã thẩm định cho các mục tiêu:
 {json.dumps(resources, ensure_ascii=False, indent=2)}
 
-NHIỆM VỤ:
-Xây dựng lộ trình Backcasting phân cấp gồm:
-1. target_vision: Tuyên ngôn mục tiêu rõ ràng.
-2. total_phases: Phân kỳ Quý / Tháng tổng quan (Giai đoạn 1: Nền tảng & Khắc phục lỗ hổng -> Giai đoạn 2: Tăng tốc chuyên sâu -> Giai đoạn 3: Thực chiến giải đề & Cán đích).
-3. weekly_milestones: Chi tiết 4 tuần đầu tiên:
-   - Mỗi tuần có milestone_title rõ ràng.
-   - Mỗi tuần có 5-7 daily_tasks:
+NHIỆM VỤ CHIẾN LƯỢC:
+1. target_vision: Tuyên ngôn mục tiêu tổng hợp kết nối hài hòa {len(goals)} mục tiêu.
+2. total_phases: Phân kỳ Quý / Tháng tổng quan (Giai đoạn 1: Nền tảng song hành -> Giai đoạn 2: Tăng tốc chuyên sâu -> Giai đoạn 3: Thực chiến giải đề/hoàn thiện & Cán đích).
+3. balance_strategy: Chiến lược phân bổ thời gian trong ngày và điều hòa tải nhận thức (Cognitive Load Balancing) để không bị quá tải và tuyệt đối không trùng giờ học.
+   Ví dụ: Mục tiêu ưu tiên cao/nặng đầu (IELTS) xếp vào Khung giờ vàng sáng 08:00 - 10:00, mục tiêu thứ 2 (HSK/Dự án) xếp vào Buổi tối 20:00 - 21:30.
+4. total_daily_hours: {total_daily_hours}
+5. weekly_milestones: Chi tiết 4 tuần đầu tiên:
+   - Mỗi tuần có milestone_title rõ ràng tích hợp các mục tiêu.
+   - Mỗi tuần có danh sách daily_tasks (phân bổ nhiệm vụ cho từng mục tiêu trong ngày, không để xung đột khung giờ):
+     * day_number: 1, 2, 3...
+     * goal_name: Tên mục tiêu mà task này phục vụ (bắt buộc khớp với một trong các tên mục tiêu trên).
      * task_title: Hành động cụ thể (không viết chung chung).
-     * duration_minutes: Bắt buộc khớp với {daily_minutes} phút.
-     * time_slot: Khớp với {preferred_slots}.
-     * attached_resource: Ghi rõ tên tài liệu kèm đường link từ danh sách tài nguyên trên.
+     * duration_minutes: Thời lượng thực hiện tính bằng phút.
+     * time_slot: Khung giờ cụ thể KHÔNG BỊ TRÙNG LẶP giữa các task trong ngày (VD: Task 1 lúc 08:00 - 09:30, Task 2 lúc 20:00 - 21:00).
+     * attached_resource: Ghi rõ tên tài liệu kèm link từ danh mục tài nguyên.
      * cognitive_load: 'high', 'medium', hoặc 'low'.
 """
-        try:
-            roadmap_obj: StrategicRoadmap = invoke_llm_resilient(
-                preferred_model="gemini-2.5-pro",
-                messages=[
-                    SystemMessage(content=SYSTEM_PROMPT + "\n\n" + ACHIEVEMENT_LEDGER),
-                    HumanMessage(content=planner_prompt),
-                ],
-                structured_schema=StrategicRoadmap,
-                temperature=0.2,
-            )
-            roadmap_dict = roadmap_obj.model_dump()
-        except Exception as e:
-            print(f"Lỗi trong strategic_planner_node: {e}")
-            first_res = resources[0] if resources else {"title": f"Tài liệu {goal_name}", "url": "https://cambridgeenglish.org"}
-            roadmap_dict = {
-                "target_vision": f"Cán đích xuất sắc {goal_name} trong {duration_days} ngày",
-                "total_phases": f"Giai đoạn 1: Xây nền tảng ({current_level}) -> Giai đoạn 2: Bứt phá kỹ năng cốt lõi -> Giai đoạn 3: Luyện đề thực chiến",
-                "weekly_milestones": [
-                    {
-                        "week_number": 1,
-                        "milestone_title": f"Củng cố nền tảng và phương pháp học {goal_name}",
-                        "daily_tasks": [
-                            {
-                                "day_number": 1,
-                                "task_title": f"Đánh giá chi tiết lỗ hổng xuất phát điểm {current_level} và hoàn thành bài tập khởi động",
-                                "duration_minutes": daily_minutes,
-                                "time_slot": preferred_slots,
-                                "attached_resource": f"{first_res.get('title')} ({first_res.get('url')})",
-                                "cognitive_load": "high",
-                            },
-                            {
-                                "day_number": 2,
-                                "task_title": "Thực hành bài tập kỹ năng trọng tâm và ghi chép từ vựng/công thức cốt lõi",
-                                "duration_minutes": daily_minutes,
-                                "time_slot": preferred_slots,
-                                "attached_resource": f"{first_res.get('title')} ({first_res.get('url')})",
-                                "cognitive_load": "medium",
-                            },
-                        ],
-                    }
-                ],
-            }
 
-        save_user_roadmap(roadmap_dict, username=username)
-        return {
-            "roadmap": roadmap_dict,
-            "target_goal": goal_name,
-            "username": username,
+    try:
+        roadmap_obj: StrategicRoadmap = invoke_llm_resilient(
+            preferred_model="gemini-2.5-pro",
+            messages=[
+                SystemMessage(content=SYSTEM_PROMPT + "\n\n" + ACHIEVEMENT_LEDGER),
+                HumanMessage(content=planner_prompt),
+            ],
+            structured_schema=StrategicRoadmap,
+            temperature=0.2,
+        )
+        roadmap_dict = roadmap_obj.model_dump()
+    except Exception as e:
+        print(f"Lỗi trong strategic_planner_node: {e}")
+        first_res = resources[0] if resources else {"title": "Tài liệu học tập chuẩn", "url": "https://cambridgeenglish.org"}
+        fallback_tasks = []
+        start_h = 8
+        for g_idx, g in enumerate(goals):
+            g_title = g.get("goal_name", f"Mục tiêu {g_idx + 1}")
+            g_dur = int(float(g.get("daily_hours", 1.0)) * 60)
+            end_h = start_h + (g_dur // 60)
+            time_slot = f"{start_h:02d}:00 - {end_h:02d}:00"
+            fallback_tasks.append({
+                "day_number": 1,
+                "goal_name": g_title,
+                "task_title": f"Khởi động kế hoạch và đánh giá xuất phát điểm cho {g_title}",
+                "duration_minutes": g_dur,
+                "time_slot": time_slot,
+                "attached_resource": first_res.get("title", "Tài liệu chuẩn"),
+                "cognitive_load": "high" if g_idx == 0 else "medium",
+            })
+            start_h = end_h + 1
+
+        roadmap_dict = {
+            "target_vision": f"Cán đích toàn diện {len(goals)} mục tiêu song song",
+            "total_phases": "Giai đoạn 1: Xây nền tảng song hành -> Giai đoạn 2: Bứt phá chuyên sâu -> Giai đoạn 3: Thực chiến & Cán đích",
+            "balance_strategy": f"Phân bổ tổng {total_daily_hours}h/ngày: Khung sáng cho mục tiêu ưu tiên cao, Khung tối cho mục tiêu thứ 2, tránh kiệt sức nhận thức.",
+            "total_daily_hours": total_daily_hours,
+            "weekly_milestones": [
+                {
+                    "week_number": 1,
+                    "milestone_title": "Khởi động và thiết lập thói quen học tập song hành",
+                    "daily_tasks": fallback_tasks,
+                }
+            ],
         }
 
-    # 1. KIỂM TRA TRIGGER TỰ ĐỘNG UNPAUSE:
-    # Nếu user báo IELTS đã hoàn thành hoặc ngày vượt qua 11/12/2026
-    is_unpause_request = any(
-        w in user_lower
-        for w in [
-            "ielts hoàn thành",
-            "đã hoàn thành ielts",
-            "ielts completed",
-            "vượt qua 11/12/2026",
-            "sau 11/12/2026",
-            "giải phóng lịch",
-            "kích hoạt lại hsk",
-            "kích hoạt lại",
-            "unpause",
-            "thi xong ielts",
-        ]
-    )
+    # Lưu toàn bộ mảng goals và roadmap vào MongoDB collection user_states và goals_ledger.json
+    save_user_goals(goals, username=username)
+    save_user_roadmap(roadmap_dict, username=username)
 
-    if is_unpause_request:
-        unpause_result = check_and_trigger_unpause(reference_date="2026-12-12", force_completed_goal="IELTS", username=username)
-        
-        reply_lines = [
-            "🎯 **TRIGGER TỰ ĐỘNG ĐÃ KÍCH HOẠT: GIẢI PHÓNG LỊCH TRÌNH & TÁI KHỞI ĐỘNG HSK (PHASE 7.2)**",
-            "\n✅ **Xác nhận hoàn thành:** Mục tiêu **IELTS 7.0/7.5** đã cán đích thành công (kỳ hạn 11/12/2026)!",
-            "\n🔓 **GIẢI PHÓNG TÀI NGUYÊN NHẬN THỨC:**",
-            "- Khung giờ vàng High Load buổi sáng (08:00 - 10:00) dành cho đề thi IELTS đã được giải phóng hoàn toàn.",
-            "- Hệ thống đã tự động quét bộ nhớ `goals_ledger.json` và chuyển đổi trạng thái của mục tiêu **Chinh phục chứng chỉ tiếng Trung HSK 4** từ `paused_until_ielts_done` trở lại **`in_progress`**.",
-            "- Cột mốc 1: *'Học từ vựng HSK 1-3 và nắm vững 600 chữ Hán cốt lõi'* đã được tái kích hoạt vào lịch trình sinh hoạt hàng ngày (Habit Stacking).",
-            "\n💡 *Executive Coach Directive:* Bạn vừa hoàn tất xuất sắc một mắt xích chiến lược trọng yếu. Bây giờ nhịp sinh học được tái phân bổ tập trung vào 2 mũi nhọn: Đỗ Chương trình Tài năng AI VinUni và bứt phá HSK 4!",
-        ]
-        return {
-            "messages": [AIMessage(content="\n".join(reply_lines))],
-            "intent": "strategic_plan",
-            "conflicts": [],
-        }
-
-    # 2. CHẠY THUẬT TOÁN BACKCASTING & PRIORITY CONFLICT:
-    # Bước A: Backcasting Thạc sĩ AI
-    target_vision = "Học bổng Thạc sĩ AI VinUni / Du học Quốc tế"
-    backcast_data = apply_backcasting_master_ai(target_vision, user_profile, username=username)
-
-    # Bước B: Priority Conflict Resolution
-    conflict_data = detect_and_resolve_priority_conflicts(reference_date="2026-11-06", username=username)
-
-    # Bước C: Xác định Milestone trung gian trọng tâm để kích hoạt Opportunity Scout (Phase 7.3)
-    target_milestone = "Cột mốc T-1.5 năm: Cần 2 năm kinh nghiệm thực chiến AI qua vị trí AI Engineer / IT BA & VinUni AI Bootcamp"
-
-    user_obstacles = state.get("user_obstacles") or user_profile.get("obstacles") or []
-    obstacles_str = (
-        "; ".join(user_obstacles)
-        if user_obstacles
-        else "Tối ưu hóa nhịp sinh học và quỹ tải nhận thức để không bị phân tán"
-    )
-
-    # Biên soạn bản báo cáo chiến lược
-    reply_lines = [
-        "🎯 **BẢN ĐỒ CHIẾN LƯỢC BACKCASTING & ĐIỀU PHỐI XUNG ĐỘT ƯU TIÊN (PHASE 7.2)**",
-        "\n### 1. 🔍 ĐỐI CHIẾU HỒ SƠ & PHÂN TÍCH KHOẢNG TRỐNG (GAP ANALYSIS):",
-        f"- **Hồ sơ hiện tại:** {user_profile.get('current_situation') or 'Nhân sự định hướng phát triển và nâng cao năng lực'}.",
-        f"- **Rào cản thực tế đã ghi nhận:** {obstacles_str}",
-        "- **Khoảng trống cốt tử (The Gap):** Cần tích lũy kinh nghiệm thực chiến và sản phẩm portfolio cụ thể để đáp ứng yêu cầu tuyển sinh/tuyển dụng chuyên sâu.",
-        "- **Chiến lược bù đắp (Compensatory Strategy):** Bắt buộc phải bù đắp bằng **kinh nghiệm thực chiến/dự án thực tế** và xây dựng **Portfolio sản phẩm hoàn chỉnh**.",
-        "- **Phương án hóa giải rào cản:** Phân bổ micro-milestones theo nhịp sinh học, áp dụng Pareto 80/20 giảm tải nhận thức và cô lập khung giờ vàng buổi sáng.",
-        f"- **Tích hợp Bộ Nhớ Thích Nghi:** Kế hoạch hành động tự động tránh các phương pháp trong `failed_methods` và thiết kế theo nhịp năng suất sinh học của bạn.",
-        "\n### 2. 🚩 LỘ TRÌNH CỘT MỐC ĐẢO NGƯỢC (BACKCAST REVERSE MILESTONES):",
-    ]
-
-    for leaf in backcast_data.get("backcast_milestones", []):
-        leaf_title = leaf.get("title") or leaf.get("milestone")
-        hours_str = f" (~{leaf.get('estimated_hours')}h)" if leaf.get("estimated_hours") else ""
-        dep_str = f" [🔗 Ràng buộc: {', '.join(leaf.get('dependencies', []))}]" if leaf.get("dependencies") else " [Khởi động]"
-        reply_lines.append(f"- 📌 **{leaf_title}**{hours_str}{dep_str}")
-
-    reply_lines.extend([
-        "\n### 3. ⚡ THUẬT TOÁN PRIORITY CONFLICT (GIẢI QUYẾT XUNG ĐỘT ƯU TIÊN):",
-        f"- **Xung đột nhận thức được phát hiện:** {conflict_data.get('reason')}",
-        "- **Hành động quyết đoán của Coach:** Tự động chuyển trạng thái của mục tiêu **Chinh phục chứng chỉ tiếng Trung HSK 4** trong `goals_ledger.json` thành **`paused_until_ielts_done`**.",
-        "- **Bảo vệ nhịp sinh học:** Áp dụng nghiêm ngặt định luật Pareto 80/20. Não bộ không được phép phân tán giữa 2 ngoại ngữ mới khi kỳ thi IELTS 7.0/7.5 có deadline gấp vào ngày **11/12/2026**.",
-        "\n### 4. 🔄 GIAO THỨC TRIGGER TỰ ĐỘNG (AUTOMATIC UNPAUSE PROTOCOL):",
-        "- **Điều kiện kích hoạt:** Khi ngày hệ thống vượt qua **11/12/2026** VÀ status IELTS chuyển thành **`completed`**.",
-        "- **Hành động:** Hệ thống tự động gọi lại node này để giải phóng lịch trình ôn thi IELTS và kích hoạt lại toàn bộ mục tiêu HSK sang trạng thái **`in_progress`** mà bạn không cần phải cấu hình thủ công.",
-        "\n*Toàn bộ dữ liệu Backcasting và trạng thái Priority Conflict đã được lưu trữ và cập nhật đồng bộ vào `goals_ledger.json`.*",
-        "\n> ⚡ *Hệ thống đang tự động kích hoạt **Opportunity Scout & Networking Protocol** để quét Tavily tìm các chương trình thực chiến (VinUni AI Bootcamp) và sinh danh sách Task nhỏ trong tuần...*",
-    ])
-
-    reply_text = "\n".join(reply_lines)
-
-    # Cập nhật coaching_stage và tiêu thụ cờ is_info_sufficient
-    if not isinstance(user_profile, dict):
-        user_profile = {}
-    user_profile["coaching_stage"] = "action"
-    user_profile["status"] = "action"
-    save_user_profile(user_profile, username=username)
+    # Cập nhật mục tiêu và các cột mốc vào goals_ledger.json
+    for g in goals:
+        g_name = g.get("goal_name", "Mục tiêu")
+        g_days = g.get("duration_days", 90)
+        g_cat = g.get("category", "career")
+        add_goal(
+            title=f"{g_name} (Lộ trình {g_days} ngày)",
+            deadline=f"{g_days} ngày tới",
+            category="education" if "học" in g_cat.lower() or "ielts" in g_name.lower() or "hsk" in g_name.lower() else "career",
+            milestones=[{"milestone": f"Cán đích {g_name}", "timeline": f"{g_days} ngày"}],
+            status="in_progress",
+            username=username,
+        )
 
     return {
-        "messages": [AIMessage(content=reply_text)],
-        "intent": "strategic_plan",
-        "conflicts": [conflict_data] if conflict_data.get("conflict_detected") else [],
-        "target_milestone": target_milestone,
-        "target_goal": target_vision,
-        "user_profile": user_profile,
-        "coaching_stage": "action",
-        "status": "action",
-        "is_info_sufficient": False,
+        "roadmap": roadmap_dict,
+        "goals": goals,
+        "profile": goals[0] if goals else {},
+        "target_goal": roadmap_dict.get("target_vision", "Đa mục tiêu"),
+        "username": username,
     }
 
 
 def scheduler_node(state: CoachState) -> Dict[str, Any]:
     """
     Node 4: Scheduler & Execution Briefing (Phase 11 Multi-Agent System).
-    - Xây dựng thời gian biểu chi tiết theo nhịp sinh học vào state["schedule"].
-    - Cập nhật mục tiêu và các task vào goals_ledger.json của user.
-    - Soạn thảo và trả về Bản Báo cáo Huấn luyện Điều hành (Executive Coaching Briefing).
+    - Xây dựng thời gian biểu chi tiết theo nhịp sinh học vào state["schedule"] cho TẤT CẢ mục tiêu.
+    - Soạn thảo và trả về Bản Báo cáo Huấn luyện Điều hành Đa Mục Tiêu (Executive Coaching Briefing).
     """
     username = (state.get("username") or "mavis").strip().lower() if isinstance(state.get("username"), str) else "mavis"
-    profile = safe_dict(state.get("profile") or load_user_goal_profile(username))
+    goals = safe_list(state.get("goals") or load_user_goals(username))
+    if not goals:
+        single_p = safe_dict(state.get("profile") or load_user_goal_profile(username))
+        if single_p.get("goal_name"):
+            goals = [single_p]
+
     resources = safe_list(state.get("resources") or load_user_resources(username))
     roadmap = safe_dict(state.get("roadmap") or load_user_roadmap(username))
 
-    goal_name = profile.get("goal_name", "IELTS 7.0")
-    current_level = profile.get("current_level", "Band 5.0")
-    duration_days = profile.get("duration_days", 90)
-    daily_hours = profile.get("daily_hours", 2.0)
-    preferred_slots = profile.get("preferred_slots", "Tối 20:00 - 22:00")
-
-    # 1. Lưu chính thức mục tiêu vào goals_ledger.json
-    milestones = []
+    total_daily_hours = sum(float(g.get("daily_hours", 1.5)) for g in goals)
     weekly_ms = safe_list(roadmap.get("weekly_milestones", []))
-    for w in weekly_ms[:4]:
-        w_dict = safe_dict(w)
-        milestones.append({
-            "milestone": f"Tuần {w_dict.get('week_number', 1)}: {w_dict.get('milestone_title', str(w))}",
-            "timeline": f"Tuần {w_dict.get('week_number', 1)}",
-            "status": "in_progress" if w_dict.get("week_number") == 1 else "pending",
-        })
-
-    add_goal(
-        title=f"{goal_name} (Lộ trình {duration_days} ngày)",
-        deadline=f"{duration_days} ngày tới",
-        category="career",
-        milestones=milestones,
-        status="in_progress",
-        username=username,
-    )
-
-    for r in resources:
-        r_dict = safe_dict(r)
-        append_resource_to_goal(
-            goal_id_or_title=goal_name,
-            resource={
-                "title": r_dict.get("title", str(r)),
-                "url": r_dict.get("url", "#"),
-                "type": r_dict.get("type", "Tài liệu"),
-            },
-            username=username,
-        )
-
-    # 2. Xây dựng lịch trình hành động ngày 1
     w1 = safe_dict(weekly_ms[0]) if weekly_ms else {}
     w1_tasks = safe_list(w1.get("daily_tasks", []))
-    day1_task = safe_dict(w1_tasks[0]) if w1_tasks else {}
-    if not day1_task:
-        first_r = safe_dict(resources[0]) if resources else {}
-        day1_task = {
-            "task_title": f"Bắt đầu bài tập khởi động cho mục tiêu {goal_name}",
-            "duration_minutes": int(daily_hours * 60),
-            "time_slot": preferred_slots,
-            "attached_resource": first_r.get("title", "Tài liệu chính thức"),
-        }
 
-    schedule_items = [
-        {
-            "time": day1_task.get("time_slot", preferred_slots),
-            "task": day1_task.get("task_title"),
-            "duration": f"{day1_task.get('duration_minutes', int(daily_hours * 60))} phút",
-            "resource": day1_task.get("attached_resource"),
-            "type": "Deep Work / High Cognitive Focus",
-        }
-    ]
+    # Xây dựng lịch trình hành động ngày 1 cho tất cả các mục tiêu
+    schedule_items = []
+    day1_tasks = [t for t in w1_tasks if safe_dict(t).get("day_number") == 1]
+    if not day1_tasks and w1_tasks:
+        day1_tasks = w1_tasks[:len(goals)]
 
-    # 3. Tạo Bản Báo cáo Huấn luyện Điều hành (Executive Coaching Briefing)
+    if day1_tasks:
+        for t in day1_tasks:
+            t_dict = safe_dict(t)
+            schedule_items.append({
+                "time": t_dict.get("time_slot", "08:00 - 10:00"),
+                "task": f"[{t_dict.get('goal_name', 'Mục tiêu')}] {t_dict.get('task_title')}",
+                "duration": f"{t_dict.get('duration_minutes', 90)} phút",
+                "resource": t_dict.get("attached_resource", "Tài liệu chính thức"),
+                "goal": t_dict.get("goal_name"),
+                "type": "Deep Work / High Cognitive Focus" if t_dict.get("cognitive_load") == "high" else "Focused Work",
+            })
+    else:
+        for g_idx, g in enumerate(goals):
+            schedule_items.append({
+                "time": g.get("preferred_slots", "08:00 - 10:00" if g_idx == 0 else "20:00 - 21:30"),
+                "task": f"[{g.get('goal_name')}] Bắt đầu bài tập khởi động",
+                "duration": f"{int(float(g.get('daily_hours', 1.5)) * 60)} phút",
+                "resource": "Tài liệu chính thức",
+                "goal": g.get("goal_name"),
+                "type": "Focused Work",
+            })
+
+    # Tạo bảng tổng quan các mục tiêu
+    goals_lines = []
+    for g in goals:
+        p_badge = "🔥 High" if g.get("priority") == "high" else ("⚡ Medium" if g.get("priority") == "medium" else "🌱 Low")
+        goals_lines.append(
+            f"- 🎯 **{g.get('goal_name')}** ({g.get('category', 'Học tập')}) | *Ưu tiên:* `{p_badge}` | *Vạch xuất phát:* {g.get('current_level')} | *Thời hạn:* {g.get('duration_days')} ngày | *Quỹ thời gian:* {g.get('daily_hours')}h/ngày"
+        )
+    goals_text = "\n".join(goals_lines)
+
+    # Danh mục tài nguyên thẩm định
     res_lines = []
     for r in resources:
         r_dict = safe_dict(r)
+        g_tag = f"[{r_dict.get('goal_name')}] " if r_dict.get("goal_name") else ""
         res_lines.append(
-            f"- **[{r_dict.get('title', 'Tài liệu')}]({r_dict.get('url', '#')})** ({r_dict.get('type', 'Tài liệu')}) - *Ước tính: {r_dict.get('estimated_hours', 'N/A')}h*\n  *Hướng dẫn:* {r_dict.get('how_to_use', 'Học theo lộ trình.')}"
+            f"- **{g_tag}[{r_dict.get('title', 'Tài liệu')}]({r_dict.get('url', '#')})** ({r_dict.get('type', 'Tài liệu')}) - *Ước tính: {r_dict.get('estimated_hours', 'N/A')}h*\n  *Hướng dẫn:* {r_dict.get('how_to_use', 'Học theo lộ trình.')}"
         )
-    res_text = "\n".join(res_lines)
+    res_text = "\n".join(res_lines) if res_lines else "Đang cập nhật danh mục tài liệu."
 
+    # Danh mục mốc tuần
     ms_lines = []
     for w in weekly_ms[:4]:
         w_dict = safe_dict(w)
         ms_lines.append(f"- **Tuần {w_dict.get('week_number', 1)}:** {w_dict.get('milestone_title', '')}")
-    ms_text = "\n".join(ms_lines)
+    ms_text = "\n".join(ms_lines) if ms_lines else "Đang phân bổ các mốc tuần."
 
-    briefing = f"""🎯 **HỒ SƠ MỤC TIÊU ĐÃ ĐƯỢC THIẾT LẬP THÀNH CÔNG!**
+    # Lịch trình ngày 1
+    sched_lines = []
+    for item in schedule_items:
+        sched_lines.append(f"- **Khung giờ:** `{item.get('time')}` ({item.get('duration')})\n  *Nhiệm vụ:* {item.get('task')}\n  *Tài liệu:* {item.get('resource')}")
+    sched_text = "\n".join(sched_lines)
 
-Chúc mừng bạn! Chúng ta đã hoàn tất việc chốt thông số và thiết lập hồ sơ chiến lược cho mục tiêu **{goal_name}**. Toàn bộ dữ liệu đã được lưu trữ bền vững vào hệ thống quản trị cuộc đời của bạn.
+    balance_strategy = roadmap.get("balance_strategy", "Phân bổ luân phiên giữa các khung giờ sáng và tối.")
+
+    briefing = f"""🎯 **HỒ SƠ ĐA MỤC TIÊU ĐÃ ĐƯỢC THIẾT LẬP THÀNH CÔNG!**
+
+Chúc mừng bạn! Chúng ta đã hoàn tất việc chốt thông số và thiết lập hồ sơ chiến lược cho **{len(goals)} mục tiêu song song**. Toàn bộ dữ liệu đã được lưu trữ bền vững vào hệ thống quản trị cuộc đời của bạn trên Cloud.
 
 ---
 
-### 📋 **1. Tổng quan Hồ sơ Chiến lược**
-- **Mục tiêu:** {goal_name}
-- **Vạch xuất phát:** {current_level}
-- **Thời hạn cam kết:** {duration_days} ngày
-- **Quỹ thời gian:** {daily_hours} giờ/ngày | Khung giờ: {preferred_slots}
+### 📋 **1. Bảng Tổng Quan Đa Mục Tiêu Song Song**
+{goals_text}
+
+⚡ **Tổng quỹ thời gian cam kết:** `{total_daily_hours} giờ/ngày`
+💡 **Chiến lược cân bằng nhịp sinh học:** {balance_strategy}
 
 ---
 
-### 📚 **2. Danh mục Tài liệu & Công cụ Thực tế đã Thẩm định**
+### 📚 **2. Danh Mục Tài Liệu & Công Cụ Thực Tế Đã Thẩm Định**
 {res_text}
 
 ---
 
-### 🗺️ **3. Lộ trình Backcasting & Phân kỳ Chiến lược**
-- **Tầm nhìn:** {roadmap.get('target_vision', f'Cán mốc {goal_name}')}
+### 🗺️ **3. Lộ Trình Backcasting & Phân Kỳ Chiến Lược**
+- **Tầm nhìn:** {roadmap.get('target_vision', 'Chinh phục toàn diện các mục tiêu')}
 - **Phân kỳ:** {roadmap.get('total_phases', 'Tháng 1 Nền tảng -> Tháng 2 Tăng tốc -> Tháng 3 Đạt chuẩn')}
 
 **Các mốc tuần trọng tâm:**
@@ -2011,19 +2015,19 @@ Chúc mừng bạn! Chúng ta đã hoàn tất việc chốt thông số và thi
 
 ---
 
-### ⚡ **4. Kế hoạch Hành động Ngày 1 (Hôm nay)**
-- **Khung giờ:** `{day1_task.get('time_slot', preferred_slots)}` ({day1_task.get('duration_minutes')} phút)
-- **Nhiệm vụ:** {day1_task.get('task_title')}
-- **Tài liệu sử dụng:** {day1_task.get('attached_resource')}
+### ⚡ **4. Kế Hoạch Hành Động Ngày 1 (Hôm nay - Không Xung Đột Giờ Giấc)**
+{sched_text}
 
 ---
 
-💡 **Executive Coach Question:** Bạn đã sẵn sàng bước vào khung giờ học đầu tiên hôm nay chưa, hay cần tôi hỗ trợ làm rõ phương pháp tiếp cận tài liệu này trước?
+💡 **Executive Coach Directive:** Lộ trình đã được tối ưu hóa nhịp sinh học để bạn hoàn thành song song các mục tiêu mà không bị quá tải. Bạn có muốn điều chỉnh thêm khung giờ nào, hay sẵn sàng bắt đầu nhiệm vụ đầu tiên hôm nay?
 """
 
     return {
         "schedule": schedule_items,
         "messages": [AIMessage(content=briefing.strip())],
+        "goals": goals,
+        "profile": goals[0] if goals else {},
         "username": username,
     }
 
