@@ -60,8 +60,11 @@ def get_mongo_db() -> Optional[Any]:
     if _mongo_db is not None:
         return _mongo_db
 
+
     uri = get_mongo_uri()
     if not uri:
+        import streamlit as st
+        st.warning("Thiếu MONGO_URI")
         return None
 
     try:
@@ -76,6 +79,8 @@ def get_mongo_db() -> Optional[Any]:
         _mongo_db = _mongo_client[DB_NAME]
         return _mongo_db
     except Exception as e:
+        import streamlit as st
+        st.error(f"Lỗi kết nối MongoDB: {e}")
         print(f"⚠️ Cảnh báo kết nối MongoDB Atlas ({DB_NAME}): {e}")
         _mongo_client = None
         _mongo_db = None
