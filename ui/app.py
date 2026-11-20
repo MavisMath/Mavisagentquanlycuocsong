@@ -30,6 +30,9 @@ try:
                 os.environ[_k] = _v
                 if _k == "GEMINI_API_KEY" and "GOOGLE_API_KEY" not in os.environ:
                     os.environ["GOOGLE_API_KEY"] = _v
+                if _k in ["MONGO_URI", "MONGODB_URI"]:
+                    os.environ["MONGO_URI"] = _v
+                    os.environ["MONGODB_URI"] = _v
 except Exception:
     pass
 

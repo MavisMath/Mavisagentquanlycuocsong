@@ -3,6 +3,9 @@ import sys
 import time
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
+from dotenv import load_dotenv
+
+load_dotenv()
 
 try:
     from pymongo import MongoClient
@@ -32,27 +35,38 @@ def get_mongo_connection_error() -> Optional[str]:
 
 def get_mongo_uri() -> Optional[str]:
     """
-    Trích xuất MONGO_URI từ st.secrets['MONGO_URI'] hoặc biến môi trường os.getenv('MONGO_URI').
-    Hỗ trợ cả trường hợp secrets dạng nested hoặc string.
+    Trích xuất URI kết nối MongoDB Atlas từ st.secrets hoặc biến môi trường.
+    Hỗ trợ cả MONGO_URI và MONGODB_URI (dạng chuỗi hoặc nested dict).
     """
     # 1. Thử lấy từ streamlit.secrets
     try:
         import streamlit as st
         if hasattr(st, "secrets"):
-            if "MONGO_URI" in st.secrets and isinstance(st.secrets["MONGO_URI"], str):
-                return st.secrets["MONGO_URI"].strip()
-            # Kiểm tra trường hợp đặt trong mục [mongo] uri = "..."
-            if "mongo" in st.secrets and isinstance(st.secrets["mongo"], dict):
-                uri = st.secrets["mongo"].get("uri") or st.secrets["mongo"].get("MONGO_URI")
-                if uri and isinstance(uri, str):
-                    return uri.strip()
+            for key in ["MONGO_URI", "MONGODB_URI", "mongo_uri", "mongodb_uri"]:
+                if key in st.secrets and isinstance(st.secrets[key], str) and st.secrets[key].strip():
+                    return st.secrets[key].strip()
+
+            # Kiểm tra trường hợp đặt trong mục [mongo] hoặc [mongodb]
+            for sec_sec in ["mongo", "mongodb"]:
+                if sec_sec in st.secrets and isinstance(st.secrets[sec_sec], dict):
+                    sec_dict = st.secrets[sec_sec]
+                    uri = (
+                        sec_dict.get("uri")
+                        or sec_dict.get("MONGO_URI")
+                        or sec_dict.get("MONGODB_URI")
+                        or sec_dict.get("mongo_uri")
+                        or sec_dict.get("mongodb_uri")
+                    )
+                    if uri and isinstance(uri, str) and uri.strip():
+                        return uri.strip()
     except Exception:
         pass
 
-    # 2. Thử lấy từ biến môi trường hệ thống
-    env_uri = os.getenv("MONGO_URI")
-    if env_uri and env_uri.strip():
-        return env_uri.strip()
+    # 2. Thử lấy từ biến môi trường hệ thống (.env hoặc OS environment)
+    for env_key in ["MONGO_URI", "MONGODB_URI", "mongo_uri", "mongodb_uri"]:
+        env_uri = os.getenv(env_key)
+        if env_uri and env_uri.strip():
+            return env_uri.strip()
 
     return None
 
