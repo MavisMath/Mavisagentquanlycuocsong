@@ -2834,8 +2834,10 @@ class CEOCoachOutput(BaseModel):
     priority: Optional[str] = Field("P2 - High", description="Mức ưu tiên: P1 - Critical, P2 - High, P3 - Medium, P4 - Low")
     current_level: Optional[str] = Field("Cơ bản", description="Trình độ hoặc vạch xuất phát hiện tại")
     feasibility_assessment: str = Field(description="Đánh giá chi tiết tính khả thi dựa trên nhịp sinh học và tổng số giờ hiện có")
-    ready_to_approve: bool = Field(description="True nếu mục tiêu rõ ràng và tổng quỹ thời gian sau khi thêm mục tiêu mới <= 5.5h/ngày (khả thi). False nếu thiếu thông số cốt lõi hoặc quá tải.")
-    coach_response: str = Field(description="Lời trò chuyện của CEO Life Coach: sắc bén, thấu cảm, ngắn gọn, phân tích chi phí cơ hội và đưa câu hỏi chốt rõ ràng")
+    burnout_risk_detected: bool = Field(default=False, description="True nếu tổng giờ sau khi thêm mục tiêu mới > 8.0 giờ/ngày hoặc có quá nhiều Deep Work (nguy cơ kiệt sức / quá tải nhận thức)")
+    suggested_pause_goal: Optional[str] = Field(None, description="Tên mục tiêu đang Active cũ có mức ưu tiên thấp hơn được gợi ý tạm dừng (paused) để bảo vệ năng lượng trước khi duyệt mục tiêu mới")
+    ready_to_approve: bool = Field(description="True nếu mục tiêu rõ ràng và tổng quỹ thời gian sau khi thêm mục tiêu mới <= 8.0h/ngày và không quá tải Deep Work (khả thi). False nếu vượt quá 8h/ngày, quá tải, hoặc thiếu thông số cốt lõi.")
+    coach_response: str = Field(description="Lời trò chuyện của CEO Life Coach: sắc bén, thấu cảm, ngắn gọn, phân tích chi phí cơ hội, cảnh báo quá tải/burnout nếu >8h và đưa câu hỏi chốt rõ ràng")
 
 
 def ceo_coach_chat(
@@ -2846,16 +2848,27 @@ def ceo_coach_chat(
     """
     Hàm Chatbot 1: CEO Coach Chat (Trò chuyện tổng & Thẩm định tính khả thi).
     Sử dụng gemini-2.5-flash để phản hồi nhanh, sắc bén.
-    Tính toán tổng quỹ thời gian hiện tại của user trên các mục tiêu 'active' trong MongoDB.
-    Đánh giá độ khả thi và trả về cờ ready_to_approve=True khi khả thi và đủ thông số.
+    Tích hợp cơ chế Quản Trị Năng Lượng & Chống Quá Tải (Burnout Shield):
+    - Tính tổng số giờ/ngày của tất cả mục tiêu đang active.
+    - Cảnh báo rủi ro quá tải nếu tổng giờ > 8h/ngày hoặc quá nhiều Deep Work.
+    - Gợi ý tạm dừng ('paused') bớt 1 mục tiêu cũ trước khi duyệt mục tiêu mới.
     """
     username = (username or "mavis").strip().lower()
     current_goals = load_user_goals(username)
     active_goals = [g for g in current_goals if g.get("status") == "active"]
     current_allocated_hours = sum(float(g.get("daily_hours", 0) or 0) for g in active_goals)
 
+    # Đếm số lượng task Deep Work trong các active goals
+    deep_work_count = 0
     active_summary = []
     for g in active_goals:
+        bd = g.get("breakdown", {})
+        if isinstance(bd, dict):
+            for w in bd.get("weekly", []):
+                if isinstance(w, dict):
+                    for t in w.get("tasks", []):
+                        if isinstance(t, dict) and "deep" in str(t.get("energy_level", "")).lower():
+                            deep_work_count += 1
         active_summary.append(
             f"- Mục tiêu: {g.get('title') or g.get('goal_name')} | Quỹ giờ: {g.get('daily_hours')}h/ngày | Khung giờ: {g.get('preferred_time')} | Ưu tiên: {g.get('priority')}"
         )
@@ -2867,18 +2880,31 @@ def ceo_coach_chat(
         history_text = "\nLịch sử trao đổi gần nhất:\n" + "\n".join(history_lines)
 
     prompt = f"""Bạn là CEO & Elite Life Coach độc quyền của người dùng.
-Nhiệm vụ: Trò chuyện tổng, thẩm định tính khả thi của mục tiêu mới đối chiếu với tổng quỹ thời gian hiện tại.
+Nhiệm vụ: Trò chuyện tổng, thẩm định tính khả thi của mục tiêu mới đối chiếu với tổng quỹ thời gian hiện tại và kích hoạt cơ chế Chống Quá Tải & Quản Trị Năng Lượng (Burnout Shield).
 
 DỮ LIỆU HIỆN TẠI TỪ CƠ SỞ DỮ LIỆU MONGODB CỦA USER:
 - Tổng quỹ giờ đã cam kết trên các mục tiêu đang Active: {current_allocated_hours:.1f} giờ/ngày.
+- Số mục tiêu đang Active: {len(active_goals)} mục tiêu.
+- Số lượng task Deep Work hiện có: {deep_work_count} tasks.
 - Danh sách các mục tiêu đang Active:
 {active_goals_text}
 
-QUY TẮC NHỊP SINH HỌC & GIỚI HẠN NĂNG LƯỢNG CỦA CEO COACH:
-1. Tổng quỹ giờ cam kết học tập / deep work tối đa an toàn mỗi ngày là 5.0 - 5.5 giờ.
-2. Nếu người dùng đề xuất mục tiêu mới và tổng giờ (hiện tại + mới) <= 5.5h/ngày VÀ đã có đủ thông số cốt lõi (tên mục tiêu, số giờ, thời hạn) -> Đặt ready_to_approve = True.
-3. Nếu tổng giờ vượt quá 5.5h/ngày (nguy cơ kiệt sức / burnout), hoặc người dùng chưa nêu rõ số giờ hoặc thời hạn -> Đặt ready_to_approve = False. Cảnh báo nguy cơ quá tải, đề xuất tạm hoãn (pause) mục tiêu ít ưu tiên hơn hoặc thương lượng giảm giờ.
-4. Phong cách phản hồi: Ngắn gọn, chuyên nghiệp, truyền cảm hứng, sắc bén như một CEO Coach thực thụ.
+QUY TẮC QUẢN TRỊ NĂNG LƯỢNG & CHỐNG QUÁ TẢI (BURNOUT SHIELD) CỦA CEO COACH:
+1. GIỚI HẠN TỐI ĐA NGHIÊM NGẶT: Tổng quỹ giờ học tập / làm việc an toàn tối đa của người dùng là 8.0 giờ/ngày.
+2. CẢNH BÁO NGUY CƠ QUÁ TẢI (BURNOUT RISK):
+   - Nếu tổng quỹ giờ (Hiện tại {current_allocated_hours:.1f}h + Mục tiêu mới đề xuất) > 8.0 giờ/ngày, HOẶC người dùng đang gánh quá nhiều tác vụ nặng não (Deep Work):
+     * BẮT BUỘC đặt burnout_risk_detected = True.
+     * BẮT BUỘC đặt ready_to_approve = False.
+     * Trong coach_response: Cảnh báo trực diện rủi ro kiệt sức/quá tải não bộ ("Tổng thời gian cam kết sẽ vượt quá 8 tiếng/ngày! Não bộ không thể duy trì nhận thức đỉnh cao khi bị quá tải!").
+     * Chỉ định rõ 1 mục tiêu cũ ít ưu tiên hơn hoặc có thể tạm hoãn vào suggested_pause_goal.
+     * Gợi ý người dùng bấm ⏸️ Tạm dừng (paused) mục tiêu đó ở Giai đoạn 1 trước khi duyệt mục tiêu mới này, hoặc giảm số giờ/ngày xuống.
+3. KHI ĐỦ ĐIỀU KIỆN DUYỆT (READY TO APPROVE):
+   - Nếu tổng quỹ giờ (Hiện tại + Mục tiêu mới) <= 8.0 giờ/ngày VÀ đã có đủ thông số cốt lõi (tên mục tiêu, số giờ, thời hạn) VÀ không quá tải Deep Work:
+     * Đặt burnout_risk_detected = False.
+     * Đặt ready_to_approve = True.
+     * Đưa ra nhận xét sắc bén, khích lệ và hỏi câu hỏi chốt để chuyển sang Giai đoạn 1 (Architect) bóc tách lộ trình.
+4. NẾU THIẾU THÔNG SỐ:
+   - Nếu người dùng chưa nêu rõ số giờ hoặc thời hạn -> Đặt ready_to_approve = False. Hỏi đúng 1 câu hỏi gợi mở để người dùng làm rõ.
 
 {history_text}
 Tin nhắn hiện tại của người dùng: "{user_message}"
@@ -2896,6 +2922,8 @@ Tin nhắn hiện tại của người dùng: "{user_message}"
         )
     except Exception as e:
         print(f"Lỗi invoke trong ceo_coach_chat: {e}")
+        is_overload = (current_allocated_hours + 1.5) > 8.0
+        lowest_goal_title = (active_goals[-1].get("title") or active_goals[-1].get("goal_name")) if active_goals else None
         analysis = CEOCoachOutput(
             detected_goal_title="Mục tiêu mới",
             category="Học tập",
@@ -2903,9 +2931,15 @@ Tin nhắn hiện tại của người dùng: "{user_message}"
             duration_days=90,
             preferred_time="08:00 - 10:00 Sáng",
             priority="P2 - High",
-            feasibility_assessment=f"Hiện bạn đang cam kết {current_allocated_hours:.1f}h/ngày. Mục tiêu mới cần cân đối quỹ thời gian.",
-            ready_to_approve=True if (current_allocated_hours + 1.5) <= 5.5 else False,
-            coach_response=f"Tôi đã ghi nhận định hướng của bạn. Hiện tại bạn đang có {current_allocated_hours:.1f}h/ngày đã phân bổ. Bạn có muốn chúng ta chốt và chuyển sang Giai đoạn 1 (Architect) để bóc tách lộ trình chi tiết không?",
+            feasibility_assessment=f"Hiện bạn đang cam kết {current_allocated_hours:.1f}h/ngày. Ngưỡng an toàn tối đa là 8.0h/ngày.",
+            burnout_risk_detected=is_overload,
+            suggested_pause_goal=lowest_goal_title if is_overload else None,
+            ready_to_approve=not is_overload,
+            coach_response=(
+                f"⚠️ Cảnh báo Burnout Shield: Hiện tại bạn đã cam kết {current_allocated_hours:.1f}h/ngày. Thêm mục tiêu này sẽ nâng tổng giờ lên {(current_allocated_hours + 1.5):.1f}h/ngày (>8h/ngày). Tôi khuyên bạn nên tạm dừng ('paused') mục tiêu '{lowest_goal_title}' trước khi duyệt mục tiêu mới!"
+                if is_overload
+                else f"Tôi đã ghi nhận định hướng của bạn. Hiện tại bạn đang có {current_allocated_hours:.1f}h/ngày đã phân bổ (nằm trong ngưỡng an toàn 8h/ngày). Bạn có muốn chúng ta chốt và chuyển sang Giai đoạn 1 (Architect) để bóc tách lộ trình chi tiết không?"
+            ),
         )
 
     # Nếu được phê duyệt (ready_to_approve == True) và có tên mục tiêu -> Thêm hoặc cập nhật vào goals (status: evaluating)
@@ -2952,6 +2986,8 @@ Tin nhắn hiện tại của người dùng: "{user_message}"
     return {
         "response": analysis.coach_response,
         "ready_to_approve": analysis.ready_to_approve,
+        "burnout_risk_detected": getattr(analysis, "burnout_risk_detected", False),
+        "suggested_pause_goal": getattr(analysis, "suggested_pause_goal", None),
         "total_allocated_hours": current_allocated_hours + (float(analysis.daily_hours or 0) if analysis.ready_to_approve else 0),
         "new_goal_detected": new_goal_record,
         "goals": load_user_goals(username),
@@ -2970,11 +3006,32 @@ class ResourceItemDetail(BaseModel):
     how_to_use: str = Field(description="Hướng dẫn khai thác cụ thể")
 
 
+class WeeklyTaskItem(BaseModel):
+    task_name: str = Field(description="Tên nhiệm vụ/bài tập cụ thể (VD: 'Giải đề Reading Cam 18 Test 1')")
+    energy_level: str = Field(
+        default="🔴 Deep Work",
+        description="Nhãn độ nặng não: '🔴 Deep Work' (nhận thức nặng/tập trung cao/giải đề khó/code), '🟡 Shallow Work' (nhẹ nhàng/học từ vựng/flashcard/sắp xếp ghi chú), hoặc '🟢 Recharge' (vận động/đi bộ/nghỉ ngơi/nghe podcast thụ động)",
+    )
+    resource_title: str = Field(default="", description="Tên gói tài liệu 1-Click đi kèm")
+    resource_url: str = Field(default="", description="Đường link chính thức uy tín tới tài liệu thực tế")
+    definition_of_done: str = Field(
+        default="",
+        description="Tiêu chí hoàn thành (Definition of Done - DoD) cụ thể, đo lường được của buổi đó (VD: 'Đạt tối thiểu 30/40 câu đúng và take note 10 từ vựng')",
+    )
+
+
 class WeeklyMilestoneItem(BaseModel):
     week: str = Field(description="Tuần (VD: 'Tuần 1', 'Tuần 2')")
     milestone: str = Field(description="Cột mốc trọng tâm của tuần")
-    action_items: List[str] = Field(description="2-3 hành động con cụ thể")
-    estimated_hours: float = Field(description="Số giờ dự kiến")
+    tasks: List[WeeklyTaskItem] = Field(
+        default=[],
+        description="Danh sách các task cụ thể trong tuần, mỗi task bắt buộc có nhãn energy_level, gói tài liệu 1-Click (resource_title, resource_url) và definition_of_done",
+    )
+    action_items: List[str] = Field(
+        default=[],
+        description="Tóm tắt ngắn gọn các gạch đầu dòng hành động",
+    )
+    estimated_hours: float = Field(default=7.0, description="Số giờ dự kiến")
     resources: str = Field(default="", description="Tài liệu bổ trợ cho tuần")
 
 
@@ -3068,12 +3125,12 @@ def architect_chat(
     goal_title = target_goal.get("title") or target_goal.get("goal_name", "Mục tiêu phát triển")
     current_bd = target_goal.get("breakdown", {})
 
-    # Tìm kiếm tài liệu thực tế bổ trợ
-    search_query = f"{goal_title} tài liệu giáo trình lộ trình chính thức uy tín"
-    raw_search = execute_resource_search(search_query, max_results=3)
+    # Tìm kiếm tài liệu thực tế bổ trợ qua Google / Tavily Search Grounding
+    search_query = f"{goal_title} tài liệu giáo trình lộ trình chính thức uy tín bài tập thực hành"
+    raw_search = execute_resource_search(search_query, max_results=5)
 
     architect_prompt = f"""Bạn là Trưởng Kiến Trúc Sư Chiến Lược (AI Roadmap & Resource Architect) của hệ thống Mavis.
-Nhiệm vụ: Chuyên trách GIAI ĐOẠN 1 — Phân rã lộ trình khép kín và thẩm định tài nguyên cho mục tiêu:
+Nhiệm vụ: Chuyên trách GIAI ĐOẠN 1 — Phân rã lộ trình khép kín 4 tầng (Yearly -> Quarterly -> Monthly -> Weekly) kết hợp cơ chế Quản Trị Năng Lượng & Chống Quá Tải (Burnout Shield) và Gói tài liệu 1-Click cho mục tiêu:
 - Tên mục tiêu: {goal_title}
 - Phân loại: {target_goal.get('category', 'Học tập')}
 - Mức ưu tiên hiện tại: {target_goal.get('priority', 'P2 - High')}
@@ -3083,21 +3140,32 @@ Nhiệm vụ: Chuyên trách GIAI ĐOẠN 1 — Phân rã lộ trình khép kín
 - Trạng thái hiện tại của breakdown:
 {json.dumps(current_bd, ensure_ascii=False, indent=2)}
 
-TÀI NGUYÊN THỰC TẾ TÌM KIẾM ĐƯỢC:
+KHO TÀI LIỆU THỰC TẾ TÌM KIẾM ĐƯỢC (BẮT BUỘC ưu tiên trích xuất link URL thực tế này vào Gói tài liệu 1-Click):
 {json.dumps(raw_search, ensure_ascii=False, indent=2)}
 
 YÊU CẦU CỦA NGƯỜI DÙNG:
 "{user_message}"
 
-CHỈ THỊ KIẾN TRÚC:
+CHỈ THỊ KIẾN TRÚC & QUẢN TRỊ NĂNG LƯỢNG (BURNOUT SHIELD) BẮT BUỘC:
 1. Nếu người dùng yêu cầu chỉnh sửa giờ giấc, độ ưu tiên hoặc quỹ giờ, hãy cập nhật vào updated_preferred_time / updated_priority / updated_daily_hours.
 2. Xây dựng phân cấp chi tiết khép kín 4 tầng:
    - yearly: Tầm nhìn chiến lược 1 năm.
    - quarterly: Phân kỳ các Quý (quarter, focus, target_outcome).
    - monthly: Phân rã từng Tháng (month, milestone, resources).
-   - weekly: Kế hoạch hành động từng Tuần (week, milestone, action_items, estimated_hours, resources).
-   - resources: 2-3 tài liệu, giáo trình hoặc công cụ chuẩn mực nhất kèm link URL thật.
-3. Xuất ra đầy đủ dữ liệu có cấu trúc để hệ thống lưu trực tiếp vào MongoDB goals.breakdown.
+   - weekly: Kế hoạch hành động từng Tuần (week, milestone, tasks, action_items, estimated_hours, resources).
+3. ĐẶC BIỆT — BẮT BUỘC GẮN ĐỦ 3 THUỘC TÍNH CHO MỖI TASK TRONG TUẦN (WeeklyTaskItem):
+   - Nhãn độ nặng não (energy_level):
+     * '🔴 Deep Work': Tập trung nhận thức cao độ, học kiến thức mới/khó, giải đề thi chuẩn, lập trình, viết luận. Khung giờ vàng 08:00 - 10:00 sáng.
+     * '🟡 Shallow Work': Ôn tập nhẹ nhàng, luyện phát âm, flashcard từ vựng, dọn dẹp ghi chú, xem video bài giảng.
+     * '🟢 Recharge': Vận động thể chất, đi bộ, giãn cơ, nghe podcast thụ động, phục hồi nhận thức.
+   - Gói tài liệu 1-Click:
+     * resource_title: Tên tài liệu cụ thể của task đó.
+     * resource_url: Đường link chính thức uy tín dẫn thẳng tới tài liệu (lấy từ kho tài liệu tìm kiếm ở trên hoặc link chuẩn).
+   - Tiêu chí hoàn thành (definition_of_done - DoD):
+     * Định nghĩa cụ thể, rõ ràng, có thể đo lường được để nghiệm thu buổi học/làm (VD: 'Giải xong 40 câu Listening Cam 18, đạt tối thiểu 30 câu đúng và phân tích lý do sai').
+4. NGUYÊN TẮC BURNOUT SHIELD: Không xếp toàn bộ là task '🔴 Deep Work' trong một tuần. Bắt buộc có sự cân bằng giữa '🔴 Deep Work', '🟡 Shallow Work' và '🟢 Recharge' để chống kiệt sức nhận thức.
+5. resources: 2-3 tài liệu, giáo trình hoặc công cụ chuẩn mực nhất kèm link URL thật.
+6. Xuất ra đầy đủ dữ liệu có cấu trúc để hệ thống lưu trực tiếp vào MongoDB goals.breakdown.
 """
 
     try:
@@ -3112,7 +3180,53 @@ CHỈ THỊ KIẾN TRÚC:
         )
     except Exception as e:
         print(f"Lỗi invoke trong architect_chat: {e}")
-        # Fallback an toàn
+        # Fallback an toàn với đầy đủ nhãn năng lượng, 1-Click resource, và DoD
+        sample_tasks_w1 = [
+            WeeklyTaskItem(
+                task_name=f"Học lý thuyết nền tảng & kỹ năng cốt lõi cho {goal_title}",
+                energy_level="🔴 Deep Work",
+                resource_title=f"Giáo trình chuẩn mực {goal_title}",
+                resource_url="https://cambridgeenglish.org",
+                definition_of_done="Hoàn thành đọc 20 trang giáo trình và ghi chú tóm tắt 5 nguyên lý cốt lõi.",
+            ),
+            WeeklyTaskItem(
+                task_name="Học từ vựng & thuật ngữ chuyên ngành qua Flashcard",
+                energy_level="🟡 Shallow Work",
+                resource_title="Kho thuật ngữ & từ vựng trích xuất",
+                resource_url="https://quizlet.com",
+                definition_of_done="Ghi nhớ 30 từ vựng mới và vượt qua bài test ôn tập đạt 90%.",
+            ),
+            WeeklyTaskItem(
+                task_name="Đi bộ 30 phút kết hợp nghe Podcast thụ động",
+                energy_level="🟢 Recharge",
+                resource_title="Kênh Podcast thực tế chất lượng cao",
+                resource_url="https://spotify.com",
+                definition_of_done="Đi bộ đạt 4.000 bước và nghe trọn vẹn 1 tập podcast chuyên đề.",
+            ),
+        ]
+        sample_tasks_w2 = [
+            WeeklyTaskItem(
+                task_name=f"Giải bộ đề thực hành số 1 cho {goal_title}",
+                energy_level="🔴 Deep Work",
+                resource_title=f"Bộ đề thi thử chuẩn quốc tế {goal_title}",
+                resource_url="https://cambridgeenglish.org",
+                definition_of_done="Bấm giờ chuẩn điều kiện thi, hoàn thành 100% đề và phân tích chi tiết các lỗi sai.",
+            ),
+            WeeklyTaskItem(
+                task_name="Phân loại lỗi sai & hệ thống hóa công thức",
+                energy_level="🟡 Shallow Work",
+                resource_title="Sổ tay tối ưu lỗi sai (Error Log)",
+                resource_url="https://notion.so",
+                definition_of_done="Nhập toàn bộ các câu sai vào Error Log kèm giải thích cách khắc phục.",
+            ),
+            WeeklyTaskItem(
+                task_name="Giãn cơ và nghỉ ngơi hồi phục nhận thức",
+                energy_level="🟢 Recharge",
+                resource_title="Hướng dẫn phục hồi năng lượng não bộ",
+                resource_url="https://youtube.com",
+                definition_of_done="Thực hiện 20 phút giãn cơ nhẹ nhàng và ngủ đủ giấc.",
+            ),
+        ]
         result = ArchitectGoalBreakdown(
             yearly=f"Chinh phục toàn diện {goal_title}",
             quarterly=[
@@ -3125,8 +3239,20 @@ CHỈ THỊ KIẾN TRÚC:
                 MonthlyMilestoneItem(month="Tháng 3", milestone="Tổng ôn và thi thử chuẩn điều kiện", resources="Mock tests chính thức"),
             ],
             weekly=[
-                WeeklyMilestoneItem(week="Tuần 1", milestone="Đánh giá năng lực và học module mở đầu", action_items=["Học lý thuyết chương 1", "Làm bài tập vận dụng cơ bản"], estimated_hours=7.0),
-                WeeklyMilestoneItem(week="Tuần 2", milestone="Nâng cao kỹ năng phân tích và phản xạ", action_items=["Giải bài tập chương 2", "Review lỗi sai chi tiết"], estimated_hours=7.0),
+                WeeklyMilestoneItem(
+                    week="Tuần 1",
+                    milestone="Đánh giá năng lực và học module mở đầu",
+                    tasks=sample_tasks_w1,
+                    action_items=[f"[{t.energy_level}] {t.task_name} — DoD: {t.definition_of_done}" for t in sample_tasks_w1],
+                    estimated_hours=7.0,
+                ),
+                WeeklyMilestoneItem(
+                    week="Tuần 2",
+                    milestone="Nâng cao kỹ năng phân tích và phản xạ",
+                    tasks=sample_tasks_w2,
+                    action_items=[f"[{t.energy_level}] {t.task_name} — DoD: {t.definition_of_done}" for t in sample_tasks_w2],
+                    estimated_hours=7.0,
+                ),
             ],
             resources=[
                 ResourceItemDetail(
@@ -3136,15 +3262,25 @@ CHỈ THỊ KIẾN TRÚC:
                     how_to_use="Học đều đặn theo khung giờ vàng đã thiết lập.",
                 )
             ],
-            architect_response=f"Tôi đã phân rã toàn diện lộ trình 4 tầng (Năm -> Quý -> Tháng -> Tuần) kèm tài liệu thực tế cho mục tiêu '{goal_title}'. Trạng thái mục tiêu đã được kích hoạt (Active) và sẵn sàng để xếp lịch tại Giai đoạn 2!",
+            architect_response=f"Tôi đã phân rã toàn diện lộ trình 4 tầng (Năm -> Quý -> Tháng -> Tuần) kèm nhãn năng lượng (🔴 Deep Work, 🟡 Shallow Work, 🟢 Recharge), Gói tài liệu 1-Click và Tiêu chí hoàn thành (DoD) cho mục tiêu '{goal_title}'. Trạng thái mục tiêu đã kích hoạt và sẵn sàng thực thi!",
         )
 
     # Cập nhật mục tiêu và lưu vào MongoDB Atlas
+    weekly_dicts = []
+    for w in result.weekly:
+        w_dict = w.model_dump()
+        if not w_dict.get("action_items") and w_dict.get("tasks"):
+            w_dict["action_items"] = [
+                f"[{t.get('energy_level', '🔴 Deep Work')}] {t.get('task_name')} — DoD: {t.get('definition_of_done', 'Hoàn thành')}"
+                for t in w_dict["tasks"]
+            ]
+        weekly_dicts.append(w_dict)
+
     updated_bd = {
         "yearly": result.yearly,
         "quarterly": [q.model_dump() for q in result.quarterly],
         "monthly": [m.model_dump() for m in result.monthly],
-        "weekly": [w.model_dump() for w in result.weekly],
+        "weekly": weekly_dicts,
         "resources": [r.model_dump() for r in result.resources],
     }
     target_goal["breakdown"] = updated_bd

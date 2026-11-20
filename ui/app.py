@@ -1187,17 +1187,22 @@ with tab_ceo:
         with m2:
             st.metric("Đã Kích Hoạt (Active)", f"{len(active_goals)} mục tiêu")
         with m3:
-            st.metric("Quỹ Giờ Deep Work", f"{total_active_hours:.1f}h / 5.5h")
+            st.metric("Quỹ Giờ Active / Ngưỡng An Toàn", f"{total_active_hours:.1f}h / 8.0h")
 
-        if total_all_hours > 5.5:
+        if total_all_hours > 8.0:
             st.warning(
-                f"⚠️ **Cảnh báo quá tải ({total_all_hours:.1f}h/ngày):** Vượt ngưỡng an toàn 5.5h/ngày. "
-                "CEO Coach khuyến nghị hạ tải hoặc tạm hoãn mục tiêu ít ưu tiên để bảo vệ nhịp sinh học!"
+                f"⚠️ **Cơ chế Burnout Shield (Lá Chắn Quá Tải):** Tổng giờ cam kết ({total_all_hours:.1f}h/ngày) vượt ngưỡng an toàn 8.0h/ngày hoặc có nguy cơ dồn quá nhiều Deep Work. "
+                "CEO Coach cảnh báo rủi ro kiệt sức và khuyến nghị tạm dừng (⏸️ Paused) bớt 1 mục tiêu cũ trong Giai đoạn 1 trước khi kích hoạt mục tiêu mới!"
+            )
+        elif total_active_hours > 8.0:
+            st.error(
+                f"🚨 **Nguy cơ kiệt sức (Burnout Risk):** Bạn đang cam kết `{total_active_hours:.1f}h/ngày` trên các mục tiêu Active (> 8h/ngày). "
+                "Vui lòng tạm dừng ('paused') bớt mục tiêu cũ để bảo vệ năng lượng não bộ!"
             )
         else:
             st.success(
-                f"🔋 **Nhịp sinh học tối ưu:** Quỹ giờ cam kết `{total_active_hours:.1f}h/ngày` "
-                "nằm trong vùng năng lượng đỉnh cao an toàn."
+                f"🛡️ **Burnout Shield An Toàn:** Quỹ giờ cam kết `{total_active_hours:.1f}h/ngày` "
+                "(nằm trong ngưỡng an toàn 8.0h/ngày) đảm bảo nhịp sinh học và năng lượng bền vững."
             )
 
         st.markdown("---")
@@ -1492,11 +1497,30 @@ with tab_arch:
                 for w_idx, w in enumerate(weekly_items, 1):
                     w_dict = safe_dict(w)
                     w_title = w_dict.get("milestone", f"Cột mốc Tuần {w_idx}")
+                    w_tasks = safe_list(w_dict.get("tasks", []))
                     w_actions = safe_list(w_dict.get("action_items", []))
                     w_hrs = w_dict.get("estimated_hours", 7.0)
                     with st.expander(f"📌 {w_dict.get('week', f'Tuần {w_idx}')}: {w_title} ({w_hrs}h)", expanded=(w_idx == 1)):
-                        for act in w_actions:
-                            st.markdown(f"- ▫️ {act}")
+                        if w_tasks:
+                            for t in w_tasks:
+                                t_dict = safe_dict(t)
+                                t_name = t_dict.get("task_name", "Nhiệm vụ")
+                                t_energy = t_dict.get("energy_level", "🔴 Deep Work")
+                                t_dod = t_dict.get("definition_of_done", "")
+                                t_res_title = t_dict.get("resource_title", "")
+                                t_res_url = t_dict.get("resource_url", "")
+
+                                with st.container(border=True):
+                                    st.markdown(f"**{t_energy}** &nbsp; **{t_name}**")
+                                    if t_dod:
+                                        st.caption(f"🏁 *Tiêu chí hoàn thành (DoD):* {t_dod}")
+                                    if t_res_title and t_res_url:
+                                        st.caption(f"📦 *Gói tài liệu 1-Click:* [{t_res_title}]({t_res_url})")
+                                    elif t_res_url:
+                                        st.caption(f"📦 *Gói tài liệu 1-Click:* [Xem tài liệu thực tế]({t_res_url})")
+                        elif w_actions:
+                            for act in w_actions:
+                                st.markdown(f"- ▫️ {act}")
             else:
                 st.caption("*(Chưa có kế hoạch tuần)*")
 
