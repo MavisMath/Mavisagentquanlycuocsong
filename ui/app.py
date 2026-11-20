@@ -59,8 +59,31 @@ except Exception as _graph_import_err:
 
     mavis_agent = FallbackAgent()
 
-from memory.goals import load_goals, CATEGORY_LABELS, load_historical_insights
+from memory.goals import (
+    load_goals,
+    save_goals,
+    add_goal,
+    update_goal,
+    CATEGORY_LABELS,
+    load_historical_insights,
+    save_historical_insights,
+    load_user_profile,
+    save_user_profile,
+    load_user_goal_profile,
+    save_user_goal_profile,
+    load_user_resources,
+    save_user_resources,
+    load_user_roadmap,
+    save_user_roadmap,
+    load_categorized_goals,
+    save_categorized_goals,
+)
 from memory.auth import get_authenticator, register_user
+
+try:
+    from agents.brain import chat_node
+except Exception:
+    chat_node = None
 
 
 def safe_dict(val: Any) -> Dict[str, Any]:
@@ -234,8 +257,7 @@ def load_categorized_goals(username: str = "mavis") -> Dict[str, Any]:
 
     # Fallback qua memory.goals
     try:
-        from memory.goals import load_categorized_goals as _m_load
-        return _m_load(username=username)
+        return load_categorized_goals(username=username)
     except Exception:
         return {}
 
@@ -460,7 +482,6 @@ if awaiting_confirmation_key not in st.session_state:
 profile_key = f"profile_{current_username}"
 if profile_key not in st.session_state:
     try:
-        from memory.goals import load_user_profile
         saved_prof = load_user_profile(current_username)
     except Exception:
         saved_prof = {}
@@ -490,17 +511,14 @@ if thread_ver_key not in st.session_state:
 
 goal_profile_key = f"goal_profile_{current_username}"
 if goal_profile_key not in st.session_state:
-    from memory.goals import load_user_goal_profile
     st.session_state[goal_profile_key] = load_user_goal_profile(current_username)
 
 resources_key = f"resources_{current_username}"
 if resources_key not in st.session_state:
-    from memory.goals import load_user_resources
     st.session_state[resources_key] = load_user_resources(current_username)
 
 roadmap_key = f"roadmap_{current_username}"
 if roadmap_key not in st.session_state:
-    from memory.goals import load_user_roadmap
     st.session_state[roadmap_key] = load_user_roadmap(current_username)
 
 # Khởi tạo graph = build_graph() trong st.session_state duy nhất 1 lần
@@ -971,11 +989,11 @@ if user_input := st.chat_input("Nhập mục tiêu hoặc trao đổi cùng Coac
         "profile": safe_dict(st.session_state.get(goal_profile_key) or load_user_goal_profile(active_username)),
         "resources": safe_list(st.session_state.get(resources_key) or load_user_resources(active_username)),
         "roadmap": safe_dict(st.session_state.get(roadmap_key) or load_user_roadmap(active_username)),
-        "current_energy_level": st.session_state[energy_key],
-        "detected_emotion": st.session_state[emotion_key],
-        "intent": st.session_state[intent_key],
-        "plan": st.session_state[plan_key],
-        "user_profile": st.session_state[profile_key],
+        "current_energy_level": st.session_state.get(energy_key, "high"),
+        "detected_emotion": st.session_state.get(emotion_key, "neutral"),
+        "intent": st.session_state.get(intent_key, "chat"),
+        "plan": st.session_state.get(plan_key, []),
+        "user_profile": st.session_state.get(profile_key, {}),
         "coaching_stage": st.session_state.get(stage_key, "interviewing"),
         "user_obstacles": st.session_state.get(obstacles_key, []),
         "status": st.session_state.get(f"status_{active_username}", "interviewing"),
@@ -1027,10 +1045,12 @@ if user_input := st.chat_input("Nhập mục tiêu hoặc trao đổi cùng Coac
                                 last_reply = c
                                 break
                     if not last_reply:
-                        from agents.brain import chat_node
-                        input_state["username"] = active_username
-                        chat_fallback = chat_node(input_state)
-                        last_reply = extract_text_from_content(chat_fallback["messages"][-1].content)
+                        if chat_node is not None:
+                            input_state["username"] = active_username
+                            chat_fallback = chat_node(input_state)
+                            last_reply = extract_text_from_content(chat_fallback["messages"][-1].content)
+                        else:
+                            last_reply = "Chào bạn! Tôi đã ghi nhận mục tiêu của bạn và đang thiết lập lộ trình."
                     combined_reply = last_reply
 
                 st.markdown(combined_reply)

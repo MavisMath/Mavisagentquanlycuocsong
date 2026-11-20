@@ -2,6 +2,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import HumanMessage
 from agents.state import CoachState, AgentState
+from memory.goals import load_user_goal_profile
 from agents.brain import (
     profiler_node,
     research_node,
@@ -53,7 +54,6 @@ def route_entry(state: CoachState) -> str:
     profile = state.get("profile") or {}
     if not profile or not profile.get("goal_name"):
         try:
-            from memory.goals import load_user_goal_profile
             saved = load_user_goal_profile(username)
             if saved and isinstance(saved, dict) and saved.get("goal_name"):
                 profile = saved

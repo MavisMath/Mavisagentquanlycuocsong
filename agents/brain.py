@@ -191,10 +191,10 @@ def invoke_llm_resilient(
         raise ValueError("Chưa tìm thấy GEMINI_API_KEY trong file .env hoặc biến môi trường.")
 
     models_to_try = [
+        "gemini-3.1-flash-lite",
         preferred_model,
         "gemini-3.8-flash",
         "gemini-3.5-flash-lite",
-        "gemini-3.1-flash-lite",
     ]
     seen = set()
     candidate_models = []
@@ -210,6 +210,7 @@ def invoke_llm_resilient(
                 model=model_name,
                 google_api_key=current_key,
                 temperature=temperature,
+                timeout=20,
             )
             if structured_schema is not None:
                 structured_llm = llm.with_structured_output(structured_schema)
