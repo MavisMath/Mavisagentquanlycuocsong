@@ -39,6 +39,9 @@ __all__ = [
     "save_retrospective_logs",
     "append_retrospective_log",
     "get_user_state_full",
+    "update_user_goal_status",
+    "update_user_goal_details",
+    "delete_user_goal",
 ]
 
 LEDGER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "goals_ledger.json")
@@ -356,11 +359,11 @@ def standardize_goal_schema(g: Dict[str, Any]) -> Dict[str, Any]:
     except (ValueError, TypeError):
         clean["duration_days"] = 90
 
-    # 4. Trạng thái: 'evaluating' | 'active' | 'completed'
+    # 4. Trạng thái: 'evaluating' | 'active' | 'completed' | 'paused'
     st = clean.get("status")
-    if not st or st not in ["evaluating", "active", "completed"]:
+    if not st or st not in ["evaluating", "active", "completed", "paused"]:
         clean["status"] = "active" if clean.get("is_complete") else "evaluating"
-    clean["is_complete"] = True if clean["status"] in ["active", "completed"] else clean.get("is_complete", False)
+    clean["is_complete"] = True if clean["status"] == "completed" else clean.get("is_complete", False)
 
     # 5. Phân cấp chi tiết (breakdown: yearly -> quarterly -> monthly -> weekly kèm resources)
     bd = clean.get("breakdown")
@@ -408,6 +411,9 @@ def save_user_goals(goals: List[Dict[str, Any]], username: str = "mavis") -> boo
     all_data[username]["goals"] = clean_goals
     if clean_goals:
         all_data[username]["goal_profile"] = clean_goals[0]
+    else:
+        all_data[username]["goal_profile"] = {}
+        all_data[username]["profile"] = {}
 
     # Đồng bộ sang user_profile để tương thích với các view khác
     if "user_profile" not in all_data[username] or not isinstance(all_data[username]["user_profile"], dict):
@@ -420,6 +426,9 @@ def save_user_goals(goals: List[Dict[str, Any]], username: str = "mavis") -> boo
         if all(g.get("is_complete") for g in clean_goals):
             all_data[username]["user_profile"]["is_onboarded"] = True
             all_data[username]["user_profile"]["coaching_stage"] = "action"
+    else:
+        all_data[username]["user_profile"]["current_situation"] = "Chưa có mục tiêu"
+        all_data[username]["user_profile"]["time_constraints"] = "0h/ngày"
     return save_all_users_data(all_data)
 
 
@@ -431,9 +440,8 @@ def load_user_goals(username: str = "mavis") -> List[Dict[str, Any]]:
     if is_mongodb_available():
         state = db_get_user_state(username)
         if state:
-            goals = state.get("goals")
-            if isinstance(goals, list) and len(goals) > 0:
-                return [standardize_goal_schema(g) for g in goals]
+            if "goals" in state and isinstance(state["goals"], list):
+                return [standardize_goal_schema(g) for g in state["goals"]]
             p = state.get("profile") or state.get("goal_profile")
             if p and isinstance(p, dict) and (p.get("goal_name") or p.get("title")):
                 return [standardize_goal_schema(p)]
@@ -442,14 +450,128 @@ def load_user_goals(username: str = "mavis") -> List[Dict[str, Any]]:
     all_data = load_all_users_data()
     user_entry = all_data.get(username, {})
     if isinstance(user_entry, dict):
-        goals = user_entry.get("goals")
-        if isinstance(goals, list) and len(goals) > 0:
-            return [standardize_goal_schema(g) for g in goals]
+        if "goals" in user_entry and isinstance(user_entry["goals"], list):
+            return [standardize_goal_schema(g) for g in user_entry["goals"]]
         p = user_entry.get("goal_profile", {})
         if isinstance(p, dict) and (p.get("goal_name") or p.get("title")):
             return [standardize_goal_schema(p)]
 
     return []
+
+
+def update_user_goal_status(goal_id: str, new_status: str, username: str = "mavis") -> bool:
+    """
+    Cập nhật trạng thái ('active', 'paused', 'completed', 'evaluating') của mục tiêu.
+    Đồng bộ lưu vào MongoDB Atlas và goals_ledger.json.
+    """
+    username = (username or DEFAULT_USER).strip().lower()
+    goals = load_user_goals(username)
+    if not goals:
+        return False
+
+    updated = False
+    gid_clean = str(goal_id).strip()
+    for g in goals:
+        if str(g.get("id", "")).strip() == gid_clean or str(g.get("title", "")).strip() == gid_clean or str(g.get("goal_name", "")).strip() == gid_clean:
+            g["status"] = new_status
+            if new_status == "completed":
+                g["is_complete"] = True
+            elif new_status in ["active", "paused", "evaluating"]:
+                g["is_complete"] = False
+            updated = True
+            break
+
+    if updated:
+        save_user_goals(goals, username=username)
+    return updated
+
+
+def update_user_goal_details(goal_id: str, updates: Dict[str, Any], username: str = "mavis") -> bool:
+    """
+    Cập nhật thông tin chi tiết (title, duration_days, daily_hours, preferred_time, priority) của mục tiêu.
+    Tự động cập nhật đồng bộ sang master_schedule nếu tiêu đề mục tiêu thay đổi.
+    """
+    username = (username or DEFAULT_USER).strip().lower()
+    goals = load_user_goals(username)
+    if not goals:
+        return False
+
+    updated = False
+    old_title = ""
+    new_title = ""
+    gid_clean = str(goal_id).strip()
+
+    for g in goals:
+        if str(g.get("id", "")).strip() == gid_clean or str(g.get("title", "")).strip() == gid_clean or str(g.get("goal_name", "")).strip() == gid_clean:
+            old_title = g.get("title") or g.get("goal_name") or ""
+            for k, v in updates.items():
+                if v is not None:
+                    g[k] = v
+                    if k == "title":
+                        g["goal_name"] = v
+                    elif k == "goal_name":
+                        g["title"] = v
+                    elif k == "preferred_time":
+                        g["preferred_slots"] = v
+                    elif k == "preferred_slots":
+                        g["preferred_time"] = v
+            new_title = g.get("title") or g.get("goal_name") or ""
+            updated = True
+            break
+
+    if updated:
+        save_user_goals(goals, username=username)
+        if old_title and new_title and old_title != new_title:
+            ms = load_master_schedule(username)
+            if ms:
+                ms_updated = False
+                for item in ms:
+                    if isinstance(item, dict):
+                        if item.get("goal_id") == gid_clean or item.get("goal_title") == old_title:
+                            item["goal_title"] = new_title
+                            ms_updated = True
+                if ms_updated:
+                    save_master_schedule(ms, username=username)
+    return updated
+
+
+def delete_user_goal(goal_id: str, username: str = "mavis") -> bool:
+    """
+    Xóa vĩnh viễn mục tiêu khỏi danh sách goals và dọn sạch các task liên quan trong master_schedule.
+    """
+    username = (username or DEFAULT_USER).strip().lower()
+    goals = load_user_goals(username)
+    if not goals:
+        return False
+
+    gid_clean = str(goal_id).strip()
+    target_goal = None
+    remaining_goals = []
+
+    for g in goals:
+        if str(g.get("id", "")).strip() == gid_clean or str(g.get("title", "")).strip() == gid_clean or str(g.get("goal_name", "")).strip() == gid_clean:
+            target_goal = g
+        else:
+            remaining_goals.append(g)
+
+    if target_goal is None:
+        return False
+
+    # 1. Lưu lại danh sách mục tiêu mới
+    save_user_goals(remaining_goals, username=username)
+
+    # 2. Xóa các lịch trình liên quan trong master_schedule
+    deleted_title = target_goal.get("title") or target_goal.get("goal_name") or ""
+    deleted_id = target_goal.get("id") or gid_clean
+    ms = load_master_schedule(username)
+    if ms:
+        clean_ms = [
+            t for t in ms
+            if isinstance(t, dict) and str(t.get("goal_id", "")) != str(deleted_id) and str(t.get("goal_id", "")) != gid_clean and t.get("goal_title") != deleted_title
+        ]
+        save_master_schedule(clean_ms, username=username)
+
+    return True
 
 
 def save_user_goal_profile(profile: Dict[str, Any], username: str = "mavis") -> bool:

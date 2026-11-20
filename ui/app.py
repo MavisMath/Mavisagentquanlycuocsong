@@ -110,6 +110,9 @@ try:
     save_retrospective_logs = getattr(mg, "save_retrospective_logs")
     append_retrospective_log = getattr(mg, "append_retrospective_log")
     get_user_state_full = getattr(mg, "get_user_state_full")
+    update_user_goal_status = getattr(mg, "update_user_goal_status")
+    update_user_goal_details = getattr(mg, "update_user_goal_details")
+    delete_user_goal = getattr(mg, "delete_user_goal")
 except Exception as _goals_import_err:
     import traceback
     st.error(f"⚠️ Cảnh báo nạp module `memory.goals`: {_goals_import_err}")
@@ -142,6 +145,9 @@ except Exception as _goals_import_err:
     def save_retrospective_logs(*args, **kwargs): return True
     def append_retrospective_log(*args, **kwargs): return True
     def get_user_state_full(*args, **kwargs): return {}
+    def update_user_goal_status(*args, **kwargs): return True
+    def update_user_goal_details(*args, **kwargs): return True
+    def delete_user_goal(*args, **kwargs): return True
 
 # Nạp an toàn module memory.auth với importlib.reload
 try:
@@ -1304,33 +1310,150 @@ with tab_arch:
 
         if not user_goals:
             st.info("💡 Chưa có mục tiêu nào trong hệ thống. Hãy trao đổi với CEO Coach tại Tab 1 để thẩm định và kích hoạt mục tiêu đầu tiên!")
+            selected_goal = None
         else:
-            goal_titles = [str(g.get("title") or g.get("goal_name", f"Mục tiêu {i+1}")) for i, g in enumerate(user_goals)]
-            selected_goal_name = st.selectbox(
-                "🎯 Chọn mục tiêu để xem & tinh chỉnh cấu trúc lộ trình:",
-                options=goal_titles,
-                index=0,
-                key=f"arch_goal_select_{current_username}",
-            )
+            selected_goal_id_key = f"selected_goal_id_{current_username}"
+            all_gids = [str(g.get("id")) for g in user_goals if g.get("id")]
+            if selected_goal_id_key not in st.session_state or st.session_state[selected_goal_id_key] not in all_gids:
+                st.session_state[selected_goal_id_key] = all_gids[0] if all_gids else (user_goals[0].get("id") or "g0")
 
+            current_sel_id = str(st.session_state[selected_goal_id_key])
+
+            # ------------------------------------------------------------------
+            # KHU VỰC: 🗂️ Quản Lý Danh Sách Mục Tiêu (Goal Manager)
+            # ------------------------------------------------------------------
+            st.markdown("#### 🗂️ Quản Lý Danh Sách Mục Tiêu (Goal Manager)")
+            st.caption(f"Đang quản lý **{len(user_goals)}** mục tiêu • Bấm '🎯 Xem lộ trình' để đồng bộ bảng Phân rã 4 tầng & Architect Bot")
+
+            for i, g in enumerate(user_goals):
+                gid = str(g.get("id") or f"goal_{i}")
+                g_title = str(g.get("title") or g.get("goal_name", f"Mục tiêu {i+1}"))
+                g_status = str(g.get("status", "active")).lower()
+                g_prio = str(g.get("priority", "Cao (P1)"))
+                g_hours = g.get("daily_hours", 1.5)
+                g_days = g.get("duration_days", 90)
+                g_slot = str(g.get("preferred_time") or g.get("preferred_slots", "08:00 - 10:00 Sáng"))
+                is_selected = (gid == current_sel_id)
+
+                # Huy hiệu Trạng thái
+                if g_status == "active":
+                    status_badge = "🟢 :green[**Đang chạy**]"
+                elif g_status == "paused":
+                    status_badge = "⏸️ :orange[**Tạm dừng**]"
+                elif g_status == "completed":
+                    status_badge = "✅ :blue[**Hoàn thành**]"
+                else:
+                    status_badge = "🔍 :violet[**Đang thẩm định**]"
+
+                # Huy hiệu Mức ưu tiên
+                prio_lower = g_prio.lower()
+                if "cao" in prio_lower or "p1" in prio_lower:
+                    prio_badge = "🔥 :red[Cao (P1)]"
+                elif "trung" in prio_lower or "p2" in prio_lower:
+                    prio_badge = "⚡ :orange[Trung bình (P2)]"
+                else:
+                    prio_badge = "🌿 :gray[Thấp (P3)]"
+
+                with st.container(border=True):
+                    # Hàng 1: Tiêu đề + Huy hiệu + Nút chọn lộ trình
+                    col_card_info, col_card_sel = st.columns([0.70, 0.30])
+                    with col_card_info:
+                        if is_selected:
+                            st.markdown(f"**🎯 {g_title}** &nbsp; {status_badge} &nbsp;|&nbsp; {prio_badge}")
+                        else:
+                            st.markdown(f"**{g_title}** &nbsp; {status_badge} &nbsp;|&nbsp; {prio_badge}")
+                        st.caption(f"⏱️ **{g_hours}h/ngày** • ⏰ **{g_slot}** • 📅 **{g_days} ngày**")
+                    with col_card_sel:
+                        if is_selected:
+                            st.button("✅ Đang xem", key=f"is_sel_{gid}_{i}", disabled=True, use_container_width=True)
+                        else:
+                            if st.button("🎯 Xem lộ trình", key=f"sel_goal_{gid}_{i}", use_container_width=True):
+                                st.session_state[selected_goal_id_key] = gid
+                                st.rerun()
+
+                    # Hàng 2: 3 nút thao tác trực tiếp (Tạm dừng/Tiếp tục, Sửa nhanh, Xóa)
+                    col_b1, col_b2, col_b3 = st.columns([0.34, 0.36, 0.30])
+
+                    # Nút 1: ⏸️ Tạm dừng / ▶️ Tiếp tục
+                    with col_b1:
+                        if g_status == "paused":
+                            if st.button("▶️ Tiếp tục", key=f"resume_btn_{gid}_{i}", use_container_width=True):
+                                update_user_goal_status(gid, "active", current_username)
+                                st.session_state[goals_key] = load_user_goals(current_username)
+                                st.toast(f"Đã tiếp tục mục tiêu '{g_title}'!")
+                                st.rerun()
+                        else:
+                            if st.button("⏸️ Tạm dừng", key=f"pause_btn_{gid}_{i}", use_container_width=True):
+                                update_user_goal_status(gid, "paused", current_username)
+                                st.session_state[goals_key] = load_user_goals(current_username)
+                                st.toast(f"Đã tạm dừng mục tiêu '{g_title}'. Lịch trình Giai đoạn 2 đã được giải phóng!")
+                                st.rerun()
+
+                    # Nút 2: ✏️ Sửa nhanh
+                    with col_b2:
+                        with st.popover("✏️ Sửa nhanh", use_container_width=True):
+                            st.markdown(f"**Chỉnh sửa nhanh: {g_title}**")
+                            new_t = st.text_input("Tên mục tiêu:", value=g_title, key=f"ed_t_{gid}_{i}")
+                            c_e1, c_e2 = st.columns(2)
+                            new_d = c_e1.number_input("Số ngày:", min_value=1, max_value=365, value=int(g_days), key=f"ed_d_{gid}_{i}")
+                            new_h = c_e2.number_input("Giờ/ngày:", min_value=0.5, max_value=12.0, step=0.5, value=float(g_hours), key=f"ed_h_{gid}_{i}")
+                            c_e3, c_e4 = st.columns(2)
+                            prio_options = ["Cao (P1)", "Trung bình (P2)", "Thấp (P3)"]
+                            prio_idx = 0
+                            for p_i, p_opt in enumerate(prio_options):
+                                if p_opt.split()[0].lower() in g_prio.lower():
+                                    prio_idx = p_i
+                                    break
+                            new_p = c_e3.selectbox("Mức ưu tiên:", options=prio_options, index=prio_idx, key=f"ed_p_{gid}_{i}")
+                            new_slot = c_e4.text_input("Khung giờ:", value=g_slot, key=f"ed_s_{gid}_{i}")
+
+                            if st.button("💾 Lưu Cập Nhật", key=f"ed_save_{gid}_{i}", type="primary", use_container_width=True):
+                                update_user_goal_details(
+                                    goal_id=gid,
+                                    updates={
+                                        "title": new_t,
+                                        "goal_name": new_t,
+                                        "duration_days": new_d,
+                                        "daily_hours": new_h,
+                                        "priority": new_p,
+                                        "preferred_time": new_slot,
+                                        "preferred_slots": new_slot,
+                                    },
+                                    username=current_username,
+                                )
+                                st.session_state[goals_key] = load_user_goals(current_username)
+                                st.session_state[master_schedule_key] = load_master_schedule(current_username)
+                                st.toast("✅ Đã cập nhật mục tiêu thành công!")
+                                st.rerun()
+
+                    # Nút 3: 🗑️ Xóa có xác nhận
+                    with col_b3:
+                        with st.popover("🗑️ Xóa", use_container_width=True):
+                            st.warning(f"⚠️ Xác nhận xóa vĩnh viễn mục tiêu **'{g_title}'** cùng toàn bộ lịch trình liên quan trong Master Schedule?")
+                            if st.button("Xác nhận xóa vĩnh viễn", key=f"del_conf_{gid}_{i}", type="primary", use_container_width=True):
+                                delete_user_goal(gid, current_username)
+                                updated_goals = load_user_goals(current_username)
+                                st.session_state[goals_key] = updated_goals
+                                st.session_state[master_schedule_key] = load_master_schedule(current_username)
+                                if updated_goals:
+                                    st.session_state[selected_goal_id_key] = updated_goals[0].get("id")
+                                else:
+                                    st.session_state[selected_goal_id_key] = None
+                                st.toast(f"Đã xóa vĩnh viễn mục tiêu '{g_title}'!")
+                                st.rerun()
+
+            # ------------------------------------------------------------------
+            # PHÂN RÃ LỘ TRÌNH 4 TẦNG (ĐỒNG BỘ MỤC TIÊU ĐANG CHỌN)
+            # ------------------------------------------------------------------
             selected_goal = next(
-                (g for g in user_goals if str(g.get("title") or g.get("goal_name")) == selected_goal_name),
+                (g for g in user_goals if str(g.get("id")) == current_sel_id),
                 user_goals[0],
             )
+            selected_goal_name = selected_goal.get("title") or selected_goal.get("goal_name", "Mục tiêu")
             bd = safe_dict(selected_goal.get("breakdown"))
 
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                st.metric("Lĩnh Vực", selected_goal.get("category", "Học tập"))
-            with c2:
-                st.metric("Quỹ Thời Gian", f"{selected_goal.get('daily_hours', 1.5)}h/ngày")
-            with c3:
-                st.metric("Thời Hạn", f"{selected_goal.get('duration_days', 90)} ngày")
-            with c4:
-                st.metric("Khung Giờ", str(selected_goal.get("preferred_time") or selected_goal.get("preferred_slots", "08:00 - 10:00 Sáng"))[:14])
-
             st.markdown("---")
-            st.markdown("#### 🏛️ Phân Rã Lộ Trình 4 Tầng:")
+            st.markdown(f"#### 🏛️ Phân Rã Lộ Trình 4 Tầng: **{selected_goal_name}**")
 
             # Tầng 1: Năm
             yearly_vision = bd.get("yearly") or f"Chinh phục toàn diện {selected_goal_name}"
@@ -1395,7 +1518,8 @@ with tab_arch:
                 st.caption("*(Chưa có tài liệu. Chat với Architect Bot để tự động tìm kiếm bộ đề và giáo trình uy tín)*")
 
     with col_chat_arch:
-        st.markdown("#### 💬 Trò Chuyện Cùng Strategy Architect")
+        arch_title = f"💬 Trò Chuyện Cùng Strategy Architect: {selected_goal_name}" if ('selected_goal_name' in locals() and selected_goal_name) else "💬 Trò Chuyện Cùng Strategy Architect"
+        st.markdown(f"#### {arch_title}")
         st.caption("Thêm/bớt tài liệu • Đổi giờ học • Phân rã lại tuần hoặc tinh chỉnh độ ưu tiên")
 
         chat_container_arch = st.container(height=520)
@@ -1442,6 +1566,22 @@ with tab_sched:
 
     with col_dash_sched:
         ms = safe_list(st.session_state.get(master_schedule_key) or load_master_schedule(current_username))
+        user_goals_sched = safe_list(st.session_state.get(goals_key) or load_user_goals(current_username))
+
+        paused_goal_ids = set(str(g.get("id")) for g in user_goals_sched if str(g.get("status", "")).lower() == "paused")
+        paused_goal_titles = set(str(g.get("title") or g.get("goal_name")) for g in user_goals_sched if str(g.get("status", "")).lower() == "paused")
+
+        # Khi mục tiêu ở trạng thái paused, tạm thời không chiếm lịch ở Tab Giai đoạn 2
+        active_schedule = [
+            t for t in ms
+            if not (
+                (t.get("goal_id") and str(t.get("goal_id")) in paused_goal_ids) or
+                (t.get("goal_title") and str(t.get("goal_title")) in paused_goal_titles)
+            )
+        ]
+
+        if paused_goal_titles:
+            st.info(f"⏸️ **{len(paused_goal_titles)} mục tiêu đang tạm dừng:** {', '.join(paused_goal_titles)}. Các khung giờ tương ứng tạm thời không chiếm lịch.")
 
         mode = st.radio(
             "Chế độ hiển thị lịch:",
@@ -1450,12 +1590,12 @@ with tab_sched:
             key=f"sched_mode_{current_username}",
         )
 
-        filtered_schedule = ms
+        filtered_schedule = active_schedule
         if mode == "🎯 Xem Lịch Riêng Theo Từng Mục Tiêu":
-            unique_goals = list(set(t.get("goal_title", "Mục tiêu") for t in ms if t.get("goal_title")))
+            unique_goals = list(set(t.get("goal_title", "Mục tiêu") for t in active_schedule if t.get("goal_title")))
             if unique_goals:
                 chosen_g = st.selectbox("Chọn mục tiêu cụ thể:", options=unique_goals, key=f"sel_ms_goal_{current_username}")
-                filtered_schedule = [t for t in ms if t.get("goal_title") == chosen_g]
+                filtered_schedule = [t for t in active_schedule if t.get("goal_title") == chosen_g]
             else:
                 st.info("Chưa có mục tiêu nào trong lịch.")
 

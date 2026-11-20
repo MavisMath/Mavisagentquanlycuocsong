@@ -3214,7 +3214,7 @@ def scheduler_chat(
     goals = load_user_goals(username)
     active_goals = [g for g in goals if g.get("status") == "active"]
     if not active_goals:
-        active_goals = goals  # Fallback nếu chưa set active
+        active_goals = [g for g in goals if g.get("status") not in ("paused", "completed", "evaluating")]
 
     existing_schedule = load_master_schedule(username)
 
