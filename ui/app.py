@@ -82,6 +82,13 @@ from memory.goals import (
     save_user_roadmap,
     load_categorized_goals,
     save_categorized_goals,
+    load_master_schedule,
+    save_master_schedule,
+    update_master_schedule_task_status,
+    load_retrospective_logs,
+    save_retrospective_logs,
+    append_retrospective_log,
+    get_user_state_full,
 )
 from memory.auth import get_authenticator, register_user
 from memory.mongodb import (
@@ -92,9 +99,19 @@ from memory.mongodb import (
 )
 
 try:
-    from agents.brain import chat_node
+    from agents.brain import (
+        chat_node,
+        ceo_coach_chat,
+        architect_chat,
+        scheduler_chat,
+        retrospective_chat,
+    )
 except Exception:
     chat_node = None
+    ceo_coach_chat = None
+    architect_chat = None
+    scheduler_chat = None
+    retrospective_chat = None
 
 
 def safe_dict(val: Any) -> Dict[str, Any]:
@@ -214,6 +231,86 @@ def generate_ics_calendar(roadmap: Dict[str, Any], goal_name: str, preferred_slo
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
         "PRODID:-//Mavis Executive Life Coach//VN",
+        "CALSCALE:GREGORIAN",
+        *events,
+        "END:VCALENDAR",
+    ]
+    return "\r\n".join(ics_content)
+
+
+def generate_ics_from_master_schedule(schedule: List[Dict[str, Any]], username: str) -> str:
+    """Tạo file lịch chuẩn .ics (iCalendar) từ Master Schedule để import vào Google Calendar, Outlook, Apple Calendar."""
+    now = datetime.now()
+    now_str = now.strftime("%Y%m%d")
+    events = []
+
+    day_map = {
+        "thứ hai": 0, "thứ ba": 1, "thứ tư": 2, "thứ năm": 3,
+        "thứ sáu": 4, "thứ bảy": 5, "chủ nhật": 6,
+        "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+        "friday": 4, "saturday": 5, "sunday": 6,
+    }
+
+    for idx, item in enumerate(schedule, 1):
+        item_dict = safe_dict(item)
+        task_title = item_dict.get("task_detail", f"Task {idx}")
+        goal_title = item_dict.get("goal_title", "Mục tiêu")
+        slot = str(item_dict.get("time_slot", "08:00 - 10:00"))
+        date_str = str(item_dict.get("date", "Thứ Hai")).lower().strip()
+
+        target_weekday = day_map.get(date_str, 0)
+        curr_weekday = now.weekday()
+        days_ahead = (target_weekday - curr_weekday) % 7
+        if days_ahead == 0 and now.hour > 18:
+            days_ahead = 7
+        event_date = now + timedelta(days=days_ahead)
+        dt_prefix = event_date.strftime("%Y%m%d")
+
+        start_h, start_m = 8, 0
+        end_h, end_m = 10, 0
+        if "-" in slot:
+            try:
+                parts = slot.split("-")
+                p1 = parts[0].strip().split(":")
+                p2 = parts[1].strip().split(":")
+                start_h, start_m = int(p1[0]), int(p1[1])
+                end_h, end_m = int(p2[0]), int(p2[1])
+            except Exception:
+                pass
+
+        dt_start = f"{dt_prefix}T{start_h:02d}{start_m:02d}00"
+        dt_end = f"{dt_prefix}T{end_h:02d}{end_m:02d}00"
+        res_link = item_dict.get("resource_link", "")
+
+        events.extend([
+            "BEGIN:VEVENT",
+            f"UID:mavis_ms_{username}_{idx}_{dt_start}@maviscoach.ai",
+            f"DTSTAMP:{now_str}T000000Z",
+            f"DTSTART:{dt_start}",
+            f"DTEND:{dt_end}",
+            f"SUMMARY:🎯 [Mavis] {goal_title}: {task_title[:50]}",
+            f"DESCRIPTION:Mục tiêu: {goal_title}\\nNhiệm vụ: {task_title}\\nTài liệu: {res_link}",
+            "STATUS:CONFIRMED",
+            "END:VEVENT",
+        ])
+
+    if not events:
+        events.extend([
+            "BEGIN:VEVENT",
+            f"UID:mavis_ms_{username}_init@maviscoach.ai",
+            f"DTSTAMP:{now_str}T000000Z",
+            f"DTSTART:{now_str}T080000",
+            f"DTEND:{now_str}T100000",
+            "SUMMARY:🎯 [Mavis] Khởi động Master Schedule",
+            "DESCRIPTION:Lịch trình thực thi cá nhân hóa từ Mavis Coach",
+            "STATUS:CONFIRMED",
+            "END:VEVENT",
+        ])
+
+    ics_content = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Mavis Executive Life Coach//Master Schedule//VN",
         "CALSCALE:GREGORIAN",
         *events,
         "END:VCALENDAR",
@@ -541,6 +638,66 @@ roadmap_key = f"roadmap_{current_username}"
 if roadmap_key not in st.session_state:
     st.session_state[roadmap_key] = load_user_roadmap(current_username)
 
+# Khởi tạo 4 luồng Chatbot chuyên biệt & Dữ liệu đồng bộ real-time từ MongoDB
+chat_ceo_key = f"chat_ceo_{current_username}"
+if chat_ceo_key not in st.session_state:
+    st.session_state[chat_ceo_key] = [
+        {
+            "role": "assistant",
+            "content": (
+                f"Xin chào **{current_name}**! Tôi là **Mavis CEO Coach** — người đồng hành chiến lược cao cấp của bạn.\n\n"
+                "Tôi sẽ đánh giá tính khả thi, phân tích quỹ thời gian và tối ưu hóa nhịp sinh học năng lượng đỉnh cao cho các mục tiêu bạn theo đuổi.\n\n"
+                "👉 Hãy chia sẻ mục tiêu bạn đang ấp ủ (VD: *'Tôi muốn học IELTS 7.0 trong 3 tháng, mỗi ngày 2 tiếng'*)..."
+            ),
+        }
+    ]
+
+chat_arch_key = f"chat_arch_{current_username}"
+if chat_arch_key not in st.session_state:
+    st.session_state[chat_arch_key] = [
+        {
+            "role": "assistant",
+            "content": (
+                f"Chào **{current_name}**! Tôi là **Strategy & Resource Architect** (Chuyên trách Giai đoạn 1).\n\n"
+                "Tôi chịu trách nhiệm phân rã mục tiêu thành lộ trình 4 tầng (**Năm ➔ Quý ➔ Tháng ➔ Tuần**) và thẩm định giáo trình/tài liệu chuẩn.\n\n"
+                "👉 Bạn có thể yêu cầu tôi đổi giờ học, đổi mức ưu tiên hoặc thêm/bớt tài liệu bất kỳ lúc nào!"
+            ),
+        }
+    ]
+
+chat_sched_key = f"chat_sched_{current_username}"
+if chat_sched_key not in st.session_state:
+    st.session_state[chat_sched_key] = [
+        {
+            "role": "assistant",
+            "content": (
+                f"Chào **{current_name}**! Tôi là **AI Master Scheduler** (Chuyên trách Giai đoạn 2).\n\n"
+                "Tôi gom toàn bộ các mục tiêu Active để xếp lịch không trùng lặp (Sáng học nặng, Chiều thực hành, Tối ôn tập nhẹ).\n\n"
+                "👉 Nếu bạn có việc bận đột xuất hoặc muốn dời task, hãy nhắn cho tôi ngay nhé!"
+            ),
+        }
+    ]
+
+chat_retro_key = f"chat_retro_{current_username}"
+if chat_retro_key not in st.session_state:
+    st.session_state[chat_retro_key] = [
+        {
+            "role": "assistant",
+            "content": (
+                f"Chào **{current_name}**! Tôi là **AI Retrospective Coach** (Chuyên trách Giai đoạn 3).\n\n"
+                "Cuối ngày hoặc cuối tuần, chúng ta hãy ngồi lại đánh giá các task chưa hoàn thành, lắng nghe cảm xúc của bạn và tự động đề xuất điều chỉnh ngược lại Thiết lập để bạn luôn duy trì phong độ bền bỉ!"
+            ),
+        }
+    ]
+
+master_schedule_key = f"master_schedule_{current_username}"
+if master_schedule_key not in st.session_state:
+    st.session_state[master_schedule_key] = load_master_schedule(current_username)
+
+retro_logs_key = f"retro_logs_{current_username}"
+if retro_logs_key not in st.session_state:
+    st.session_state[retro_logs_key] = load_retrospective_logs(current_username)
+
 # Khởi tạo graph = build_graph() trong st.session_state duy nhất 1 lần
 if "mavis_graph" not in st.session_state:
     st.session_state["mavis_graph"] = build_graph()
@@ -830,7 +987,7 @@ with st.sidebar:
                                 st.markdown(f"- 🔗 [{r.get('title')}]({url_target}) *({res_type})*{cost_str}")
 
     st.markdown("---")
-    if st.button("🔄 Làm mới phiên trò chuyện (Reset)", use_container_width=True):
+    if st.button("🔄 Làm mới phiên làm việc (Reset All)", use_container_width=True):
         st.session_state[thread_ver_key] = st.session_state.get(thread_ver_key, 1) + 1
         st.session_state[msg_key] = [
             {
@@ -838,6 +995,33 @@ with st.sidebar:
                 "content": OPENING_GREETING,
             }
         ]
+        st.session_state[chat_ceo_key] = [
+            {
+                "role": "assistant",
+                "content": f"Xin chào **{current_name}**! Tôi là **Mavis CEO Coach**. Sẵn sàng thẩm định các mục tiêu mới cùng bạn!",
+            }
+        ]
+        st.session_state[chat_arch_key] = [
+            {
+                "role": "assistant",
+                "content": f"Chào **{current_name}**! Tôi là **Strategy & Resource Architect**. Sẵn sàng hỗ trợ bạn tinh chỉnh lộ trình & tài liệu!",
+            }
+        ]
+        st.session_state[chat_sched_key] = [
+            {
+                "role": "assistant",
+                "content": f"Chào **{current_name}**! Tôi là **AI Master Scheduler**. Sẵn sàng phân bổ và dời lịch trình cho bạn!",
+            }
+        ]
+        st.session_state[chat_retro_key] = [
+            {
+                "role": "assistant",
+                "content": f"Chào **{current_name}**! Tôi là **AI Retrospective Coach**. Sẵn sàng check-in và hồi cứu cùng bạn!",
+            }
+        ]
+        st.session_state[goals_key] = load_user_goals(current_username)
+        st.session_state[master_schedule_key] = load_master_schedule(current_username)
+        st.session_state[retro_logs_key] = load_retrospective_logs(current_username)
         st.session_state[energy_key] = "high"
         st.session_state[emotion_key] = "neutral"
         st.session_state[intent_key] = "chat"
@@ -845,7 +1029,6 @@ with st.sidebar:
         st.session_state[pending_goal_key] = None
         st.session_state[awaiting_confirmation_key] = False
         st.session_state[goal_profile_key] = {}
-        st.session_state[goals_key] = []
         st.session_state[resources_key] = []
         st.session_state[roadmap_key] = {}
         st.session_state[profile_key] = {
@@ -875,375 +1058,556 @@ st.markdown(
     f"**Không gian làm việc:** `{current_name}` (`@{current_username}`) | Tối ưu hóa nhịp sinh học • Phản biện chi phí cơ hội • Đa người dùng SaaS"
 )
 
-# 4 Tab Trực quan hiển thị dữ liệu real-time từ State
-tab_chat, tab_profile, tab_resources, tab_roadmap = st.tabs([
-    "💬 Trò Chuyện & Coaching",
-    "🎯 Hồ Sơ Mục Tiêu",
-    "📚 Kho Tài Liệu Thẩm Định",
-    "🗺️ Lộ Trình Backcasting",
+# ==========================================
+# 5. MAIN PANEL: BẢNG CHỈ HUY 4 GIAI ĐOẠN KHÉP KÍN & 4 CHATBOT CHUYÊN BIỆT
+# ==========================================
+st.title("🤖 Mavis AI Executive & Life Coach")
+st.markdown(
+    f"**Không gian làm việc:** `{current_name}` (`@{current_username}`) | Mô hình CEO điều phối 3 giai đoạn khép kín • Tối ưu nhịp sinh học • Đồng bộ Cloud MongoDB"
+)
+
+# 4 Tab Chuyên biệt theo Chu trình Điều hành Mavis CEO
+tab_ceo, tab_arch, tab_sched, tab_retro = st.tabs([
+    "🎙️ Tổng Hành Dinh (CEO Coach)",
+    "📐 Giai đoạn 1: Thiết Lập Mục Tiêu",
+    "📅 Giai đoạn 2: Thực Thi & Lịch Trình",
+    "📊 Giai đoạn 3: Tổng Kết & Cải Thiện",
 ])
 
-with tab_chat:
-    # Hiển thị các tin nhắn trong phiên trò chuyện
-    for msg in st.session_state[msg_key]:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+# ------------------------------------------------------------------------------
+# TAB 1: 🎙️ TỔNG HÀNH DINH (CEO COACH)
+# ------------------------------------------------------------------------------
+with tab_ceo:
+    st.markdown("### 🎙️ Tổng Hành Dinh Chiến Lược (CEO Coach)")
+    st.caption("Thẩm định độ khả thi • Tính toán quỹ thời gian • Bảo vệ nhịp sinh học năng lượng đỉnh cao")
 
-with tab_profile:
-    st.markdown("### 🎯 Hồ Sơ Đa Mục Tiêu Song Song (Multi-Goal Portfolio)")
-    goals_list = safe_list(st.session_state.get(goals_key) or load_user_goals(current_username))
-    if not goals_list:
-        p_dict = safe_dict(st.session_state.get(goal_profile_key))
-        if p_dict.get("goal_name"):
-            goals_list = [p_dict]
+    col_dash, col_chat = st.columns([1.15, 0.85], gap="large")
 
-    if goals_list:
-        # Hàng thống kê tổng quan
-        total_g = len(goals_list)
-        comp_g = sum(1 for g in goals_list if safe_dict(g).get("is_complete"))
-        total_hrs = sum(float(safe_dict(g).get("daily_hours") or 0) for g in goals_list)
-        cats = list(set(safe_dict(g).get("category", "Học tập") for g in goals_list))
+    with col_dash:
+        user_goals = safe_list(st.session_state.get(goals_key) or load_user_goals(current_username))
 
-        m1, m2, m3, m4 = st.columns(4)
+        evaluating_goals = [g for g in user_goals if safe_dict(g).get("status") == "evaluating"]
+        active_goals = [g for g in user_goals if safe_dict(g).get("status") == "active"]
+
+        total_active_hours = sum(float(safe_dict(g).get("daily_hours") or 0) for g in active_goals)
+        total_eval_hours = sum(float(safe_dict(g).get("daily_hours") or 0) for g in evaluating_goals)
+        total_all_hours = total_active_hours + total_eval_hours
+
+        m1, m2, m3 = st.columns(3)
         with m1:
-            st.metric("Tổng Số Mục Tiêu", f"{total_g} mục tiêu")
+            st.metric("Đang Thẩm Định", f"{len(evaluating_goals)} mục tiêu")
         with m2:
-            st.metric("Mục Tiêu Đã Chốt", f"{comp_g}/{total_g}")
+            st.metric("Đã Kích Hoạt (Active)", f"{len(active_goals)} mục tiêu")
         with m3:
-            st.metric("Tổng Quỹ Thời Gian", f"{total_hrs:.1f} h/ngày")
-        with m4:
-            st.metric("Lĩnh Vực", ", ".join(cats) if cats else "Đa lĩnh vực")
+            st.metric("Quỹ Giờ Deep Work", f"{total_active_hours:.1f}h / 5.5h")
 
-        st.markdown("---")
-        st.markdown("#### 📋 Danh Sách Mục Tiêu Chi Tiết:")
-
-        for idx, g in enumerate(goals_list, 1):
-            g_dict = safe_dict(g)
-            g_name = g_dict.get("goal_name", f"Mục tiêu {idx}")
-            cat = g_dict.get("category", "Học tập")
-            prio = g_dict.get("priority", "medium")
-            level = g_dict.get("current_level") or "Chưa rõ"
-            days = g_dict.get("duration_days") or "N/A"
-            hrs = g_dict.get("daily_hours") or "N/A"
-            slots = g_dict.get("preferred_slots") or "Tối ưu theo nhịp sinh học"
-            is_comp = g_dict.get("is_complete", False)
-
-            prio_badge = "🔥 High Priority" if prio == "high" else ("⚡ Medium" if prio == "medium" else "🌱 Low Priority")
-            status_badge = "✅ ĐÃ CHỐT CHIẾN LƯỢC" if is_comp else "⚠️ CHƯA HOÀN THIỆN"
-
-            with st.container(border=True):
-                col_title, col_status = st.columns([3, 2])
-                with col_title:
-                    st.markdown(f"### 🎯 #{idx}: {g_name} `({cat})`")
-                    st.caption(f"Mức ưu tiên: `{prio_badge}`")
-                with col_status:
-                    if is_comp:
-                        st.success(f"{status_badge}")
-                    else:
-                        st.warning(f"{status_badge}")
-
-                c1, c2, c3, c4 = st.columns(4)
-                with c1:
-                    st.metric("Vạch Xuất Phát", level)
-                with c2:
-                    st.metric("Thời Hạn", f"{days} ngày" if days != "N/A" else "Chưa rõ")
-                with c3:
-                    st.metric("Cam Kết", f"{hrs} h/ngày" if hrs != "N/A" else "Chưa rõ")
-                with c4:
-                    st.metric("Khung Giờ", slots[:18] + "..." if len(str(slots)) > 18 else str(slots))
-
-                if not is_comp:
-                    missing = []
-                    if not g_dict.get("goal_name"): missing.append("Tên mục tiêu cụ thể")
-                    if not g_dict.get("current_level"): missing.append("Trình độ / vạch xuất phát")
-                    if not g_dict.get("duration_days"): missing.append("Thời gian hoàn thành (ngày)")
-                    if not g_dict.get("daily_hours"): missing.append("Số giờ cam kết mỗi ngày")
-                    st.info(f"💡 Đang thiếu thông số: **{', '.join(missing)}**. Bạn hãy trao đổi thêm trong tab **Trò Chuyện & Coaching** để Coach chốt mục tiêu này!")
-    else:
-        st.info("💡 Bạn chưa thiết lập mục tiêu nào. Hãy vào tab **Trò Chuyện & Coaching** và chia sẻ các mục tiêu của bạn (ví dụ: *'Tôi vừa muốn học IELTS 7.0 trong 3 tháng, vừa muốn học HSK 4 trong 6 tháng, vừa build dự án AI'*).")
-
-with tab_resources:
-    st.markdown("### 📚 Kho Tài Liệu & Công Cụ Thực Tế Đã Thẩm Định")
-    res_list = safe_list(st.session_state.get(resources_key))
-    if res_list:
-        for idx, r in enumerate(res_list, 1):
-            r_dict = safe_dict(r)
-            title = r_dict.get("title", f"Tài liệu {idx}")
-            url = r_dict.get("url", "#")
-            rtype = r_dict.get("type", "Tài liệu học tập")
-            hours = r_dict.get("estimated_hours", "N/A")
-            how_to = r_dict.get("how_to_use", "Học tập và giải bài tập theo lộ trình đề ra.")
-            g_tag = f"🎯 `[{r_dict.get('goal_name')}]` " if r_dict.get("goal_name") else ""
-
-            with st.container(border=True):
-                st.markdown(f"#### 🔗 {g_tag}[{title}]({url})")
-                c1, c2 = st.columns([1, 2])
-                with c1:
-                    st.caption(f"🏷️ Phân loại: **{rtype}** | ⏳ Thời lượng: **{hours}h**")
-                with c2:
-                    st.caption(f"💡 Hướng dẫn: {how_to}")
-    else:
-        st.info("💡 Chưa có tài liệu nào được trích xuất. Khi các mục tiêu được chốt đầy đủ 4 thông số cốt lõi, Agent Research sẽ tự động tìm kiếm các bộ đề, giáo trình uy tín kèm link trực tiếp tại đây!")
-
-with tab_roadmap:
-    st.markdown("### 🗺️ Lộ Trình Backcasting & Kế Hoạch Đa Mục Tiêu")
-    roadmap_dict = safe_dict(st.session_state.get(roadmap_key))
-    goals_list = safe_list(st.session_state.get(goals_key) or load_user_goals(current_username))
-    if not goals_list:
-        p_dict = safe_dict(st.session_state.get(goal_profile_key))
-        if p_dict.get("goal_name"):
-            goals_list = [p_dict]
-
-    if roadmap_dict and (roadmap_dict.get("target_vision") or roadmap_dict.get("weekly_milestones")):
-        st.info(f"🎯 **Tầm nhìn Chiến lược:** {roadmap_dict.get('target_vision', 'Chinh phục toàn diện các mục tiêu')}")
-        if roadmap_dict.get("total_phases"):
-            st.markdown(f"**Phân kỳ Quý / Tháng:** {roadmap_dict.get('total_phases')}")
-
-        if roadmap_dict.get("balance_strategy"):
-            st.success(f"⚖️ **Chiến lược cân bằng nhịp sinh học & Quỹ thời gian ({roadmap_dict.get('total_daily_hours', 'N/A')}h/ngày):** {roadmap_dict.get('balance_strategy')}")
-
-        st.markdown("---")
-
-        # Bộ lọc mục tiêu cho Lộ trình Backcasting
-        goal_names = [safe_dict(g).get("goal_name") for g in goals_list if safe_dict(g).get("goal_name")]
-        filter_options = ["🎯 Tất cả mục tiêu"] + goal_names
-        selected_goal_filter = st.selectbox(
-            "🔍 Lọc Lộ Trình & Nhiệm Vụ Theo Mục Tiêu:",
-            options=filter_options,
-            index=0,
-            help="Chọn mục tiêu cụ thể để theo dõi chi tiết các task hành động của mục tiêu đó mà không bị phân tán."
-        )
-
-        st.markdown("---")
-
-        # Nút Đồng bộ Google Calendar
-        st.subheader("📅 Đồng Bộ Lịch Trình (Google Calendar & iCal)")
-        w_ms = safe_list(roadmap_dict.get("weekly_milestones", []))
-        w1_tasks = safe_list(safe_dict(w_ms[0]).get("daily_tasks", [])) if w_ms else []
-        d1 = safe_dict(w1_tasks[0]) if w1_tasks else {}
-        d1_title = d1.get("task_title", "Bắt đầu kế hoạch hành động")
-        d1_dur = d1.get("duration_minutes", 90)
-        d1_res = d1.get("attached_resource", "")
-        d1_slot = d1.get("time_slot", "08:00 - 10:00")
-
-        col_gcal, col_ics = st.columns(2)
-        with col_gcal:
-            gcal_url = generate_gcal_link(d1_title, d1_slot, d1_dur, d1_res)
-            st.link_button("🌐 Mở Google Calendar (Thêm Ngày 1)", url=gcal_url, use_container_width=True)
-
-        with col_ics:
-            goal_label = selected_goal_filter if selected_goal_filter != "🎯 Tất cả mục tiêu" else "Đa Mục Tiêu"
-            ics_data = generate_ics_calendar(roadmap_dict, goal_label, d1_slot)
-            st.download_button(
-                label="📥 Tải File Lịch (.ics) Cho Google / Apple / Outlook",
-                data=ics_data,
-                file_name=f"mavis_schedule_{current_username}.ics",
-                mime="text/calendar",
-                use_container_width=True,
+        if total_all_hours > 5.5:
+            st.warning(
+                f"⚠️ **Cảnh báo quá tải ({total_all_hours:.1f}h/ngày):** Vượt ngưỡng an toàn 5.5h/ngày. "
+                "CEO Coach khuyến nghị hạ tải hoặc tạm hoãn mục tiêu ít ưu tiên để bảo vệ nhịp sinh học!"
+            )
+        else:
+            st.success(
+                f"🔋 **Nhịp sinh học tối ưu:** Quỹ giờ cam kết `{total_active_hours:.1f}h/ngày` "
+                "nằm trong vùng năng lượng đỉnh cao an toàn."
             )
 
         st.markdown("---")
-        st.markdown(f"#### 🚩 Chi Tiết Cột Mốc Từng Tuần & Nhiệm Vụ Hàng Ngày ({selected_goal_filter}):")
+        st.markdown("#### 🔍 Mục Tiêu Đang Thẩm Định Độ Khả Thi:")
 
-        for w in w_ms:
-            w_dict = safe_dict(w)
-            w_num = w_dict.get("week_number", 1)
-            w_title = w_dict.get("milestone_title", f"Tuần {w_num}")
-            all_daily_tasks = safe_list(w_dict.get("daily_tasks", []))
+        if evaluating_goals:
+            for idx, eg in enumerate(evaluating_goals, 1):
+                eg_dict = safe_dict(eg)
+                gid = eg_dict.get("id") or eg_dict.get("goal_id", f"eval_{idx}")
+                g_title = eg_dict.get("title") or eg_dict.get("goal_name", f"Mục tiêu {idx}")
+                cat = eg_dict.get("category", "Học tập")
+                daily_h = eg_dict.get("daily_hours", 1.5)
+                dur_days = eg_dict.get("duration_days", 90)
+                pref_t = eg_dict.get("preferred_time") or eg_dict.get("preferred_slots", "08:00 - 10:00 Sáng")
 
-            # Áp dụng bộ lọc mục tiêu
-            if selected_goal_filter != "🎯 Tất cả mục tiêu":
-                target_norm = selected_goal_filter.lower().strip()
-                filtered_daily_tasks = [
-                    t for t in all_daily_tasks
-                    if target_norm in safe_dict(t).get("goal_name", "").lower()
-                    or target_norm in safe_dict(t).get("task_title", "").lower()
-                ]
-            else:
-                filtered_daily_tasks = all_daily_tasks
+                with st.container(border=True):
+                    c_title, c_cat = st.columns([3, 1])
+                    with c_title:
+                        st.markdown(f"##### 🎯 #{idx}: **{g_title}**")
+                    with c_cat:
+                        st.caption(f"🏷️ `{cat}`")
 
-            with st.expander(f"📌 Tuần {w_num}: {w_title} ({len(filtered_daily_tasks)} nhiệm vụ)", expanded=(w_num == 1)):
-                if filtered_daily_tasks:
-                    for t in filtered_daily_tasks:
-                        t_dict = safe_dict(t)
-                        day_num = t_dict.get("day_number", 1)
-                        t_goal = t_dict.get("goal_name", "")
-                        t_title = t_dict.get("task_title", "")
-                        t_dur = t_dict.get("duration_minutes", 60)
-                        t_slot = t_dict.get("time_slot", "08:00 - 10:00")
-                        t_res = t_dict.get("attached_resource", "Tài liệu chuẩn")
-                        cog = t_dict.get("cognitive_load", "medium")
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        st.caption(f"⏳ **Thời lượng:** {daily_h}h/ngày")
+                    with c2:
+                        st.caption(f"📅 **Thời hạn:** {dur_days} ngày")
+                    with c3:
+                        st.caption(f"⏰ **Khung giờ:** {str(pref_t)[:18]}")
 
-                        cog_badge = "🔥 High Load" if cog == "high" else ("⚡ Medium" if cog == "medium" else "🌱 Low Load")
-                        goal_tag = f"`[🎯 {t_goal}]` " if t_goal else ""
-                        st.markdown(
-                            f"- **Ngày {day_num}:** {goal_tag}**{t_title}**\n"
-                            f"  *Khung giờ:* `{t_slot}` ({t_dur} phút) | `{cog_badge}` | 📖 *Tài liệu:* {t_res}"
-                        )
-                else:
-                    st.caption(f"Không có nhiệm vụ nào thuộc mục tiêu '{selected_goal_filter}' trong tuần này.")
-    else:
-        st.info("💡 Lộ trình Backcasting chưa được khởi tạo. Sau khi bạn cung cấp đủ thông số các mục tiêu, Agent Strategic Planner sẽ tự động phân rã lộ trình cân bằng tại đây!")
+                    if st.button(
+                        "✅ Đồng ý thêm vào Mục tiêu cuộc đời",
+                        key=f"btn_approve_{gid}_{idx}",
+                        type="primary",
+                        use_container_width=True,
+                    ):
+                        eg["status"] = "active"
+                        eg["is_complete"] = True
+                        save_user_goals(user_goals, username=current_username)
+                        st.session_state[goals_key] = load_user_goals(current_username)
+                        st.toast(f"🎉 Đã thêm '{g_title}' vào Mục tiêu cuộc đời!")
+                        st.rerun()
+        else:
+            st.info(
+                "💡 Hiện không có mục tiêu nào đang chờ thẩm định. Hãy chia sẻ với **CEO Coach** ở cột bên phải "
+                "(ví dụ: *'Tôi muốn học IELTS 7.0 trong 3 tháng, mỗi ngày 2 tiếng'*) để bắt đầu thẩm định mục tiêu mới!"
+            )
 
-# Khung nhập tin nhắn (nằm bên dưới các tab để điều hướng mượt mà)
-if user_input := st.chat_input("Nhập mục tiêu hoặc trao đổi cùng Coach (VD: 'Tôi muốn học Data Science trong 3 tháng', 'Thiết lập mục tiêu chạy bộ')..."):
-    # 1. Thêm tin nhắn của User vào giao diện
-    st.session_state[msg_key].append({"role": "user", "content": user_input})
+        st.markdown("---")
+        st.markdown("#### 🌟 Mục Tiêu Cuộc Đời Đang Thực Hiện (Active Goals):")
+        if active_goals:
+            for idx, ag in enumerate(active_goals, 1):
+                ag_dict = safe_dict(ag)
+                a_title = ag_dict.get("title") or ag_dict.get("goal_name", f"Mục tiêu {idx}")
+                a_cat = ag_dict.get("category", "Sự nghiệp")
+                a_h = ag_dict.get("daily_hours", 1.5)
+                a_prio = ag_dict.get("priority", "P2 - High")
+                st.markdown(
+                    f"- 🚀 **{a_title}** `({a_cat})` — `{a_h}h/ngày` | Ưu tiên: `{a_prio}` — 🟢 *Active*"
+                )
+        else:
+            st.caption("Chưa có mục tiêu Active nào. Khi mục tiêu được thẩm định khả thi, hãy bấm '✅ Đồng ý' ở trên.")
 
-    # 2. Chuẩn bị input cho LangGraph Agent với định danh username
-    active_username = (st.session_state.get("username") or current_username or "mavis").strip().lower()
+    with col_chat:
+        st.markdown("#### 💬 Trò Chuyện Cùng CEO Coach")
+        st.caption("Đánh giá mục tiêu mới • Kiểm tra quỹ giờ • Quản trị nhịp sinh học")
 
-    # Chuyển đổi toàn bộ lịch sử trao đổi trong phiên thành HumanMessage / AIMessage để bảo toàn ngữ cảnh trọn vẹn
-    full_messages = []
-    for m in st.session_state.get(msg_key, []):
-        m_role = m.get("role")
-        m_content = m.get("content", "")
-        if m_role == "user":
-            full_messages.append(HumanMessage(content=m_content))
-        elif m_role == "assistant":
-            full_messages.append(AIMessage(content=m_content))
-    if not full_messages:
-        full_messages = [HumanMessage(content=user_input)]
+        chat_container_ceo = st.container(height=520)
+        with chat_container_ceo:
+            for msg in st.session_state[chat_ceo_key]:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
 
-    input_state = {
-        "messages": full_messages,
-        "goals": safe_list(st.session_state.get(goals_key) or load_user_goals(active_username)),
-        "profile": safe_dict(st.session_state.get(goal_profile_key) or load_user_goal_profile(active_username)),
-        "resources": safe_list(st.session_state.get(resources_key) or load_user_resources(active_username)),
-        "roadmap": safe_dict(st.session_state.get(roadmap_key) or load_user_roadmap(active_username)),
-        "current_energy_level": st.session_state.get(energy_key, "high"),
-        "detected_emotion": st.session_state.get(emotion_key, "neutral"),
-        "intent": st.session_state.get(intent_key, "chat"),
-        "plan": st.session_state.get(plan_key, []),
-        "user_profile": st.session_state.get(profile_key, {}),
-        "coaching_stage": st.session_state.get(stage_key, "interviewing"),
-        "user_obstacles": st.session_state.get(obstacles_key, []),
-        "status": st.session_state.get(f"status_{active_username}", "interviewing"),
-        "is_info_sufficient": False,
-        "uploaded_context": st.session_state.get(rag_key),
-        "username": active_username,
-        "user_id": active_username,
-        "pending_goal": st.session_state.get(pending_goal_key),
-        "awaiting_confirmation": st.session_state.get(awaiting_confirmation_key, False),
-    }
-
-    # 3. Kích hoạt Agent xử lý
-    with st.chat_message("assistant"):
-        with st.spinner(f"Executive Coach đang phân tích dữ liệu cho {current_name}..."):
-            try:
-                # Cấu hình thread_id cố định theo phiên người dùng (st.session_state.username)
-                thread_user = getattr(st.session_state, "username", None) or active_username
-                config = {"configurable": {"thread_id": thread_user}}
-                output_state = mavis_agent.invoke(input_state, config=config)
-
-                # Dọn dẹp hiển thị UI: Gom tất cả các phản hồi AI mới được sinh ra trong lượt này (sau tin nhắn của user)
-                new_ai_texts = []
-                all_msgs = output_state.get("messages", [])
-
-                last_user_idx = -1
-                for idx, m in enumerate(all_msgs):
-                    if isinstance(m, HumanMessage) or getattr(m, "type", "") == "human" or (isinstance(m, dict) and m.get("role") == "user"):
-                        last_user_idx = idx
-
-                if last_user_idx >= 0:
-                    for m in all_msgs[last_user_idx + 1:]:
-                        if isinstance(m, AIMessage) or getattr(m, "type", "") == "ai":
-                            c = extract_text_from_content(getattr(m, "content", m))
-                            if c and c.strip() and c.strip() != user_input.strip() and c.strip() not in new_ai_texts:
-                                new_ai_texts.append(c.strip())
-                        elif isinstance(m, dict) and m.get("role") == "assistant":
-                            c = extract_text_from_content(m.get("content", ""))
-                            if c and c.strip() and c.strip() != user_input.strip() and c.strip() not in new_ai_texts:
-                                new_ai_texts.append(c.strip())
-
-                if new_ai_texts:
-                    combined_reply = "\n\n---\n\n".join(new_ai_texts)
-                else:
-                    last_reply = None
-                    for msg in reversed(all_msgs):
-                        if isinstance(msg, AIMessage) or getattr(msg, "type", "") == "ai":
-                            c = extract_text_from_content(getattr(msg, "content", msg))
-                            if c and c.strip() and c.strip() != user_input.strip():
-                                last_reply = c
-                                break
-                    if not last_reply:
-                        if chat_node is not None:
-                            input_state["username"] = active_username
-                            chat_fallback = chat_node(input_state)
-                            last_reply = extract_text_from_content(chat_fallback["messages"][-1].content)
+        if ceo_input := st.chat_input(
+            "Nhập mục tiêu mới hoặc thảo luận cùng CEO Coach...",
+            key=f"input_ceo_{current_username}",
+        ):
+            st.session_state[chat_ceo_key].append({"role": "user", "content": ceo_input})
+            with chat_container_ceo:
+                with st.chat_message("user"):
+                    st.markdown(ceo_input)
+                with st.chat_message("assistant"):
+                    with st.spinner("CEO Coach đang phân tích quỹ thời gian và thẩm định khả thi..."):
+                        if ceo_coach_chat is not None:
+                            res = ceo_coach_chat(
+                                user_message=ceo_input,
+                                username=current_username,
+                                chat_history=st.session_state[chat_ceo_key],
+                            )
+                            coach_rep = res.get("response", "Tôi đã ghi nhận mục tiêu của bạn.")
                         else:
-                            last_reply = "Chào bạn! Tôi đã ghi nhận mục tiêu của bạn và đang thiết lập lộ trình."
-                    combined_reply = last_reply
+                            coach_rep = "Hệ thống đang đồng bộ kết nối AI. Vui lòng thử lại sau giây lát."
+                        st.markdown(coach_rep)
+                        st.session_state[chat_ceo_key].append({"role": "assistant", "content": coach_rep})
+                        st.session_state[goals_key] = load_user_goals(current_username)
+                        st.rerun()
 
-                st.markdown(combined_reply)
 
-                # Lưu vào lịch sử hiển thị của user
-                st.session_state[msg_key].append(
-                    {"role": "assistant", "content": combined_reply}
-                )
+# ------------------------------------------------------------------------------
+# TAB 2: 📐 GIAI ĐOẠN 1: THIẾT LẬP MỤC TIÊU (ARCHITECT)
+# ------------------------------------------------------------------------------
+with tab_arch:
+    st.markdown("### 📐 Giai đoạn 1: Thiết Lập Mục Tiêu & Phân Rã Lộ Trình")
+    st.caption("Kiến trúc sư chiến lược phân cấp 4 tầng (Năm ➔ Quý ➔ Tháng ➔ Tuần) & Thẩm định tài liệu thực tế")
 
-                # Cập nhật các trạng thái của Agent vào session_state của user và MongoDB Atlas (collection 'user_states')
-                if "goals" in output_state and output_state["goals"]:
-                    st.session_state[goals_key] = output_state["goals"]
-                    save_user_goals(output_state["goals"], username=active_username)
-                    if output_state["goals"]:
-                        st.session_state[goal_profile_key] = output_state["goals"][0]
+    col_dash_arch, col_chat_arch = st.columns([1.15, 0.85], gap="large")
 
-                if "profile" in output_state and output_state["profile"]:
-                    st.session_state[goal_profile_key] = output_state["profile"]
-                    save_user_goal_profile(output_state["profile"], username=active_username)
+    with col_dash_arch:
+        user_goals = safe_list(st.session_state.get(goals_key) or load_user_goals(current_username))
 
-                if "resources" in output_state and output_state["resources"]:
-                    st.session_state[resources_key] = output_state["resources"]
-                    save_user_resources(output_state["resources"], username=active_username)
+        if not user_goals:
+            st.info("💡 Chưa có mục tiêu nào trong hệ thống. Hãy trao đổi với CEO Coach tại Tab 1 để thẩm định và kích hoạt mục tiêu đầu tiên!")
+        else:
+            goal_titles = [str(g.get("title") or g.get("goal_name", f"Mục tiêu {i+1}")) for i, g in enumerate(user_goals)]
+            selected_goal_name = st.selectbox(
+                "🎯 Chọn mục tiêu để xem & tinh chỉnh cấu trúc lộ trình:",
+                options=goal_titles,
+                index=0,
+                key=f"arch_goal_select_{current_username}",
+            )
 
-                if "roadmap" in output_state and output_state["roadmap"]:
-                    st.session_state[roadmap_key] = output_state["roadmap"]
-                    save_user_roadmap(output_state["roadmap"], username=active_username)
+            selected_goal = next(
+                (g for g in user_goals if str(g.get("title") or g.get("goal_name")) == selected_goal_name),
+                user_goals[0],
+            )
+            bd = safe_dict(selected_goal.get("breakdown"))
 
-                if "schedule" in output_state and output_state["schedule"]:
-                    st.session_state[f"schedule_{active_username}"] = output_state["schedule"]
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric("Lĩnh Vực", selected_goal.get("category", "Học tập"))
+            with c2:
+                st.metric("Quỹ Thời Gian", f"{selected_goal.get('daily_hours', 1.5)}h/ngày")
+            with c3:
+                st.metric("Thời Hạn", f"{selected_goal.get('duration_days', 90)} ngày")
+            with c4:
+                st.metric("Khung Giờ", str(selected_goal.get("preferred_time") or selected_goal.get("preferred_slots", "08:00 - 10:00 Sáng"))[:14])
 
-                if "user_profile" in output_state and output_state["user_profile"]:
-                    st.session_state[profile_key] = output_state["user_profile"]
-                    save_user_profile(output_state["user_profile"], username=active_username)
+            st.markdown("---")
+            st.markdown("#### 🏛️ Phân Rã Lộ Trình 4 Tầng:")
 
-                if "coaching_stage" in output_state and output_state["coaching_stage"]:
-                    st.session_state[stage_key] = output_state["coaching_stage"]
+            # Tầng 1: Năm
+            yearly_vision = bd.get("yearly") or f"Chinh phục toàn diện {selected_goal_name}"
+            st.markdown("**🌟 TẦNG 1 — TẦM NHÌN DÀI HẠN (YEARLY):**")
+            st.info(f"🎯 **{yearly_vision}**")
 
-                if "user_obstacles" in output_state and output_state["user_obstacles"]:
-                    st.session_state[obstacles_key] = output_state["user_obstacles"]
+            # Tầng 2: Quý
+            quarterly_items = safe_list(bd.get("quarterly", []))
+            st.markdown("**🏆 TẦNG 2 — PHÂN KỲ CHIẾN LƯỢC (QUARTERLY):**")
+            if quarterly_items:
+                q_cols = st.columns(min(len(quarterly_items), 3) or 1)
+                for q_idx, q in enumerate(quarterly_items[:3]):
+                    q_dict = safe_dict(q)
+                    with q_cols[q_idx % len(q_cols)]:
+                        with st.container(border=True):
+                            st.markdown(f"**{q_dict.get('quarter', f'Quý {q_idx+1}')}**")
+                            st.caption(f"🎯 *Trọng tâm:* {q_dict.get('focus', 'Nền tảng')}")
+                            st.caption(f"🏁 *Kết quả:* {q_dict.get('target_outcome', 'Đạt chuẩn')}")
+            else:
+                st.caption("*(Chưa có phân kỳ Quý. Hãy chat với Architect Bot ở cột phải để tự động phân rã)*")
 
-                if "status" in output_state and output_state["status"]:
-                    st.session_state[f"status_{active_username}"] = output_state["status"]
+            # Tầng 3: Tháng
+            monthly_items = safe_list(bd.get("monthly", []))
+            st.markdown("**📅 TẦNG 3 — PHÂN RÃ THEO THÁNG (MONTHLY):**")
+            if monthly_items:
+                for m_idx, m in enumerate(monthly_items, 1):
+                    m_dict = safe_dict(m)
+                    st.markdown(f"- **{m_dict.get('month', f'Tháng {m_idx}')}:** {m_dict.get('milestone', '')} *(Tài liệu: {m_dict.get('resources', 'Giáo trình chuẩn')})*")
+            else:
+                st.caption("*(Chưa có phân rã Tháng)*")
 
-                if "current_energy_level" in output_state:
-                    st.session_state[energy_key] = output_state["current_energy_level"]
+            # Tầng 4: Tuần
+            weekly_items = safe_list(bd.get("weekly", []))
+            st.markdown("**⚡ TẦNG 4 — KẾ HOẠCH HÀNH ĐỘNG TỪNG TUẦN (WEEKLY):**")
+            if weekly_items:
+                for w_idx, w in enumerate(weekly_items, 1):
+                    w_dict = safe_dict(w)
+                    w_title = w_dict.get("milestone", f"Cột mốc Tuần {w_idx}")
+                    w_actions = safe_list(w_dict.get("action_items", []))
+                    w_hrs = w_dict.get("estimated_hours", 7.0)
+                    with st.expander(f"📌 {w_dict.get('week', f'Tuần {w_idx}')}: {w_title} ({w_hrs}h)", expanded=(w_idx == 1)):
+                        for act in w_actions:
+                            st.markdown(f"- ▫️ {act}")
+            else:
+                st.caption("*(Chưa có kế hoạch tuần)*")
 
-                if "detected_emotion" in output_state and output_state["detected_emotion"]:
-                    st.session_state[emotion_key] = output_state["detected_emotion"]
+            # Tài nguyên chuẩn
+            resources_items = safe_list(bd.get("resources", []))
+            st.markdown("---")
+            st.markdown("#### 📚 Kho Tài Liệu & Công Cụ Thẩm Định (Curated Resources):")
+            if resources_items:
+                for r_idx, r in enumerate(resources_items, 1):
+                    r_dict = safe_dict(r)
+                    r_title = r_dict.get("title", f"Tài liệu {r_idx}")
+                    r_url = r_dict.get("url", "#")
+                    r_type = r_dict.get("type", "Giáo trình")
+                    r_how = r_dict.get("how_to_use", "Học tập và làm bài tập theo khung giờ đã định.")
+                    with st.container(border=True):
+                        st.markdown(f"🔗 **[{r_title}]({r_url})** `[{r_type}]`")
+                        st.caption(f"💡 *Hướng dẫn khai thác:* {r_how}")
+            else:
+                st.caption("*(Chưa có tài liệu. Chat với Architect Bot để tự động tìm kiếm bộ đề và giáo trình uy tín)*")
 
-                if "intent" in output_state and output_state["intent"]:
-                    st.session_state[intent_key] = output_state["intent"]
+    with col_chat_arch:
+        st.markdown("#### 💬 Trò Chuyện Cùng Strategy Architect")
+        st.caption("Thêm/bớt tài liệu • Đổi giờ học • Phân rã lại tuần hoặc tinh chỉnh độ ưu tiên")
 
-                if "plan" in output_state and output_state["plan"]:
-                    st.session_state[plan_key] = output_state["plan"]
+        chat_container_arch = st.container(height=520)
+        with chat_container_arch:
+            for msg in st.session_state[chat_arch_key]:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
 
-                if "uploaded_context" in output_state:
-                    st.session_state[rag_key] = output_state["uploaded_context"]
+        if arch_input := st.chat_input(
+            "Yêu cầu thêm tài liệu, đổi giờ học hoặc phân rã lại...",
+            key=f"input_arch_{current_username}",
+        ):
+            st.session_state[chat_arch_key].append({"role": "user", "content": arch_input})
+            with chat_container_arch:
+                with st.chat_message("user"):
+                    st.markdown(arch_input)
+                with st.chat_message("assistant"):
+                    with st.spinner("Strategy Architect đang tìm kiếm tài liệu chuẩn và tái cấu trúc lộ trình..."):
+                        target_gid = selected_goal.get("id") if 'selected_goal' in locals() and selected_goal else None
+                        if architect_chat is not None:
+                            res = architect_chat(
+                                user_message=arch_input,
+                                username=current_username,
+                                goal_id=target_gid,
+                                chat_history=st.session_state[chat_arch_key],
+                            )
+                            arch_rep = res.get("response", "Tôi đã cập nhật lộ trình vào hệ thống.")
+                        else:
+                            arch_rep = "Hệ thống đang đồng bộ kết nối AI. Vui lòng thử lại sau giây lát."
+                        st.markdown(arch_rep)
+                        st.session_state[chat_arch_key].append({"role": "assistant", "content": arch_rep})
+                        st.session_state[goals_key] = load_user_goals(current_username)
+                        st.rerun()
 
-                if "pending_goal" in output_state:
-                    st.session_state[pending_goal_key] = output_state["pending_goal"]
 
-                if "awaiting_confirmation" in output_state:
-                    st.session_state[awaiting_confirmation_key] = output_state["awaiting_confirmation"]
+# ------------------------------------------------------------------------------
+# TAB 3: 📅 GIAI ĐOẠN 2: THỰC THI & LỊCH TRÌNH (SCHEDULER)
+# ------------------------------------------------------------------------------
+with tab_sched:
+    st.markdown("### 📅 Giai đoạn 2: Thực Thi & Lịch Trình Điều Hành")
+    st.caption("Phân bổ nhịp sinh học không trùng lặp • Checklist tương tác real-time • Dời lịch linh hoạt khi bận")
 
-                # Rerun để Sidebar đồng bộ ngay lập tức các chỉ số mới
+    col_dash_sched, col_chat_sched = st.columns([1.15, 0.85], gap="large")
+
+    with col_dash_sched:
+        ms = safe_list(st.session_state.get(master_schedule_key) or load_master_schedule(current_username))
+
+        mode = st.radio(
+            "Chế độ hiển thị lịch:",
+            options=["🌐 Lịch Tổng Hợp Tất Cả Mục Tiêu (Master Schedule)", "🎯 Xem Lịch Riêng Theo Từng Mục Tiêu"],
+            horizontal=True,
+            key=f"sched_mode_{current_username}",
+        )
+
+        filtered_schedule = ms
+        if mode == "🎯 Xem Lịch Riêng Theo Từng Mục Tiêu":
+            unique_goals = list(set(t.get("goal_title", "Mục tiêu") for t in ms if t.get("goal_title")))
+            if unique_goals:
+                chosen_g = st.selectbox("Chọn mục tiêu cụ thể:", options=unique_goals, key=f"sel_ms_goal_{current_username}")
+                filtered_schedule = [t for t in ms if t.get("goal_title") == chosen_g]
+            else:
+                st.info("Chưa có mục tiêu nào trong lịch.")
+
+        st.markdown("---")
+        # Nút xuất lịch
+        c_ics, c_gcal = st.columns(2)
+        with c_ics:
+            ics_text = generate_ics_from_master_schedule(filtered_schedule, current_username)
+            st.download_button(
+                label="📥 Tải File Lịch (.ics) Cho Google / Apple / Outlook",
+                data=ics_text,
+                file_name=f"mavis_master_schedule_{current_username}.ics",
+                mime="text/calendar",
+                use_container_width=True,
+            )
+        with c_gcal:
+            first_task = filtered_schedule[0] if filtered_schedule else {}
+            gcal_link = generate_gcal_link(
+                first_task.get("task_detail", "Học tập cùng Mavis"),
+                first_task.get("time_slot", "08:00 - 10:00"),
+                duration_minutes=90,
+                resource_info=first_task.get("resource_link", ""),
+            )
+            st.link_button("🌐 Mở Google Calendar (Thêm Sự Kiện 1 Chạm)", url=gcal_link, use_container_width=True)
+
+        st.markdown("---")
+        st.markdown("#### 📋 Checklist Thực Thi Tương Tác Hàng Ngày:")
+
+        if not filtered_schedule:
+            st.info(
+                "💡 Chưa có lịch trình. Bạn hãy chat với **AI Master Scheduler** ở cột bên phải "
+                "(ví dụ: *'Hãy gom tất cả active goals để xếp lịch tuần này cho tôi'*) để tạo lịch ngay lập tức!"
+            )
+        else:
+            days_order = []
+            for t in filtered_schedule:
+                d = t.get("date", "Hôm nay")
+                if d not in days_order:
+                    days_order.append(d)
+
+            for d in days_order:
+                day_tasks = [t for t in filtered_schedule if t.get("date") == d]
+                done_day = sum(1 for t in day_tasks if t.get("is_done") is True)
+                total_day = len(day_tasks)
+
+                with st.expander(f"📅 **{d}** — Tiến độ: {done_day}/{total_day} hoàn thành", expanded=(done_day < total_day)):
+                    for sess in ["Sáng", "Chiều", "Tối"]:
+                        sess_tasks = [t for t in day_tasks if t.get("session") == sess]
+                        if sess_tasks:
+                            st.markdown(f"##### ⏰ Buổi {sess}:")
+                            for idx, task in enumerate(sess_tasks):
+                                t_detail = task.get("task_detail", "Nhiệm vụ")
+                                t_slot = task.get("time_slot", "08:00 - 10:00")
+                                t_goal = task.get("goal_title", "")
+                                t_link = task.get("resource_link", "")
+                                is_done_val = bool(task.get("is_done", False))
+
+                                chk_key = f"chk_{current_username}_{d}_{sess}_{idx}_{abs(hash(t_detail)) % 100000}"
+                                label = f"**{t_slot}** — {t_detail} `[🎯 {t_goal}]`" if t_goal else f"**{t_slot}** — {t_detail}"
+                                checked = st.checkbox(label, value=is_done_val, key=chk_key)
+
+                                if checked != is_done_val:
+                                    update_master_schedule_task_status(
+                                        task_detail=t_detail,
+                                        is_done=checked,
+                                        date=d,
+                                        username=current_username,
+                                    )
+                                    task["is_done"] = checked
+                                    st.session_state[master_schedule_key] = load_master_schedule(current_username)
+                                    st.toast(f"✅ Đã cập nhật: {t_detail[:35]}...")
+                                    st.rerun()
+
+                                if t_link:
+                                    st.caption(f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;📖 *Tài liệu:* [{t_link}]({t_link})")
+
+    with col_chat_sched:
+        st.markdown("#### 💬 Trò Chuyện Cùng Master Scheduler")
+        st.caption("Báo bận • Dời lịch linh hoạt • Phân bổ nhịp sinh học không trùng lặp")
+
+        chat_container_sched = st.container(height=520)
+        with chat_container_sched:
+            for msg in st.session_state[chat_sched_key]:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
+
+        if sched_input := st.chat_input(
+            "Báo bận (VD: 'chiều nay bận họp, dời task sang mai')...",
+            key=f"input_sched_{current_username}",
+        ):
+            st.session_state[chat_sched_key].append({"role": "user", "content": sched_input})
+            with chat_container_sched:
+                with st.chat_message("user"):
+                    st.markdown(sched_input)
+                with st.chat_message("assistant"):
+                    with st.spinner("AI Master Scheduler đang tính toán tối ưu lại lịch trình..."):
+                        if scheduler_chat is not None:
+                            res = scheduler_chat(
+                                user_message=sched_input,
+                                username=current_username,
+                                chat_history=st.session_state[chat_sched_key],
+                            )
+                            sched_rep = res.get("response", "Tôi đã điều chỉnh lịch trình phù hợp cho bạn.")
+                        else:
+                            sched_rep = "Hệ thống đang đồng bộ kết nối AI. Vui lòng thử lại sau giây lát."
+                        st.markdown(sched_rep)
+                        st.session_state[chat_sched_key].append({"role": "assistant", "content": sched_rep})
+                        st.session_state[master_schedule_key] = load_master_schedule(current_username)
+                        st.rerun()
+
+
+# ------------------------------------------------------------------------------
+# TAB 4: 📊 GIAI ĐOẠN 3: TỔNG KẾT & CẢI THIỆN (RETROSPECTIVE)
+# ------------------------------------------------------------------------------
+with tab_retro:
+    st.markdown("### 📊 Giai đoạn 3: Tổng Kết, Khai Vấn & Cải Thiện Khép Kín")
+    st.caption("Phân tích điểm nghẽn • Khai vấn thấu cảm • Bảo vệ năng lượng • Tự động thích ứng lộ trình")
+
+    col_dash_retro, col_chat_retro = st.columns([1.15, 0.85], gap="large")
+
+    with col_dash_retro:
+        ms = safe_list(st.session_state.get(master_schedule_key) or load_master_schedule(current_username))
+        r_logs = safe_list(st.session_state.get(retro_logs_key) or load_retrospective_logs(current_username))
+        user_goals = safe_list(st.session_state.get(goals_key) or load_user_goals(current_username))
+
+        total_tasks = len(ms)
+        done_tasks = sum(1 for t in ms if t.get("is_done") is True)
+        uncompleted_tasks = total_tasks - done_tasks
+        rate = (done_tasks / total_tasks * 100.0) if total_tasks > 0 else 0.0
+
+        latest_log = r_logs[-1] if r_logs else {}
+        last_emotion = latest_log.get("emotion", "neutral")
+        emotion_emojis = {
+            "motivated": "🔥 Tràn đầy động lực",
+            "overwhelmed": "⚠️ Quá tải / Cần hạ tải",
+            "tired": "💤 Mệt mỏi / Cần nghỉ ngơi",
+            "satisfied": "✨ Hài lòng / Thư thái",
+            "discouraged": "🌱 Cần động viên",
+            "neutral": "⚡ Cân bằng",
+        }
+        disp_emotion = emotion_emojis.get(last_emotion, f"⚡ {last_emotion}")
+
+        m1, m2, m3, m4 = st.columns(4)
+        with m1:
+            st.metric("Tỷ Lệ Hoàn Thành", f"{rate:.1f}%")
+        with m2:
+            st.metric("Task Đã Xong", f"{done_tasks}/{total_tasks}")
+        with m3:
+            st.metric("Task Chưa Xong", f"{uncompleted_tasks}")
+        with m4:
+            st.metric("Trạng Thái Năng Lượng", disp_emotion)
+
+        st.progress(rate / 100.0)
+
+        st.markdown("---")
+        st.markdown("#### 🔄 Cơ Chế Khép Kín Vòng Lặp (Closed-Loop Adaptation):")
+        st.caption("Khi gặp tình trạng quá tải hoặc task quá khó, hãy bấm nút dưới đây để AI tự động điều chỉnh số giờ hoặc bổ sung tài liệu cho Giai đoạn 1:")
+
+        if st.button("🔄 Cập nhật lại Thiết lập (Giai đoạn 1)", type="primary", use_container_width=True, key=f"btn_apply_loop_{current_username}"):
+            if latest_log and latest_log.get("recommended_adjustments"):
+                adj_desc = latest_log.get("recommended_adjustments")
+                for g in user_goals:
+                    if "Hạ tải" in adj_desc or "quá tải" in adj_desc or "giảm" in adj_desc.lower():
+                        old_h = float(g.get("daily_hours", 1.5))
+                        new_h = max(1.0, old_h - 0.5)
+                        g["daily_hours"] = new_h
+                save_user_goals(user_goals, username=current_username)
+                st.session_state[goals_key] = load_user_goals(current_username)
+                st.success(f"🎉 Đã cập nhật thành công thiết lập Giai đoạn 1: {adj_desc}")
                 st.rerun()
+            else:
+                st.info("💡 Bạn hãy chia sẻ phản hồi với Retrospective Coach ở cột bên phải để Coach tạo đề xuất điều chỉnh cá nhân hóa trước!")
 
-            except Exception as e:
-                error_msg = f"Đã xảy ra lỗi trong quá trình điều phối Agent: {str(e)}"
-                st.error(error_msg)
-                st.session_state[msg_key].append(
-                    {"role": "assistant", "content": error_msg}
-                )
+        st.markdown("---")
+        st.markdown("#### 🎯 Tiến Độ Từng Mục Tiêu:")
+        if user_goals:
+            for g in user_goals:
+                g_title = g.get("title") or g.get("goal_name", "Mục tiêu")
+                g_tasks = [t for t in ms if t.get("goal_title") == g_title or t.get("goal_id") == g.get("id")]
+                g_done = sum(1 for t in g_tasks if t.get("is_done") is True)
+                g_total = len(g_tasks)
+                g_rate = (g_done / g_total) if g_total > 0 else 0.0
+                st.markdown(f"**{g_title}** ({g_done}/{g_total} task • {g_rate*100:.0f}%)")
+                st.progress(g_rate)
+        else:
+            st.caption("Chưa có mục tiêu nào.")
+
+        st.markdown("---")
+        st.markdown("#### 📜 Lịch Sử Nhật Ký Khai Vấn Hồi Cứu (Retrospective Logs):")
+        if r_logs:
+            for l_idx, log in enumerate(reversed(r_logs[-5:]), 1):
+                l_date = log.get("date", "N/A")
+                l_emo = log.get("emotion", "neutral")
+                l_rate = log.get("completion_rate", 0.0)
+                l_notes = log.get("reflection_notes", "")
+                l_adj = log.get("recommended_adjustments", "")
+                with st.expander(f"📌 Check-in {l_date} — Cảm xúc: `{l_emo}` | Tỷ lệ: `{l_rate:.1f}%`", expanded=(l_idx == 1)):
+                    st.markdown(f"**Lời khuyên của Coach:**\n> {l_notes}")
+                    if l_adj:
+                        st.info(f"💡 **Đề xuất điều chỉnh:** {l_adj}")
+        else:
+            st.caption("Chưa có lịch sử check-in. Bạn hãy trao đổi cùng Retrospective Coach ở cột bên phải để hoàn thiện buổi check-in đầu tiên!")
+
+    with col_chat_retro:
+        st.markdown("#### 💬 Trò Chuyện Cùng Retrospective Coach")
+        st.caption("Check-in cuối ngày • Lắng nghe cảm xúc • Phân tích nguyên nhân (quá khó, quá tải...)")
+
+        chat_container_retro = st.container(height=520)
+        with chat_container_retro:
+            for msg in st.session_state[chat_retro_key]:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
+
+        if retro_input := st.chat_input(
+            "Chia sẻ cảm xúc hoặc nguyên nhân chưa xong task hôm nay...",
+            key=f"input_retro_{current_username}",
+        ):
+            st.session_state[chat_retro_key].append({"role": "user", "content": retro_input})
+            with chat_container_retro:
+                with st.chat_message("user"):
+                    st.markdown(retro_input)
+                with st.chat_message("assistant"):
+                    with st.spinner("Retrospective Coach đang lắng nghe và phân tích nguyên nhân..."):
+                        if retrospective_chat is not None:
+                            res = retrospective_chat(
+                                user_message=retro_input,
+                                username=current_username,
+                                chat_history=st.session_state[chat_retro_key],
+                            )
+                            retro_rep = res.get("response", "Cảm ơn bạn đã chia sẻ cùng Coach.")
+                        else:
+                            retro_rep = "Hệ thống đang đồng bộ kết nối AI. Vui lòng thử lại sau giây lát."
+                        st.markdown(retro_rep)
+                        st.session_state[chat_retro_key].append({"role": "assistant", "content": retro_rep})
+                        st.session_state[retro_logs_key] = load_retrospective_logs(current_username)
+                        st.session_state[goals_key] = load_user_goals(current_username)
+                        st.rerun()
