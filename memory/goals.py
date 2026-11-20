@@ -290,13 +290,75 @@ def load_user_profile(username: str = "mavis") -> Dict[str, Any]:
     return all_data.get(username, {}).get("user_profile", {})
 
 
+def standardize_goal_schema(g: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Chuẩn hóa cấu trúc Goal theo Schema CEO 3 Giai đoạn:
+    - id, title, category, priority, preferred_time
+    - status: 'evaluating' | 'active' | 'completed'
+    - breakdown: yearly -> quarterly -> monthly -> weekly kèm resources
+    Đồng thời bảo toàn các trường tương thích ngược (goal_id, goal_name, preferred_slots, is_complete).
+    """
+    if not isinstance(g, dict):
+        return {}
+    clean = dict(g)
+
+    # 1. ID & Tiêu đề
+    gid = clean.get("id") or clean.get("goal_id") or f"goal_{uuid.uuid4().hex[:6]}"
+    title = clean.get("title") or clean.get("goal_name") or "Mục tiêu phát triển"
+    clean["id"] = gid
+    clean["goal_id"] = gid
+    clean["title"] = title
+    clean["goal_name"] = title
+
+    # 2. Phân loại & Mức ưu tiên
+    clean["category"] = clean.get("category") or "Học tập"
+    clean["priority"] = clean.get("priority") or "P2 - High"
+
+    # 3. Khung giờ & Quỹ thời gian
+    clean["preferred_time"] = clean.get("preferred_time") or clean.get("preferred_slots") or "08:00 - 10:00 Sáng"
+    clean["preferred_slots"] = clean["preferred_time"]
+    try:
+        clean["daily_hours"] = float(clean.get("daily_hours", 1.5))
+    except (ValueError, TypeError):
+        clean["daily_hours"] = 1.5
+    try:
+        clean["duration_days"] = int(clean.get("duration_days", 90))
+    except (ValueError, TypeError):
+        clean["duration_days"] = 90
+
+    # 4. Trạng thái: 'evaluating' | 'active' | 'completed'
+    st = clean.get("status")
+    if not st or st not in ["evaluating", "active", "completed"]:
+        clean["status"] = "active" if clean.get("is_complete") else "evaluating"
+    clean["is_complete"] = True if clean["status"] in ["active", "completed"] else clean.get("is_complete", False)
+
+    # 5. Phân cấp chi tiết (breakdown: yearly -> quarterly -> monthly -> weekly kèm resources)
+    bd = clean.get("breakdown")
+    if not isinstance(bd, dict):
+        bd = {}
+    if "yearly" not in bd:
+        bd["yearly"] = clean.get("target_vision") or f"Chinh phục thành công mục tiêu {title}"
+    if "quarterly" not in bd or not isinstance(bd["quarterly"], list):
+        bd["quarterly"] = []
+    if "monthly" not in bd or not isinstance(bd["monthly"], list):
+        bd["monthly"] = []
+    if "weekly" not in bd or not isinstance(bd["weekly"], list):
+        bd["weekly"] = []
+    if "resources" not in bd or not isinstance(bd["resources"], list):
+        bd["resources"] = clean.get("resources", [])
+    clean["breakdown"] = bd
+
+    return clean
+
+
 def save_user_goals(goals: List[Dict[str, Any]], username: str = "mavis") -> bool:
     """
     Lưu danh sách đa mục tiêu song song (goals: List[GoalProfile]) vào collection 'user_states'
     trên MongoDB Atlas với update_one(..., upsert=True) và đồng bộ dự phòng vào goals_ledger.json.
+    Tự động chuẩn hóa đầy đủ theo Schema CEO 3 Giai đoạn: id, title, category, priority, preferred_time, status, breakdown.
     """
     username = (username or DEFAULT_USER).strip().lower()
-    clean_goals = [g for g in goals if isinstance(g, dict) and g.get("goal_name")]
+    clean_goals = [standardize_goal_schema(g) for g in goals if isinstance(g, dict) and (g.get("goal_name") or g.get("title"))]
 
     # 1. Tự động lưu bền vững lên MongoDB Atlas
     if is_mongodb_available():
@@ -321,7 +383,7 @@ def save_user_goals(goals: List[Dict[str, Any]], username: str = "mavis") -> boo
     if "user_profile" not in all_data[username] or not isinstance(all_data[username]["user_profile"], dict):
         all_data[username]["user_profile"] = {}
     if clean_goals:
-        goal_names = [g.get("goal_name") for g in clean_goals if g.get("goal_name")]
+        goal_names = [g.get("title") or g.get("goal_name") for g in clean_goals if (g.get("title") or g.get("goal_name"))]
         all_data[username]["user_profile"]["current_situation"] = f"Đa mục tiêu: {', '.join(goal_names)}"
         total_h = sum(float(g.get("daily_hours") or 0) for g in clean_goals)
         all_data[username]["user_profile"]["time_constraints"] = f"{total_h}h/ngày trên {len(clean_goals)} mục tiêu"
@@ -332,7 +394,7 @@ def save_user_goals(goals: List[Dict[str, Any]], username: str = "mavis") -> boo
 
 
 def load_user_goals(username: str = "mavis") -> List[Dict[str, Any]]:
-    """Tải danh sách đa mục tiêu từ MongoDB Atlas hoặc goals_ledger.json."""
+    """Tải danh sách đa mục tiêu từ MongoDB Atlas hoặc goals_ledger.json và chuẩn hóa theo Schema."""
     username = (username or DEFAULT_USER).strip().lower()
 
     # 1. Ưu tiên tải từ MongoDB Atlas
@@ -341,14 +403,10 @@ def load_user_goals(username: str = "mavis") -> List[Dict[str, Any]]:
         if state:
             goals = state.get("goals")
             if isinstance(goals, list) and len(goals) > 0:
-                return goals
+                return [standardize_goal_schema(g) for g in goals]
             p = state.get("profile") or state.get("goal_profile")
-            if p and isinstance(p, dict) and p.get("goal_name"):
-                copy_p = dict(p)
-                if "goal_id" not in copy_p: copy_p["goal_id"] = "g1"
-                if "category" not in copy_p: copy_p["category"] = "Học tập"
-                if "priority" not in copy_p: copy_p["priority"] = "high"
-                return [copy_p]
+            if p and isinstance(p, dict) and (p.get("goal_name") or p.get("title")):
+                return [standardize_goal_schema(p)]
 
     # 2. Fallback về goals_ledger.json
     all_data = load_all_users_data()
@@ -356,14 +414,10 @@ def load_user_goals(username: str = "mavis") -> List[Dict[str, Any]]:
     if isinstance(user_entry, dict):
         goals = user_entry.get("goals")
         if isinstance(goals, list) and len(goals) > 0:
-            return goals
+            return [standardize_goal_schema(g) for g in goals]
         p = user_entry.get("goal_profile", {})
-        if isinstance(p, dict) and p.get("goal_name"):
-            copy_p = dict(p)
-            if "goal_id" not in copy_p: copy_p["goal_id"] = "g1"
-            if "category" not in copy_p: copy_p["category"] = "Học tập"
-            if "priority" not in copy_p: copy_p["priority"] = "high"
-            return [copy_p]
+        if isinstance(p, dict) and (p.get("goal_name") or p.get("title")):
+            return [standardize_goal_schema(p)]
 
     return []
 
@@ -514,6 +568,187 @@ def load_user_roadmap(username: str = "mavis") -> Dict[str, Any]:
     # 2. Fallback về goals_ledger.json
     all_data = load_all_users_data()
     return all_data.get(username, {}).get("backcasting_roadmap", {})
+
+
+# ==============================================================================
+# MASTER SCHEDULE PERSISTENCE (LỊCH TỔNG HỢP GỘP TẤT CẢ ACTIVE GOALS)
+# ==============================================================================
+
+def save_master_schedule(schedule: List[Dict[str, Any]], username: str = "mavis") -> bool:
+    """
+    Lưu lịch trình tổng hợp Master Schedule gộp tất cả active goals vào collection 'user_states'
+    trên MongoDB Atlas và đồng bộ dự phòng vào goals_ledger.json.
+    Mỗi slot: date, session (Sáng/Chiều/Tối), time_slot, goal_id, goal_title, task_detail, resource_link, is_done.
+    """
+    username = (username or DEFAULT_USER).strip().lower()
+    clean_schedule = [s for s in schedule if isinstance(s, dict)]
+
+    # 1. Lưu vào MongoDB Atlas
+    if is_mongodb_available():
+        db_update_user_state(
+            username=username,
+            state_update={"master_schedule": clean_schedule},
+        )
+
+    # 2. Lưu dự phòng vào goals_ledger.json
+    all_data = load_all_users_data()
+    if username not in all_data or not isinstance(all_data[username], dict):
+        all_data[username] = get_blank_tree()
+    all_data[username]["master_schedule"] = clean_schedule
+    return save_all_users_data(all_data)
+
+
+def load_master_schedule(username: str = "mavis") -> List[Dict[str, Any]]:
+    """Tải lịch trình tổng hợp Master Schedule từ MongoDB Atlas hoặc goals_ledger.json."""
+    username = (username or DEFAULT_USER).strip().lower()
+
+    if is_mongodb_available():
+        state = db_get_user_state(username)
+        if state and "master_schedule" in state:
+            sched = state.get("master_schedule")
+            if isinstance(sched, list):
+                return sched
+
+    all_data = load_all_users_data()
+    user_entry = all_data.get(username, {})
+    if isinstance(user_entry, dict) and "master_schedule" in user_entry:
+        sched = user_entry.get("master_schedule")
+        if isinstance(sched, list):
+            return sched
+
+    return []
+
+
+def update_master_schedule_task_status(
+    task_identifier: str,
+    is_done: bool = True,
+    date: Optional[str] = None,
+    username: str = "mavis",
+) -> bool:
+    """Cập nhật trạng thái is_done cho task trong master_schedule trên MongoDB Atlas."""
+    username = (username or DEFAULT_USER).strip().lower()
+    schedule = load_master_schedule(username)
+    if not schedule:
+        return False
+
+    matched = False
+    task_clean = task_identifier.strip().lower()
+
+    for item in schedule:
+        if not isinstance(item, dict):
+            continue
+        # Cấu trúc phẳng từng task
+        t_title = str(item.get("task_detail", "")).lower()
+        if t_title and (task_clean in t_title or t_title in task_clean):
+            if date is None or item.get("date") == date:
+                item["is_done"] = is_done
+                matched = True
+
+        # Cấu trúc theo ngày / sessions
+        if "sessions" in item and isinstance(item["sessions"], dict):
+            for sess_name, task_list in item["sessions"].items():
+                if isinstance(task_list, list):
+                    for t in task_list:
+                        if isinstance(t, dict):
+                            st_title = str(t.get("task_detail", "")).lower()
+                            if st_title and (task_clean in st_title or st_title in task_clean):
+                                t["is_done"] = is_done
+                                matched = True
+
+    if matched:
+        save_master_schedule(schedule, username=username)
+    return matched
+
+
+# ==============================================================================
+# RETROSPECTIVE LOGS PERSISTENCE (LỊCH SỬ CHECK-IN CẢM XÚC & TỶ LỆ HOÀN THÀNH)
+# ==============================================================================
+
+def save_retrospective_logs(logs: List[Dict[str, Any]], username: str = "mavis") -> bool:
+    """Lưu lịch sử check-in cảm xúc, tỷ lệ hoàn thành vào MongoDB user_states và goals_ledger.json."""
+    username = (username or DEFAULT_USER).strip().lower()
+    clean_logs = [l for l in logs if isinstance(l, dict)]
+
+    if is_mongodb_available():
+        db_update_user_state(
+            username=username,
+            state_update={"retrospective_logs": clean_logs},
+        )
+
+    all_data = load_all_users_data()
+    if username not in all_data or not isinstance(all_data[username], dict):
+        all_data[username] = get_blank_tree()
+    all_data[username]["retrospective_logs"] = clean_logs
+    return save_all_users_data(all_data)
+
+
+def load_retrospective_logs(username: str = "mavis") -> List[Dict[str, Any]]:
+    """Tải lịch sử check-in cảm xúc và tỷ lệ hoàn thành từ MongoDB hoặc goals_ledger.json."""
+    username = (username or DEFAULT_USER).strip().lower()
+
+    if is_mongodb_available():
+        state = db_get_user_state(username)
+        if state and "retrospective_logs" in state:
+            rlogs = state.get("retrospective_logs")
+            if isinstance(rlogs, list):
+                return rlogs
+
+    all_data = load_all_users_data()
+    user_entry = all_data.get(username, {})
+    if isinstance(user_entry, dict) and "retrospective_logs" in user_entry:
+        rlogs = user_entry.get("retrospective_logs")
+        if isinstance(rlogs, list):
+            return rlogs
+
+    return []
+
+
+def append_retrospective_log(log_entry: Dict[str, Any], username: str = "mavis") -> bool:
+    """Thêm một bản ghi check-in mới vào retrospective_logs trên MongoDB."""
+    username = (username or DEFAULT_USER).strip().lower()
+    existing_logs = load_retrospective_logs(username)
+    if not isinstance(log_entry, dict):
+        return False
+
+    clean_entry = dict(log_entry)
+    if "log_id" not in clean_entry:
+        clean_entry["log_id"] = f"retro_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    if "timestamp" not in clean_entry:
+        clean_entry["timestamp"] = datetime.now().isoformat()
+    if "date" not in clean_entry:
+        clean_entry["date"] = datetime.now().strftime("%Y-%m-%d")
+
+    existing_logs.append(clean_entry)
+    return save_retrospective_logs(existing_logs, username=username)
+
+
+def get_user_state_full(username: str = "mavis") -> Dict[str, Any]:
+    """Tải toàn bộ trạng thái người dùng (goals, master_schedule, retrospective_logs, user_profile) từ MongoDB."""
+    username = (username or DEFAULT_USER).strip().lower()
+    if is_mongodb_available():
+        st = db_get_user_state(username)
+        if st:
+            return {
+                "username": username,
+                "goals": load_user_goals(username),
+                "master_schedule": load_master_schedule(username),
+                "retrospective_logs": load_retrospective_logs(username),
+                "profile": st.get("profile", {}),
+                "resources": st.get("resources", []),
+                "roadmap": st.get("roadmap", {}),
+                "user_profile": st.get("user_profile", {}),
+            }
+
+    return {
+        "username": username,
+        "goals": load_user_goals(username),
+        "master_schedule": load_master_schedule(username),
+        "retrospective_logs": load_retrospective_logs(username),
+        "profile": {},
+        "resources": [],
+        "roadmap": {},
+        "user_profile": {},
+    }
 
 
 def load_categorized_goals(username: str = "mavis") -> Dict[str, Any]:

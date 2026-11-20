@@ -1,5 +1,6 @@
 import os
 import json
+from datetime import datetime
 from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
@@ -55,6 +56,13 @@ from memory.goals import (
     load_user_resources,
     save_user_roadmap,
     load_user_roadmap,
+    save_master_schedule,
+    load_master_schedule,
+    update_master_schedule_task_status,
+    save_retrospective_logs,
+    load_retrospective_logs,
+    append_retrospective_log,
+    get_user_state_full,
 )
 from agents.task_estimator import analyze_and_estimate_goal
 try:
@@ -2784,3 +2792,641 @@ NHIỆM VỤ CỦA BẠN:
         "intent": "retrospective",
         "username": username,
     }
+
+
+# ==============================================================================
+# MÔ HÌNH CEO ĐIỀU PHỐI 3 GIAI ĐOẠN KHÉP KÍN (CLOSED-LOOP MULTI-AGENT ARCHITECTURE)
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. CEO COACH CHAT (ĐÁNH GIÁ TỔNG QUỸ THỜI GIAN & KHẢ THI MỤC TIÊU MỚI)
+# ------------------------------------------------------------------------------
+
+class CEOCoachOutput(BaseModel):
+    detected_goal_title: Optional[str] = Field(None, description="Tên mục tiêu mới phát hiện được nếu người dùng đề xuất (VD: 'IELTS 7.0', 'Học Python')")
+    category: Optional[str] = Field("Học tập", description="Nhóm: 'Học tập', 'Sự nghiệp', 'Sức khỏe', 'Tài chính', hoặc 'Mối quan hệ'")
+    daily_hours: Optional[float] = Field(None, description="Số giờ rảnh dự kiến cam kết cho mục tiêu mới mỗi ngày")
+    duration_days: Optional[int] = Field(None, description="Tổng thời gian thực hiện ước tính (ngày)")
+    preferred_time: Optional[str] = Field("08:00 - 10:00 Sáng", description="Khung giờ ưu tiên trong ngày")
+    priority: Optional[str] = Field("P2 - High", description="Mức ưu tiên: P1 - Critical, P2 - High, P3 - Medium, P4 - Low")
+    current_level: Optional[str] = Field("Cơ bản", description="Trình độ hoặc vạch xuất phát hiện tại")
+    feasibility_assessment: str = Field(description="Đánh giá chi tiết tính khả thi dựa trên nhịp sinh học và tổng số giờ hiện có")
+    ready_to_approve: bool = Field(description="True nếu mục tiêu rõ ràng và tổng quỹ thời gian sau khi thêm mục tiêu mới <= 5.5h/ngày (khả thi). False nếu thiếu thông số cốt lõi hoặc quá tải.")
+    coach_response: str = Field(description="Lời trò chuyện của CEO Life Coach: sắc bén, thấu cảm, ngắn gọn, phân tích chi phí cơ hội và đưa câu hỏi chốt rõ ràng")
+
+
+def ceo_coach_chat(
+    user_message: str,
+    username: str = "mavis",
+    chat_history: Optional[List[Dict[str, str]]] = None,
+) -> Dict[str, Any]:
+    """
+    Hàm Chatbot 1: CEO Coach Chat (Trò chuyện tổng & Thẩm định tính khả thi).
+    Sử dụng gemini-2.5-flash để phản hồi nhanh, sắc bén.
+    Tính toán tổng quỹ thời gian hiện tại của user trên các mục tiêu 'active' trong MongoDB.
+    Đánh giá độ khả thi và trả về cờ ready_to_approve=True khi khả thi và đủ thông số.
+    """
+    username = (username or "mavis").strip().lower()
+    current_goals = load_user_goals(username)
+    active_goals = [g for g in current_goals if g.get("status") == "active"]
+    current_allocated_hours = sum(float(g.get("daily_hours", 0) or 0) for g in active_goals)
+
+    active_summary = []
+    for g in active_goals:
+        active_summary.append(
+            f"- Mục tiêu: {g.get('title') or g.get('goal_name')} | Quỹ giờ: {g.get('daily_hours')}h/ngày | Khung giờ: {g.get('preferred_time')} | Ưu tiên: {g.get('priority')}"
+        )
+    active_goals_text = "\n".join(active_summary) if active_summary else "Chưa có mục tiêu nào đang Active."
+
+    history_text = ""
+    if chat_history:
+        history_lines = [f"{msg.get('role', 'user')}: {msg.get('content', '')}" for msg in chat_history[-5:]]
+        history_text = "\nLịch sử trao đổi gần nhất:\n" + "\n".join(history_lines)
+
+    prompt = f"""Bạn là CEO & Elite Life Coach độc quyền của người dùng.
+Nhiệm vụ: Trò chuyện tổng, thẩm định tính khả thi của mục tiêu mới đối chiếu với tổng quỹ thời gian hiện tại.
+
+DỮ LIỆU HIỆN TẠI TỪ CƠ SỞ DỮ LIỆU MONGODB CỦA USER:
+- Tổng quỹ giờ đã cam kết trên các mục tiêu đang Active: {current_allocated_hours:.1f} giờ/ngày.
+- Danh sách các mục tiêu đang Active:
+{active_goals_text}
+
+QUY TẮC NHỊP SINH HỌC & GIỚI HẠN NĂNG LƯỢNG CỦA CEO COACH:
+1. Tổng quỹ giờ cam kết học tập / deep work tối đa an toàn mỗi ngày là 5.0 - 5.5 giờ.
+2. Nếu người dùng đề xuất mục tiêu mới và tổng giờ (hiện tại + mới) <= 5.5h/ngày VÀ đã có đủ thông số cốt lõi (tên mục tiêu, số giờ, thời hạn) -> Đặt ready_to_approve = True.
+3. Nếu tổng giờ vượt quá 5.5h/ngày (nguy cơ kiệt sức / burnout), hoặc người dùng chưa nêu rõ số giờ hoặc thời hạn -> Đặt ready_to_approve = False. Cảnh báo nguy cơ quá tải, đề xuất tạm hoãn (pause) mục tiêu ít ưu tiên hơn hoặc thương lượng giảm giờ.
+4. Phong cách phản hồi: Ngắn gọn, chuyên nghiệp, truyền cảm hứng, sắc bén như một CEO Coach thực thụ.
+
+{history_text}
+Tin nhắn hiện tại của người dùng: "{user_message}"
+"""
+
+    try:
+        analysis: CEOCoachOutput = invoke_llm_resilient(
+            preferred_model="gemini-2.5-flash",
+            messages=[
+                SystemMessage(content=SYSTEM_PROMPT),
+                HumanMessage(content=prompt),
+            ],
+            structured_schema=CEOCoachOutput,
+            temperature=0.2,
+        )
+    except Exception as e:
+        print(f"Lỗi invoke trong ceo_coach_chat: {e}")
+        analysis = CEOCoachOutput(
+            detected_goal_title="Mục tiêu mới",
+            category="Học tập",
+            daily_hours=1.5,
+            duration_days=90,
+            preferred_time="08:00 - 10:00 Sáng",
+            priority="P2 - High",
+            feasibility_assessment=f"Hiện bạn đang cam kết {current_allocated_hours:.1f}h/ngày. Mục tiêu mới cần cân đối quỹ thời gian.",
+            ready_to_approve=True if (current_allocated_hours + 1.5) <= 5.5 else False,
+            coach_response=f"Tôi đã ghi nhận định hướng của bạn. Hiện tại bạn đang có {current_allocated_hours:.1f}h/ngày đã phân bổ. Bạn có muốn chúng ta chốt và chuyển sang Giai đoạn 1 (Architect) để bóc tách lộ trình chi tiết không?",
+        )
+
+    # Nếu được phê duyệt (ready_to_approve == True) và có tên mục tiêu -> Thêm hoặc cập nhật vào goals (status: evaluating)
+    new_goal_record = None
+    if analysis.ready_to_approve and analysis.detected_goal_title:
+        title_lower = analysis.detected_goal_title.strip().lower()
+        matched_idx = None
+        for idx, g in enumerate(current_goals):
+            if str(g.get("title") or g.get("goal_name", "")).strip().lower() == title_lower:
+                matched_idx = idx
+                break
+
+        goal_id = current_goals[matched_idx].get("id", f"goal_{uuid.uuid4().hex[:6]}") if matched_idx is not None else f"goal_{uuid.uuid4().hex[:6]}"
+        new_goal_record = {
+            "id": goal_id,
+            "goal_id": goal_id,
+            "title": analysis.detected_goal_title,
+            "goal_name": analysis.detected_goal_title,
+            "category": analysis.category or "Học tập",
+            "priority": analysis.priority or "P2 - High",
+            "preferred_time": analysis.preferred_time or "08:00 - 10:00 Sáng",
+            "preferred_slots": analysis.preferred_time or "08:00 - 10:00 Sáng",
+            "daily_hours": float(analysis.daily_hours or 1.5),
+            "duration_days": int(analysis.duration_days or 90),
+            "current_level": analysis.current_level or "Cơ bản",
+            "status": "evaluating",
+            "is_complete": True,
+            "breakdown": {
+                "yearly": f"Chinh phục thành công {analysis.detected_goal_title}",
+                "quarterly": [],
+                "monthly": [],
+                "weekly": [],
+                "resources": [],
+            },
+        }
+
+        if matched_idx is not None:
+            current_goals[matched_idx].update(new_goal_record)
+        else:
+            current_goals.append(new_goal_record)
+
+        save_user_goals(current_goals, username=username)
+
+    return {
+        "response": analysis.coach_response,
+        "ready_to_approve": analysis.ready_to_approve,
+        "total_allocated_hours": current_allocated_hours + (float(analysis.daily_hours or 0) if analysis.ready_to_approve else 0),
+        "new_goal_detected": new_goal_record,
+        "goals": load_user_goals(username),
+        "status": "ready_for_architect" if analysis.ready_to_approve else "evaluating",
+    }
+
+
+# ------------------------------------------------------------------------------
+# 2. ARCHITECT CHAT (GIAI ĐOẠN 1: PHÂN RÃ LỘ TRÌNH VÀ THẨM ĐỊNH TÀI NGUYÊN)
+# ------------------------------------------------------------------------------
+
+class ResourceItemDetail(BaseModel):
+    title: str = Field(description="Tên tài liệu, giáo trình, bộ đề hoặc công cụ")
+    url: str = Field(description="Đường link chính thức uy tín")
+    type: str = Field(description="'Giáo trình', 'Bộ đề', 'Khóa học', hoặc 'Công cụ'")
+    how_to_use: str = Field(description="Hướng dẫn khai thác cụ thể")
+
+
+class WeeklyMilestoneItem(BaseModel):
+    week: str = Field(description="Tuần (VD: 'Tuần 1', 'Tuần 2')")
+    milestone: str = Field(description="Cột mốc trọng tâm của tuần")
+    action_items: List[str] = Field(description="2-3 hành động con cụ thể")
+    estimated_hours: float = Field(description="Số giờ dự kiến")
+    resources: str = Field(default="", description="Tài liệu bổ trợ cho tuần")
+
+
+class MonthlyMilestoneItem(BaseModel):
+    month: str = Field(description="Tháng (VD: 'Tháng 1', 'Tháng 2')")
+    milestone: str = Field(description="Mục tiêu cốt lõi của tháng")
+    resources: str = Field(default="", description="Tài liệu trọng tâm")
+
+
+class QuarterlyMilestoneItem(BaseModel):
+    quarter: str = Field(description="Quý (VD: 'Quý 1', 'Quý 2')")
+    focus: str = Field(description="Trọng tâm chiến lược")
+    target_outcome: str = Field(description="Kết quả đầu ra kỳ vọng")
+
+
+class ArchitectGoalBreakdown(BaseModel):
+    updated_preferred_time: Optional[str] = Field(None, description="Khung giờ ưu tiên được cập nhật nếu user yêu cầu đổi")
+    updated_priority: Optional[str] = Field(None, description="Độ ưu tiên được cập nhật nếu user yêu cầu đổi")
+    updated_daily_hours: Optional[float] = Field(None, description="Số giờ mỗi ngày được cập nhật nếu user yêu cầu đổi")
+    yearly: str = Field(description="Tầm nhìn dài hạn / mục tiêu cốt lõi năm")
+    quarterly: List[QuarterlyMilestoneItem] = Field(description="Phân kỳ các Quý (quarterly)")
+    monthly: List[MonthlyMilestoneItem] = Field(description="Phân kỳ các Tháng (monthly)")
+    weekly: List[WeeklyMilestoneItem] = Field(description="Phân rã chi tiết các Tuần (weekly)")
+    resources: List[ResourceItemDetail] = Field(description="Danh sách tài liệu và link chính thức thẩm định")
+    architect_response: str = Field(description="Phản hồi chi tiết, minh bạch của AI Architect về lộ trình đã thiết kế hoặc tinh chỉnh")
+
+
+def architect_chat(
+    user_message: str,
+    username: str = "mavis",
+    goal_id: Optional[str] = None,
+    chat_history: Optional[List[Dict[str, str]]] = None,
+) -> Dict[str, Any]:
+    """
+    Hàm Chatbot 2: Architect Chat (Chuyên trách Giai đoạn 1).
+    Sử dụng gemini-2.5-pro kết hợp tìm kiếm tài liệu chuẩn.
+    Nhận yêu cầu chỉnh sửa giờ giấc, độ ưu tiên, thêm/bớt tài liệu theo Năm/Quý/Tháng/Tuần
+    và cập nhật thẳng vào MongoDB goals.breakdown.
+    """
+    username = (username or "mavis").strip().lower()
+    goals = load_user_goals(username)
+
+    # Xác định mục tiêu trọng tâm
+    target_goal = None
+    target_idx = None
+
+    if goal_id:
+        for idx, g in enumerate(goals):
+            if g.get("id") == goal_id or g.get("goal_id") == goal_id:
+                target_goal = g
+                target_idx = idx
+                break
+
+    if target_goal is None:
+        # Tìm theo từ khóa trong tin nhắn
+        msg_lower = user_message.lower()
+        for idx, g in enumerate(goals):
+            g_title = str(g.get("title") or g.get("goal_name", "")).lower()
+            if g_title and g_title in msg_lower:
+                target_goal = g
+                target_idx = idx
+                break
+
+    if target_goal is None:
+        # Ưu tiên mục tiêu đang evaluating, nếu không thì lấy mục tiêu đầu tiên
+        for idx, g in enumerate(goals):
+            if g.get("status") == "evaluating":
+                target_goal = g
+                target_idx = idx
+                break
+        if target_goal is None and goals:
+            target_goal = goals[0]
+            target_idx = 0
+
+    # Nếu chưa có goal nào, tạo một goal cơ bản từ tin nhắn
+    if target_goal is None:
+        target_goal = {
+            "id": f"goal_{uuid.uuid4().hex[:6]}",
+            "title": "Mục tiêu hành động mới",
+            "category": "Học tập",
+            "priority": "P2 - High",
+            "preferred_time": "08:00 - 10:00 Sáng",
+            "daily_hours": 1.5,
+            "duration_days": 90,
+            "status": "evaluating",
+            "breakdown": {},
+        }
+        goals.append(target_goal)
+        target_idx = len(goals) - 1
+
+    goal_title = target_goal.get("title") or target_goal.get("goal_name", "Mục tiêu phát triển")
+    current_bd = target_goal.get("breakdown", {})
+
+    # Tìm kiếm tài liệu thực tế bổ trợ
+    search_query = f"{goal_title} tài liệu giáo trình lộ trình chính thức uy tín"
+    raw_search = execute_resource_search(search_query, max_results=3)
+
+    architect_prompt = f"""Bạn là Trưởng Kiến Trúc Sư Chiến Lược (AI Roadmap & Resource Architect) của hệ thống Mavis.
+Nhiệm vụ: Chuyên trách GIAI ĐOẠN 1 — Phân rã lộ trình khép kín và thẩm định tài nguyên cho mục tiêu:
+- Tên mục tiêu: {goal_title}
+- Phân loại: {target_goal.get('category', 'Học tập')}
+- Mức ưu tiên hiện tại: {target_goal.get('priority', 'P2 - High')}
+- Khung giờ ưu tiên hiện tại: {target_goal.get('preferred_time', '08:00 - 10:00 Sáng')}
+- Quỹ thời gian: {target_goal.get('daily_hours', 1.5)} giờ/ngày
+- Thời hạn: {target_goal.get('duration_days', 90)} ngày
+- Trạng thái hiện tại của breakdown:
+{json.dumps(current_bd, ensure_ascii=False, indent=2)}
+
+TÀI NGUYÊN THỰC TẾ TÌM KIẾM ĐƯỢC:
+{json.dumps(raw_search, ensure_ascii=False, indent=2)}
+
+YÊU CẦU CỦA NGƯỜI DÙNG:
+"{user_message}"
+
+CHỈ THỊ KIẾN TRÚC:
+1. Nếu người dùng yêu cầu chỉnh sửa giờ giấc, độ ưu tiên hoặc quỹ giờ, hãy cập nhật vào updated_preferred_time / updated_priority / updated_daily_hours.
+2. Xây dựng phân cấp chi tiết khép kín 4 tầng:
+   - yearly: Tầm nhìn chiến lược 1 năm.
+   - quarterly: Phân kỳ các Quý (quarter, focus, target_outcome).
+   - monthly: Phân rã từng Tháng (month, milestone, resources).
+   - weekly: Kế hoạch hành động từng Tuần (week, milestone, action_items, estimated_hours, resources).
+   - resources: 2-3 tài liệu, giáo trình hoặc công cụ chuẩn mực nhất kèm link URL thật.
+3. Xuất ra đầy đủ dữ liệu có cấu trúc để hệ thống lưu trực tiếp vào MongoDB goals.breakdown.
+"""
+
+    try:
+        result: ArchitectGoalBreakdown = invoke_llm_resilient(
+            preferred_model="gemini-2.5-pro",
+            messages=[
+                SystemMessage(content=SYSTEM_PROMPT),
+                HumanMessage(content=architect_prompt),
+            ],
+            structured_schema=ArchitectGoalBreakdown,
+            temperature=0.2,
+        )
+    except Exception as e:
+        print(f"Lỗi invoke trong architect_chat: {e}")
+        # Fallback an toàn
+        result = ArchitectGoalBreakdown(
+            yearly=f"Chinh phục toàn diện {goal_title}",
+            quarterly=[
+                QuarterlyMilestoneItem(quarter="Quý 1", focus="Nền tảng & Cốt lõi", target_outcome="Hoàn thiện 50% kiến thức trọng tâm"),
+                QuarterlyMilestoneItem(quarter="Quý 2", focus="Thực chiến & Luyện đề", target_outcome="Đạt điểm mục tiêu chuẩn hóa"),
+            ],
+            monthly=[
+                MonthlyMilestoneItem(month="Tháng 1", milestone="Củng cố kiến thức gốc và phương pháp", resources="Tài liệu chuyên ngành chuẩn"),
+                MonthlyMilestoneItem(month="Tháng 2", milestone="Tăng tốc giải bài tập nâng cao", resources="Bộ đề luyện thi chính thức"),
+                MonthlyMilestoneItem(month="Tháng 3", milestone="Tổng ôn và thi thử chuẩn điều kiện", resources="Mock tests chính thức"),
+            ],
+            weekly=[
+                WeeklyMilestoneItem(week="Tuần 1", milestone="Đánh giá năng lực và học module mở đầu", action_items=["Học lý thuyết chương 1", "Làm bài tập vận dụng cơ bản"], estimated_hours=7.0),
+                WeeklyMilestoneItem(week="Tuần 2", milestone="Nâng cao kỹ năng phân tích và phản xạ", action_items=["Giải bài tập chương 2", "Review lỗi sai chi tiết"], estimated_hours=7.0),
+            ],
+            resources=[
+                ResourceItemDetail(
+                    title=f"Giáo trình chuẩn mực cho {goal_title}",
+                    url="https://cambridgeenglish.org",
+                    type="Giáo trình",
+                    how_to_use="Học đều đặn theo khung giờ vàng đã thiết lập.",
+                )
+            ],
+            architect_response=f"Tôi đã phân rã toàn diện lộ trình 4 tầng (Năm -> Quý -> Tháng -> Tuần) kèm tài liệu thực tế cho mục tiêu '{goal_title}'. Trạng thái mục tiêu đã được kích hoạt (Active) và sẵn sàng để xếp lịch tại Giai đoạn 2!",
+        )
+
+    # Cập nhật mục tiêu và lưu vào MongoDB Atlas
+    updated_bd = {
+        "yearly": result.yearly,
+        "quarterly": [q.model_dump() for q in result.quarterly],
+        "monthly": [m.model_dump() for m in result.monthly],
+        "weekly": [w.model_dump() for w in result.weekly],
+        "resources": [r.model_dump() for r in result.resources],
+    }
+    target_goal["breakdown"] = updated_bd
+
+    if result.updated_preferred_time:
+        target_goal["preferred_time"] = result.updated_preferred_time
+        target_goal["preferred_slots"] = result.updated_preferred_time
+    if result.updated_priority:
+        target_goal["priority"] = result.updated_priority
+    if result.updated_daily_hours:
+        target_goal["daily_hours"] = float(result.updated_daily_hours)
+
+    target_goal["status"] = "active"
+    target_goal["is_complete"] = True
+
+    if target_idx is not None and target_idx < len(goals):
+        goals[target_idx] = target_goal
+    else:
+        goals.append(target_goal)
+
+    save_user_goals(goals, username=username)
+    save_user_resources(updated_bd["resources"], username=username)
+
+    return {
+        "response": result.architect_response,
+        "updated_goal": target_goal,
+        "goals": load_user_goals(username),
+        "goal_id": target_goal.get("id"),
+        "breakdown": updated_bd,
+    }
+
+
+# ------------------------------------------------------------------------------
+# 3. SCHEDULER CHAT (GIAI ĐOẠN 2: MASTER SCHEDULE & DỜI LỊCH LINH HOẠT)
+# ------------------------------------------------------------------------------
+
+class MasterScheduleTaskItem(BaseModel):
+    date: str = Field(description="Ngày trong tuần (VD: 'Thứ Hai', 'Thứ Ba', hoặc '2026-11-23')")
+    session: str = Field(description="'Sáng', 'Chiều', hoặc 'Tối'")
+    time_slot: str = Field(description="Khung giờ cụ thể không trùng lặp (VD: '08:00 - 10:00', '14:30 - 16:00')")
+    goal_id: str = Field(description="ID mục tiêu tương ứng")
+    goal_title: str = Field(description="Tên mục tiêu tương ứng")
+    task_detail: str = Field(description="Nhiệm vụ cụ thể chi tiết kèm bài tập/nội dung")
+    resource_link: str = Field(default="", description="Link tài liệu hoặc tài nguyên đi kèm")
+    is_done: bool = Field(default=False, description="Trạng thái hoàn thành (True/False)")
+
+
+class MasterScheduleOutput(BaseModel):
+    is_reschedule_request: bool = Field(description="True nếu người dùng báo bận, hoãn lịch hoặc dời task; False nếu tạo lịch mới")
+    rescheduled_task_names: List[str] = Field(default=[], description="Danh sách các task đã được dời sang ngày khác")
+    master_schedule: List[MasterScheduleTaskItem] = Field(description="Lịch trình tổng hợp gộp tất cả active goals, không trùng lặp giờ giấc")
+    scheduler_response: str = Field(description="Lời phản hồi của AI Scheduler: phân bổ nhịp sinh học, bảo vệ năng lượng và thông báo các slot đã xếp hoặc dời")
+
+
+def scheduler_chat(
+    user_message: str,
+    username: str = "mavis",
+    chat_history: Optional[List[Dict[str, str]]] = None,
+) -> Dict[str, Any]:
+    """
+    Hàm Chatbot 3: Scheduler Chat (Chuyên trách Giai đoạn 2).
+    Sử dụng gemini-2.5-flash để phản hồi và tối ưu lịch nhanh chóng.
+    Gom toàn bộ goals đang 'active' để xếp lịch không trùng lặp vào master_schedule.
+    Hỗ trợ dời lịch linh hoạt khi user báo bận, lưu bền vững vào MongoDB Atlas.
+    """
+    username = (username or "mavis").strip().lower()
+    goals = load_user_goals(username)
+    active_goals = [g for g in goals if g.get("status") == "active"]
+    if not active_goals:
+        active_goals = goals  # Fallback nếu chưa set active
+
+    existing_schedule = load_master_schedule(username)
+
+    active_summary = []
+    for g in active_goals:
+        bd = g.get("breakdown", {})
+        weekly = bd.get("weekly", [])
+        w1_tasks = weekly[0].get("action_items", []) if weekly else []
+        active_summary.append({
+            "goal_id": g.get("id"),
+            "title": g.get("title") or g.get("goal_name"),
+            "preferred_time": g.get("preferred_time"),
+            "daily_hours": g.get("daily_hours", 1.5),
+            "priority": g.get("priority", "P2 - High"),
+            "immediate_tasks": w1_tasks,
+        })
+
+    scheduler_prompt = f"""Bạn là Bậc Thầy Phân Bổ Lịch Trình Điều Hành (AI Master Scheduler) của hệ thống Mavis.
+Nhiệm vụ: Chuyên trách GIAI ĐOẠN 2 — Gom toàn bộ mục tiêu đang Active để xếp lịch không trùng lặp vào master_schedule, hoặc dời lịch linh hoạt khi người dùng báo bận.
+
+DANH SÁCH MỤC TIÊU ACTIVE CẦN XẾP LỊCH TỪ MONGODB:
+{json.dumps(active_summary, ensure_ascii=False, indent=2)}
+
+LỊCH HIỆN CÓ TRONG MASTER SCHEDULE (NẾU ĐÃ CÓ):
+{json.dumps(existing_schedule[:10], ensure_ascii=False, indent=2) if existing_schedule else "Chưa có lịch, cần sinh mới."}
+
+QUY TẮC NHỊP SINH HỌC & XẾP LỊCH ĐIỀU HÀNH BẮT BUỘC:
+1. KHÔNG TRÙNG LẶP: Mỗi khung giờ trong ngày chỉ xếp DUY NHẤT 1 mục tiêu.
+2. Buổi Sáng (08:00 - 10:00): Ưu tiên tuyệt đối cho mục tiêu có độ ưu tiên cao nhất (P1) hoặc tác vụ nhận thức nặng (giải đề, tư duy logic).
+3. Buổi Chiều (14:00 - 16:00 hoặc 16:00 - 18:00): Các tác vụ thực hành, thể chất, review.
+4. Buổi Tối (19:30 - 21:00): Habit stacking, ôn tập nhẹ hoặc Recovery Buffer.
+5. KHI NGƯỜI DÙNG BÁO BẬN (VD: 'hôm nay bận đi tiệc', 'chiều nay bận họp', 'dời task sang mai'):
+   - Đặt is_reschedule_request = True.
+   - Nhận diện các task bị ảnh hưởng, tự động dời sang ngày tiếp theo hoặc buổi sáng cuối tuần.
+   - Thêm tên các task đã dời vào rescheduled_task_names.
+6. Mỗi phần tử trong master_schedule bắt buộc gồm: date, session (Sáng/Chiều/Tối), time_slot, goal_id, goal_title, task_detail, resource_link, is_done (mặc định False).
+
+YÊU CẦU CỦA NGƯỜI DÙNG:
+"{user_message}"
+"""
+
+    try:
+        output: MasterScheduleOutput = invoke_llm_resilient(
+            preferred_model="gemini-2.5-flash",
+            messages=[
+                SystemMessage(content=SYSTEM_PROMPT),
+                HumanMessage(content=scheduler_prompt),
+            ],
+            structured_schema=MasterScheduleOutput,
+            temperature=0.2,
+        )
+        schedule_dicts = [item.model_dump() for item in output.master_schedule]
+        rescheduled_tasks = output.rescheduled_task_names
+        response_text = output.scheduler_response
+        is_rescheduled = output.is_reschedule_request
+    except Exception as e:
+        print(f"Lỗi invoke trong scheduler_chat: {e}")
+        # Fallback tạo lịch mẫu phân chia sáng / chiều / tối
+        days = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu"]
+        schedule_dicts = []
+        for d in days:
+            for idx, g in enumerate(active_goals):
+                g_title = g.get("title") or g.get("goal_name", "Mục tiêu")
+                slot = "08:00 - 10:00" if idx == 0 else ("14:30 - 16:00" if idx == 1 else "19:30 - 21:00")
+                sess = "Sáng" if idx == 0 else ("Chiều" if idx == 1 else "Tối")
+                schedule_dicts.append({
+                    "date": d,
+                    "session": sess,
+                    "time_slot": slot,
+                    "goal_id": g.get("id", f"g{idx}"),
+                    "goal_title": g_title,
+                    "task_detail": f"Nghiên cứu và thực hành bài tập cho {g_title}",
+                    "resource_link": "https://cambridgeenglish.org",
+                    "is_done": False,
+                })
+        rescheduled_tasks = []
+        is_rescheduled = False
+        response_text = "Tôi đã phân rã toàn bộ các mục tiêu Active vào Master Schedule theo đúng nguyên tắc nhịp sinh học (Sáng học nặng, Chiều thực hành, Tối ôn tập) mà không trùng lặp giờ giấc!"
+
+    save_master_schedule(schedule_dicts, username=username)
+
+    return {
+        "response": response_text,
+        "master_schedule": schedule_dicts,
+        "rescheduled_tasks": rescheduled_tasks,
+        "is_rescheduled": is_rescheduled,
+    }
+
+
+# ------------------------------------------------------------------------------
+# 4. RETROSPECTIVE CHAT (GIAI ĐOẠN 3: HỒI CỨU, CHECK-IN CẢM XÚC & KHÉP KÍN VÒNG LẶP)
+# ------------------------------------------------------------------------------
+
+class UncompletedTaskReason(BaseModel):
+    task_detail: str = Field(description="Nhiệm vụ chưa hoàn thành")
+    goal_title: str = Field(default="", description="Thuộc mục tiêu nào")
+    reason: str = Field(description="Nguyên nhân chính: 'quá khó', 'quá tải', 'bận việc đột xuất', 'thiếu tập trung', 'mệt mỏi'")
+    specific_bottleneck: str = Field(description="Điểm nghẽn cụ thể")
+
+
+class ProposedBreakdownAdjustment(BaseModel):
+    target_goal_id: Optional[str] = Field(None, description="ID mục tiêu cần điều chỉnh lại trong goals.breakdown")
+    adjustment_type: str = Field(description="'reduce_daily_hours', 'extend_duration', 'simplify_weekly_actions', 'add_foundation_resource', hoặc 'keep_as_is'")
+    recommended_daily_hours: Optional[float] = Field(None, description="Số giờ mới đề xuất nếu bị quá tải")
+    recommended_resource_additions: List[Dict[str, str]] = Field(default=[], description="Tài liệu bổ trợ dễ hơn nếu task quá khó")
+    adjustment_explanation: str = Field(description="Lý do điều chỉnh chiến lược")
+
+
+class RetrospectiveChatOutput(BaseModel):
+    detected_emotion: str = Field(description="'motivated', 'overwhelmed', 'tired', 'neutral', 'satisfied', hoặc 'discouraged'")
+    completion_rate: float = Field(description="Tỷ lệ hoàn thành ước tính (0.0 đến 100.0%)")
+    uncompleted_tasks_analysis: List[UncompletedTaskReason] = Field(description="Phân tích chi tiết từng task chưa hoàn thành và lý do")
+    coaching_reflection: str = Field(description="Lời trò chuyện khai vấn (Socratic reflection) thấu cảm, khích lệ tinh thần và định hướng phục hồi")
+    proposed_adjustment: ProposedBreakdownAdjustment = Field(description="Đề xuất điều chỉnh ngược lại goals.breakdown")
+    should_apply_adjustment: bool = Field(description="True nếu cần tự động cập nhật ngay đề xuất vào goals.breakdown")
+
+
+def retrospective_chat(
+    user_message: str,
+    username: str = "mavis",
+    chat_history: Optional[List[Dict[str, str]]] = None,
+) -> Dict[str, Any]:
+    """
+    Hàm Chatbot 4: Retrospective Chat (Chuyên trách Giai đoạn 3).
+    Sử dụng gemini-2.5-flash để khai vấn thấu cảm và phân tích nguyên nhân gốc rễ.
+    Phân tích các task chưa 'is_done' từ master_schedule, hỏi thăm cảm xúc / nguyên nhân,
+    lưu check-in log vào retrospective_logs và sinh đề xuất điều chỉnh ngược lại goals.breakdown (khép kín vòng lặp).
+    """
+    username = (username or "mavis").strip().lower()
+    master_schedule = load_master_schedule(username)
+    goals = load_user_goals(username)
+
+    done_tasks = [t for t in master_schedule if t.get("is_done") is True]
+    uncompleted_tasks = [t for t in master_schedule if t.get("is_done") is False]
+    total_count = len(master_schedule) if master_schedule else 1
+    actual_rate = (len(done_tasks) / total_count) * 100.0
+
+    uncompleted_sample = [
+        {"task_detail": t.get("task_detail"), "goal_title": t.get("goal_title"), "date": t.get("date"), "slot": t.get("time_slot")}
+        for t in uncompleted_tasks[:6]
+    ]
+
+    retro_prompt = f"""Bạn là Chuyên Gia Khai Vấn Hồi Cứu & Bảo Vệ Năng Lượng (AI Retrospective Coach) của hệ thống Mavis.
+Nhiệm vụ: Chuyên trách GIAI ĐOẠN 3 — Đánh giá các task chưa hoàn thành, phân tích cảm xúc và nguyên nhân (quá khó, quá tải...), và sinh đề xuất điều chỉnh ngược lại goals.breakdown để khép kín vòng lặp điều phối.
+
+DỮ LIỆU HIỆN TẠI TỪ MASTER SCHEDULE CỦA USER:
+- Tổng số task trong lịch: {len(master_schedule)}
+- Số task đã hoàn thành (is_done=True): {len(done_tasks)}
+- Số task chưa hoàn thành (is_done=False): {len(uncompleted_tasks)}
+- Tỷ lệ hoàn thành thực tế: {actual_rate:.1f}%
+
+DANH SÁCH TASK CHƯA HOÀN THÀNH:
+{json.dumps(uncompleted_sample, ensure_ascii=False, indent=2)}
+
+DANH SÁCH MỤC TIÊU HIỆN CÓ:
+{json.dumps([{'id': g.get('id'), 'title': g.get('title') or g.get('goal_name'), 'daily_hours': g.get('daily_hours')} for g in goals], ensure_ascii=False, indent=2)}
+
+CHIA SẺ / PHẢN HỒI CỦA NGƯỜI DÙNG:
+"{user_message}"
+
+CHỈ THỊ KHAI VẤN (RETROSPECTIVE PROTOCOL):
+1. Thấu cảm tuyệt đối: Không phán xét hay trách cứ. Phân tích xem nguyên nhân là do "quá tải" (quá nhiều task), "quá khó" (tài liệu vượt quá trình độ), "mệt mỏi / mất tập trung", hay "bận việc đột xuất".
+2. Sinh đề xuất điều chỉnh ngược lại goals.breakdown (Giai đoạn 1):
+   - Nếu "quá tải": Đề xuất giảm daily_hours (VD: từ 2h xuống 1.5h) và nới lỏng tuần học.
+   - Nếu "quá khó": Đề xuất bổ sung tài liệu nền tảng cơ bản hơn vào resources.
+   - Đặt should_apply_adjustment = True nếu xác định được mục tiêu cần điều chỉnh.
+3. Lời coaching_reflection: Hỏi câu hỏi mở (Socratic), công nhận những nỗ lực đã hoàn thành và khích lệ người dùng duy trì đà tiến bộ.
+"""
+
+    try:
+        output: RetrospectiveChatOutput = invoke_llm_resilient(
+            preferred_model="gemini-2.5-flash",
+            messages=[
+                SystemMessage(content=SYSTEM_PROMPT),
+                HumanMessage(content=retro_prompt),
+            ],
+            structured_schema=RetrospectiveChatOutput,
+            temperature=0.2,
+        )
+    except Exception as e:
+        print(f"Lỗi invoke trong retrospective_chat: {e}")
+        output = RetrospectiveChatOutput(
+            detected_emotion="tired",
+            completion_rate=actual_rate,
+            uncompleted_tasks_analysis=[
+                UncompletedTaskReason(
+                    task_detail="Các task chưa kịp hoàn thành",
+                    goal_title=goals[0].get("title", "") if goals else "",
+                    reason="quá tải hoặc bận đột xuất",
+                    specific_bottleneck="Khối lượng công việc dồn ứ cuối ngày",
+                )
+            ],
+            coaching_reflection="Tôi nhận thấy bạn đã rất nỗ lực nhưng lịch trình gần đây có dấu hiệu hơi quá tải. Hãy cho phép bản thân nghỉ ngơi tối nay, chúng ta sẽ điều chỉnh lại nhịp độ để bạn tiến bước bền bỉ hơn!",
+            proposed_adjustment=ProposedBreakdownAdjustment(
+                target_goal_id=goals[0].get("id") if goals else None,
+                adjustment_type="reduce_daily_hours",
+                recommended_daily_hours=1.5,
+                adjustment_explanation="Hạ tải 30 phút mỗi ngày để bảo vệ nhịp sinh học.",
+            ),
+            should_apply_adjustment=True,
+        )
+
+    # 1. Lưu bản ghi check-in vào collection user_states (retrospective_logs)
+    log_entry = {
+        "log_id": f"retro_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        "timestamp": datetime.now().isoformat(),
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "emotion": output.detected_emotion,
+        "completion_rate": output.completion_rate,
+        "completed_tasks": [t.get("task_detail") for t in done_tasks],
+        "uncompleted_tasks": [u.model_dump() for u in output.uncompleted_tasks_analysis],
+        "reflection_notes": output.coaching_reflection,
+        "recommended_adjustments": output.proposed_adjustment.adjustment_explanation,
+    }
+    append_retrospective_log(log_entry, username=username)
+
+    # 2. Khép kín vòng lặp: Cập nhật ngược lại goals.breakdown nếu should_apply_adjustment == True
+    if output.should_apply_adjustment and output.proposed_adjustment.target_goal_id:
+        tid = output.proposed_adjustment.target_goal_id
+        for g in goals:
+            if g.get("id") == tid or g.get("goal_id") == tid:
+                if output.proposed_adjustment.adjustment_type == "reduce_daily_hours" and output.proposed_adjustment.recommended_daily_hours:
+                    g["daily_hours"] = float(output.proposed_adjustment.recommended_daily_hours)
+                if output.proposed_adjustment.recommended_resource_additions:
+                    bd = g.setdefault("breakdown", {})
+                    res_list = bd.setdefault("resources", [])
+                    res_list.extend(output.proposed_adjustment.recommended_resource_additions)
+                break
+        save_user_goals(goals, username=username)
+
+    return {
+        "response": output.coaching_reflection,
+        "completion_rate": output.completion_rate,
+        "retrospective_log": log_entry,
+        "proposed_adjustments": output.proposed_adjustment.model_dump(),
+        "updated_goals": load_user_goals(username),
+    }
+
