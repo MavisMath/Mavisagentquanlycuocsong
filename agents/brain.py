@@ -125,14 +125,14 @@ def safe_list(val: Any) -> List[Any]:
 # ==============================================================================
 
 class GoalProfile(BaseModel):
-    """Mô hình hồ sơ mục tiêu cốt lõi với Structured Output."""
+    """Mô hình hồ sơ mục tiêu cốt lõi với Structured Output (Chỉ cần 4 thông số cốt lõi để hoàn thành)."""
     goal_name: Optional[str] = Field(None, description="Tên mục tiêu cụ thể, VD: 'IELTS 7.0' hoặc 'Đỗ Thạc sĩ AI VinUni'")
     current_level: Optional[str] = Field(None, description="Trình độ hoặc trạng thái xuất phát hiện tại của người dùng, VD: 'Band 5.0', 'Mất gốc', 'Đã biết Python cơ bản'")
     duration_days: Optional[int] = Field(None, description="Tổng số ngày dự kiến hoàn thành mục tiêu, VD: 90 ngày (3 tháng), 180 ngày")
     daily_hours: Optional[float] = Field(None, description="Số giờ rảnh mỗi ngày có thể cam kết thực hiện, VD: 2.0")
-    preferred_slots: Optional[str] = Field(None, description="Khung giờ ưu tiên trong ngày, VD: 'Tối (20:00 - 22:00)', 'Sáng sớm (06:00 - 08:00)'")
-    is_complete: bool = Field(False, description="True nếu ĐÃ ĐẦY ĐỦ 5 thông số cốt lõi: goal_name, current_level, duration_days, daily_hours, preferred_slots. False nếu còn thiếu ít nhất 1 thông số.")
-    missing_info_question: Optional[str] = Field(None, description="Nếu is_complete là False: Đặt đúng 1 câu hỏi ngắn gọn, tự nhiên và trực tiếp hỏi thông tin còn thiếu. Tuyệt đối không chào hỏi dài dòng, không nói 'đã ghi nhận', không dùng văn mẫu. Nếu is_complete là True: để trống hoặc None.")
+    preferred_slots: Optional[str] = Field(None, description="Khung giờ ưu tiên trong ngày (nếu có nhắc đến). Nếu người dùng không nói, để None và hệ thống sẽ tự động gán mặc định.")
+    is_complete: bool = Field(False, description="True nếu ĐÃ ĐẦY ĐỦ 4 thông số cốt lõi: goal_name, current_level, duration_days, daily_hours. False nếu còn thiếu ít nhất 1 trong 4 thông số này.")
+    missing_info_question: Optional[str] = Field(None, description="Nếu is_complete là False: Đặt đúng 1 câu hỏi ngắn gọn, tự nhiên và trực tiếp hỏi thông tin còn thiếu trong 4 thông số cốt lõi (goal_name, current_level, duration_days, daily_hours). TUYỆT ĐỐI KHÔNG hỏi về preferred_slots. Tuyệt đối không chào hỏi dài dòng, không nói 'đã ghi nhận', không dùng văn mẫu. Nếu is_complete là True: để trống hoặc None.")
 
 
 class ResourceItem(BaseModel):
@@ -1502,6 +1502,14 @@ def profiler_node(state: CoachState) -> Dict[str, Any]:
             "username": username,
         }
 
+    # Định dạng toàn bộ lịch sử trao đổi từ đầu phiên
+    history_lines = []
+    for m in messages:
+        m_type = getattr(m, 'type', '') or ('user' if isinstance(m, HumanMessage) else 'coach')
+        m_content = getattr(m, 'content', str(m))
+        history_lines.append(f"- {m_type}: {m_content}")
+    history_str = "\n".join(history_lines) if history_lines else f"- user: {last_user_message}"
+
     # Prompt trích xuất và cộng dồn thông số mục tiêu
     extraction_prompt = f"""Bạn là Hệ thống Khai thác & Chốt hồ sơ mục tiêu (Goal Profiler Agent).
 Dưới đây là hồ sơ hiện tại đã thu thập được từ các lượt trước (nếu có):
@@ -1510,21 +1518,21 @@ Dưới đây là hồ sơ hiện tại đã thu thập được từ các lư�
 Tin nhắn mới nhất từ người dùng:
 "{last_user_message}"
 
-Toàn bộ lịch sử trao đổi gần nhất:
-{chr(10).join([f"- {getattr(m, 'type', 'msg')}: {getattr(m, 'content', str(m))}" for m in messages[-4:]])}
+Toàn bộ lịch sử trao đổi từ đầu phiên:
+{history_str}
 
 NHIỆM VỤ:
-1. Trích xuất và CỘNG DỒN các thông số mục tiêu. Nếu thông số nào đã có trong hồ sơ cũ và người dùng không đổi, hãy giữ nguyên. Nếu người dùng cung cấp thông tin mới, hãy cập nhật:
+1. Trích xuất và CỘNG DỒN các thông số mục tiêu từ toàn bộ lịch sử trao đổi kết hợp với hồ sơ cũ. Tuyệt đối không làm mất thông tin đã thu thập ở các lượt trước:
    - goal_name: Tên mục tiêu cụ thể (VD: 'IELTS 7.0', 'Luyện Python', 'Giảm 5kg').
    - current_level: Trình độ hoặc trạng thái xuất phát hiện tại (VD: 'Band 5.0', 'Mất gốc', 'Người mới').
    - duration_days: Tổng thời gian thực hiện (chuyển đổi ra số ngày, VD: 3 tháng -> 90, 2 tháng -> 60, 6 tháng -> 180).
    - daily_hours: Quỹ thời gian rảnh mỗi ngày (số thực, VD: 2.0).
-   - preferred_slots: Khung giờ ưu tiên trong ngày (VD: 'Tối 20:00 - 22:00', 'Sáng 06:00 - 08:00').
+   - preferred_slots: Khung giờ ưu tiên trong ngày (VD: 'Tối 20:00 - 22:00'). Nếu người dùng không nói, để None.
 2. Đánh giá is_complete:
-   - CHỈ ĐẶT is_complete = True KHI VÀ CHỈ KHI CẢ 5 THÔNG SỐ TRÊN ĐỀU ĐÃ ĐƯỢC ĐIỀN ĐẦY ĐỦ VÀ HỢP LỆ!
-   - Nếu còn thiếu dù chỉ 1 thông số, BẮT BUỘC đặt is_complete = False.
+   - CHỈ CẦN THU THẬP ĐỦ 4 THÔNG SỐ CỐT LÕI: goal_name, current_level, duration_days, daily_hours LÀ BẮT BUỘC ĐẶT is_complete = True!
+   - Tuyệt đối KHÔNG bắt người dùng phải nói khung giờ (preferred_slots) mới cho hoàn thành.
 3. Sinh missing_info_question:
-   - Nếu is_complete == False: Viết đúng 1 câu hỏi Socratic ngắn gọn, tự nhiên, đi thẳng vào các thông tin còn thiếu.
+   - Nếu is_complete == False: Viết đúng 1 câu hỏi Socratic ngắn gọn, tự nhiên, đi thẳng vào đúng các thông số còn thiếu trong 4 thông số cốt lõi. TUYỆT ĐỐI KHÔNG hỏi về khung giờ.
      TUYỆT ĐỐI KHÔNG nói 'đã ghi nhận', KHÔNG dùng văn mẫu, KHÔNG nhắc lại hồ sơ cũ.
    - Nếu is_complete == True: Để None hoặc chuỗi rỗng.
 """
@@ -1540,35 +1548,42 @@ NHIỆM VỤ:
             temperature=0.1,
         )
 
-        updated_profile = {
-            "goal_name": extracted.goal_name or current_profile.get("goal_name"),
-            "current_level": extracted.current_level or current_profile.get("current_level"),
-            "duration_days": extracted.duration_days or current_profile.get("duration_days"),
-            "daily_hours": extracted.daily_hours or current_profile.get("daily_hours"),
-            "preferred_slots": extracted.preferred_slots or current_profile.get("preferred_slots"),
-        }
-        
-        has_all = bool(
-            updated_profile.get("goal_name")
-            and updated_profile.get("current_level")
-            and updated_profile.get("duration_days")
-            and updated_profile.get("daily_hours")
-            and updated_profile.get("preferred_slots")
-        )
-        updated_profile["is_complete"] = has_all
+        new_goal = extracted.goal_name or current_profile.get("goal_name")
+        new_level = extracted.current_level or current_profile.get("current_level")
+        new_duration = extracted.duration_days or current_profile.get("duration_days")
+        new_hours = extracted.daily_hours or current_profile.get("daily_hours")
+        new_slots = extracted.preferred_slots or current_profile.get("preferred_slots")
+        if not new_slots or not str(new_slots).strip():
+            new_slots = "Tối ưu theo nhịp sinh học (08:00 - 10:00 sáng & tối linh hoạt)"
 
-        # Lưu hồ sơ vào disk ngay lập tức
+        has_4_core = bool(
+            new_goal
+            and new_level
+            and new_duration
+            and new_hours
+        )
+
+        updated_profile = {
+            "goal_name": new_goal,
+            "current_level": new_level,
+            "duration_days": int(new_duration) if new_duration else None,
+            "daily_hours": float(new_hours) if new_hours else None,
+            "preferred_slots": new_slots,
+            "is_complete": has_4_core,
+        }
+
+        # Lưu hồ sơ vào disk & MongoDB ngay lập tức
         save_user_goal_profile(updated_profile, username=username)
 
         if not updated_profile["is_complete"]:
             q = extracted.missing_info_question
-            if not q or not q.strip():
-                missing = []
-                if not updated_profile.get("goal_name"): missing.append("mục tiêu cụ thể")
-                if not updated_profile.get("current_level"): missing.append("trình độ/vạch xuất phát hiện tại")
-                if not updated_profile.get("duration_days"): missing.append("thời gian hoàn thành dự kiến")
-                if not updated_profile.get("daily_hours"): missing.append("quỹ thời gian rảnh mỗi ngày")
-                if not updated_profile.get("preferred_slots"): missing.append("khung giờ bạn muốn thực hiện")
+            missing = []
+            if not updated_profile.get("goal_name"): missing.append("mục tiêu cụ thể")
+            if not updated_profile.get("current_level"): missing.append("trình độ/vạch xuất phát hiện tại")
+            if not updated_profile.get("duration_days"): missing.append("thời gian hoàn thành dự kiến (ví dụ: 3 tháng)")
+            if not updated_profile.get("daily_hours"): missing.append("quỹ thời gian rảnh bạn có thể dành ra mỗi ngày")
+
+            if not q or not q.strip() or "khung giờ" in q.lower() or "thời gian trong ngày" in q.lower():
                 q = f"Để thiết kế lộ trình chính xác và khả thi nhất, bạn có thể chia sẻ thêm về {', '.join(missing)} không?"
 
             return {

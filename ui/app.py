@@ -985,8 +985,21 @@ if user_input := st.chat_input("Nhập mục tiêu hoặc trao đổi cùng Coac
 
     # 2. Chuẩn bị input cho LangGraph Agent với định danh username
     active_username = (st.session_state.get("username") or current_username or "mavis").strip().lower()
+
+    # Chuyển đổi toàn bộ lịch sử trao đổi trong phiên thành HumanMessage / AIMessage để bảo toàn ngữ cảnh trọn vẹn
+    full_messages = []
+    for m in st.session_state.get(msg_key, []):
+        m_role = m.get("role")
+        m_content = m.get("content", "")
+        if m_role == "user":
+            full_messages.append(HumanMessage(content=m_content))
+        elif m_role == "assistant":
+            full_messages.append(AIMessage(content=m_content))
+    if not full_messages:
+        full_messages = [HumanMessage(content=user_input)]
+
     input_state = {
-        "messages": [HumanMessage(content=user_input)],
+        "messages": full_messages,
         "profile": safe_dict(st.session_state.get(goal_profile_key) or load_user_goal_profile(active_username)),
         "resources": safe_list(st.session_state.get(resources_key) or load_user_resources(active_username)),
         "roadmap": safe_dict(st.session_state.get(roadmap_key) or load_user_roadmap(active_username)),

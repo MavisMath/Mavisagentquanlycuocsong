@@ -60,8 +60,17 @@ def route_entry(state: CoachState) -> str:
         except Exception:
             pass
 
-    # Nếu người dùng đang hỏi tư vấn và đã có mục tiêu hoặc profile đầy đủ
-    if is_advice and profile.get("is_complete"):
+    # Kiểm tra nếu người dùng muốn đặt lại / tạo mục tiêu mới
+    reset_triggers = [
+        "mục tiêu mới", "đặt lại mục tiêu", "reset", "thay đổi mục tiêu",
+        "tạo mục tiêu khác", "mục tiêu khác", "lập mục tiêu mới", "đổi mục tiêu"
+    ]
+    if any(w in last_lower for w in reset_triggers):
+        return "profiler"
+
+    # Nếu người dùng đang hỏi tư vấn hoặc hồ sơ mục tiêu đã hoàn thành (is_complete == True)
+    # Điều hướng sang 'chat' để trao đổi, cố vấn và phản hồi bình thường, không bị lặp lại profiler
+    if profile.get("is_complete") is True:
         return "chat"
 
     # Kiểm tra intent đặc thù
@@ -79,11 +88,12 @@ def route_entry(state: CoachState) -> str:
 def route_after_profiler(state: CoachState) -> str:
     """
     Conditional Edge sau profiler_node:
-    - Nếu is_complete == True: Đã thu thập đủ 5 thông số cốt lõi -> Kích hoạt research_node (Node 2)
-      để thẩm định tài nguyên thực tế.
+    - Nếu is_complete == True: Đã thu thập đủ 4 thông số cốt lõi -> Kích hoạt research_node (Node 2)
+      để thẩm định tài nguyên thực tế và phân rã lộ trình Backcasting.
     - Nếu is_complete == False: Còn thiếu dữ liệu -> Dừng tại END để người dùng trả lời câu hỏi còn thiếu.
     """
-    if state.get("is_complete") is True:
+    prof = state.get("profile") or {}
+    if state.get("is_complete") is True or (isinstance(prof, dict) and prof.get("is_complete") is True):
         return "research"
     return END
 
