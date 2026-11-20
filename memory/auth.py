@@ -34,41 +34,22 @@ def load_auth_config() -> Dict[str, Any]:
         except Exception as e:
             print(f"Cảnh báo đọc auth_config.yaml: {e}")
 
-    if "credentials" not in local_config:
+    if "credentials" not in local_config or not isinstance(local_config.get("credentials"), dict):
         local_config["credentials"] = {"usernames": {}}
+    if "usernames" not in local_config["credentials"] or not isinstance(local_config["credentials"].get("usernames"), dict):
+        local_config["credentials"]["usernames"] = {}
     if "cookie" not in local_config:
         local_config["cookie"] = DEFAULT_COOKIE
-
-    # Khởi tạo hash mật khẩu mặc định nếu file chưa có người dùng
-    if not local_config["credentials"].get("usernames"):
-        mavis_hash = stauth.Hasher.hash("mavis123")
-        user_b_hash = stauth.Hasher.hash("user123")
-        local_config["credentials"]["usernames"] = {
-            "mavis": {
-                "email": "mavis@executive.ai",
-                "name": "Mavis Executive",
-                "password": mavis_hash,
-            },
-            "user_b": {
-                "email": "user_b@saas.com",
-                "name": "User B",
-                "password": user_b_hash,
-            },
-        }
-        save_auth_config(local_config)
 
     # 1. Nếu MongoDB Atlas khả dụng: Ưu tiên tải tài khoản từ MongoDB Atlas
     if is_mongodb_available():
         try:
             db_users = db_load_all_users()
-            # Nếu collection users đang trống, seed các tài khoản ban đầu lên Atlas
-            if not db_users and local_config["credentials"].get("usernames"):
-                seed_default_users_if_needed(local_config["credentials"]["usernames"])
-                db_users = db_load_all_users()
-
             if db_users:
-                # Hợp nhất users từ MongoDB vào config
                 local_config["credentials"]["usernames"] = db_users
+            else:
+                # MongoDB đang hoàn toàn trống, sẵn sàng cho người dùng mới đăng ký tài khoản sạch
+                local_config["credentials"]["usernames"] = {}
         except Exception as e:
             print(f"Lỗi khi đồng bộ users từ MongoDB: {e}")
 
