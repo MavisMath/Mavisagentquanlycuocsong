@@ -8,7 +8,6 @@ from memory.mongodb import (
     db_load_all_users,
     db_save_user,
     db_get_user,
-    seed_default_users_if_needed,
     db_update_user_state,
 )
 

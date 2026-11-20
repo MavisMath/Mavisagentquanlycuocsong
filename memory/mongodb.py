@@ -222,23 +222,8 @@ def db_load_all_users() -> Dict[str, Dict[str, Any]]:
 
 
 def seed_default_users_if_needed(default_credentials: Dict[str, Any]) -> None:
-    """Khởi tạo tài khoản mẫu (mavis, user_b) lên MongoDB nếu collection users đang trống."""
-    db = get_mongo_db()
-    if db is None:
-        return
-
-    try:
-        count = db.users.count_documents({})
-        if count == 0 and default_credentials:
-            for uname, info in default_credentials.items():
-                db_save_user(
-                    username=uname,
-                    name=info.get("name", uname.capitalize()),
-                    email=info.get("email", f"{uname}@executive.ai"),
-                    hashed_password=info.get("password", ""),
-                )
-    except Exception as e:
-        print(f"Lỗi khi seed tài khoản mặc định vào MongoDB: {e}")
+    """Không tự động seed tài khoản mặc định để người dùng toàn quyền đăng ký mới."""
+    return
 
 
 # ==============================================================================
