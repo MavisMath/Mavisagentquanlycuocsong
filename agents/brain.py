@@ -1,9 +1,32 @@
+# Mavis Executive Multi-Agent Brain - Build 2026.11.21-v2
 import os
 import json
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
+
+__all__ = [
+    "chat_node",
+    "ceo_coach_chat",
+    "architect_chat",
+    "scheduler_chat",
+    "retrospective_chat",
+    "profiler_node",
+    "research_node",
+    "strategic_planner_node",
+    "scheduler_node",
+    "motivate_node",
+    "trend_node",
+    "retrospective_node",
+    "onboarding_node",
+    "analyze_input_node",
+    "schedule_node",
+    "goal_manager_node",
+    "resource_finder_node",
+    "opportunity_scout_node",
+    "holistic_scheduler_node",
+]
 
 from langchain_core.messages import (
     SystemMessage,

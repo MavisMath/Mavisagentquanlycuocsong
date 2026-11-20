@@ -1,3 +1,4 @@
+# Mavis Executive Memory System - Build 2026.11.21-v2
 import os
 import json
 import uuid
@@ -10,6 +11,35 @@ from memory.mongodb import (
     db_update_user_state,
     db_get_user_state,
 )
+
+__all__ = [
+    "load_goals",
+    "save_goals",
+    "add_goal",
+    "update_goal",
+    "CATEGORY_LABELS",
+    "load_historical_insights",
+    "save_historical_insights",
+    "load_user_profile",
+    "save_user_profile",
+    "load_user_goal_profile",
+    "save_user_goal_profile",
+    "load_user_goals",
+    "save_user_goals",
+    "load_user_resources",
+    "save_user_resources",
+    "load_user_roadmap",
+    "save_user_roadmap",
+    "load_categorized_goals",
+    "save_categorized_goals",
+    "load_master_schedule",
+    "save_master_schedule",
+    "update_master_schedule_task_status",
+    "load_retrospective_logs",
+    "save_retrospective_logs",
+    "append_retrospective_log",
+    "get_user_state_full",
+]
 
 LEDGER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "goals_ledger.json")
 

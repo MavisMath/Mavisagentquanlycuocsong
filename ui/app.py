@@ -40,11 +40,24 @@ try:
 except Exception:
     pass
 
+# Dọn dẹp cache module cũ trong sys.modules khi Streamlit Cloud reload mã nguồn
+import importlib
+for _mod in ["memory.goals", "memory.auth", "memory.mongodb", "agents.brain", "agents.graph", "memory", "agents"]:
+    if _mod in sys.modules:
+        try:
+            del sys.modules[_mod]
+        except Exception:
+            pass
+importlib.invalidate_caches()
+
 from langchain_core.messages import HumanMessage, AIMessage
 
 # Khởi tạo an toàn Agent Graph với cơ chế báo lỗi trực quan trên Cloud
 try:
-    from agents.graph import build_graph, mavis_agent
+    import agents.graph as ag
+    importlib.reload(ag)
+    build_graph = getattr(ag, "build_graph")
+    mavis_agent = getattr(ag, "mavis_agent", None) or build_graph()
 except Exception as _graph_import_err:
     import traceback
     st.error(f"⚠️ Phát hiện cảnh báo khi khởi tạo Multi-Agent Graph: {_graph_import_err}")
@@ -66,36 +79,37 @@ except Exception as _graph_import_err:
 
     mavis_agent = FallbackAgent()
 
-# Nạp an toàn module memory.goals với cơ chế bắt lỗi không làm sập ứng dụng
+# Nạp an toàn module memory.goals với importlib.reload dọn sạch cache
 try:
-    from memory.goals import (
-        load_goals,
-        save_goals,
-        add_goal,
-        update_goal,
-        CATEGORY_LABELS,
-        load_historical_insights,
-        save_historical_insights,
-        load_user_profile,
-        save_user_profile,
-        load_user_goal_profile,
-        save_user_goal_profile,
-        load_user_goals,
-        save_user_goals,
-        load_user_resources,
-        save_user_resources,
-        load_user_roadmap,
-        save_user_roadmap,
-        load_categorized_goals,
-        save_categorized_goals,
-        load_master_schedule,
-        save_master_schedule,
-        update_master_schedule_task_status,
-        load_retrospective_logs,
-        save_retrospective_logs,
-        append_retrospective_log,
-        get_user_state_full,
-    )
+    import memory.goals as mg
+    importlib.reload(mg)
+
+    load_goals = getattr(mg, "load_goals")
+    save_goals = getattr(mg, "save_goals")
+    add_goal = getattr(mg, "add_goal")
+    update_goal = getattr(mg, "update_goal")
+    CATEGORY_LABELS = getattr(mg, "CATEGORY_LABELS", {})
+    load_historical_insights = getattr(mg, "load_historical_insights")
+    save_historical_insights = getattr(mg, "save_historical_insights")
+    load_user_profile = getattr(mg, "load_user_profile")
+    save_user_profile = getattr(mg, "save_user_profile")
+    load_user_goal_profile = getattr(mg, "load_user_goal_profile")
+    save_user_goal_profile = getattr(mg, "save_user_goal_profile")
+    load_user_goals = getattr(mg, "load_user_goals")
+    save_user_goals = getattr(mg, "save_user_goals")
+    load_user_resources = getattr(mg, "load_user_resources")
+    save_user_resources = getattr(mg, "save_user_resources")
+    load_user_roadmap = getattr(mg, "load_user_roadmap")
+    save_user_roadmap = getattr(mg, "save_user_roadmap")
+    load_categorized_goals = getattr(mg, "load_categorized_goals")
+    save_categorized_goals = getattr(mg, "save_categorized_goals")
+    load_master_schedule = getattr(mg, "load_master_schedule")
+    save_master_schedule = getattr(mg, "save_master_schedule")
+    update_master_schedule_task_status = getattr(mg, "update_master_schedule_task_status")
+    load_retrospective_logs = getattr(mg, "load_retrospective_logs")
+    save_retrospective_logs = getattr(mg, "save_retrospective_logs")
+    append_retrospective_log = getattr(mg, "append_retrospective_log")
+    get_user_state_full = getattr(mg, "get_user_state_full")
 except Exception as _goals_import_err:
     import traceback
     st.error(f"⚠️ Cảnh báo nạp module `memory.goals`: {_goals_import_err}")
@@ -129,9 +143,12 @@ except Exception as _goals_import_err:
     def append_retrospective_log(*args, **kwargs): return True
     def get_user_state_full(*args, **kwargs): return {}
 
-# Nạp an toàn module memory.auth
+# Nạp an toàn module memory.auth với importlib.reload
 try:
-    from memory.auth import get_authenticator, register_user
+    import memory.auth as ma
+    importlib.reload(ma)
+    get_authenticator = getattr(ma, "get_authenticator", None)
+    register_user = getattr(ma, "register_user", None)
 except Exception as _auth_import_err:
     import traceback
     st.error(f"⚠️ Cảnh báo nạp module `memory.auth`: {_auth_import_err}")
@@ -140,14 +157,14 @@ except Exception as _auth_import_err:
     get_authenticator = None
     register_user = None
 
-# Nạp an toàn module memory.mongodb
+# Nạp an toàn module memory.mongodb với importlib.reload
 try:
-    from memory.mongodb import (
-        is_mongodb_available,
-        db_update_user_state,
-        get_mongo_connection_error,
-        get_mongo_uri,
-    )
+    import memory.mongodb as mm
+    importlib.reload(mm)
+    is_mongodb_available = getattr(mm, "is_mongodb_available", lambda: False)
+    db_update_user_state = getattr(mm, "db_update_user_state", lambda *args, **kwargs: False)
+    get_mongo_connection_error = getattr(mm, "get_mongo_connection_error", lambda: None)
+    get_mongo_uri = getattr(mm, "get_mongo_uri", lambda: None)
 except Exception as _mongo_import_err:
     import traceback
     st.error(f"⚠️ Cảnh báo nạp module `memory.mongodb`: {_mongo_import_err}")
@@ -158,15 +175,15 @@ except Exception as _mongo_import_err:
     def get_mongo_connection_error(): return str(_mongo_import_err)
     def get_mongo_uri(): return None
 
-# Nạp an toàn 4 Chatbot functions từ agents.brain
+# Nạp an toàn 4 Chatbot functions từ agents.brain với importlib.reload
 try:
-    from agents.brain import (
-        chat_node,
-        ceo_coach_chat,
-        architect_chat,
-        scheduler_chat,
-        retrospective_chat,
-    )
+    import agents.brain as ab
+    importlib.reload(ab)
+    chat_node = getattr(ab, "chat_node", None)
+    ceo_coach_chat = getattr(ab, "ceo_coach_chat")
+    architect_chat = getattr(ab, "architect_chat")
+    scheduler_chat = getattr(ab, "scheduler_chat")
+    retrospective_chat = getattr(ab, "retrospective_chat")
 except Exception as _brain_err:
     import traceback
     st.error(f"⚠️ Cảnh báo nạp các Chatbot từ `agents.brain`: {_brain_err}")
