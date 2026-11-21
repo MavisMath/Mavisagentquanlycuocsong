@@ -1,4 +1,44 @@
 {
+  "mavis": {
+    "career": {
+      "label": "💼 Sự nghiệp & Học tập (Career)",
+      "description": "Học tập, Công việc, Quan hệ đối tác & Sự nghiệp",
+      "children": []
+    },
+    "relationships": {
+      "label": "🤝 Mối quan hệ (Relationships)",
+      "description": "Gia đình, Bạn bè, Tình yêu & Mạng lưới kết nối",
+      "children": []
+    },
+    "health": {
+      "label": "🧘 Sức khỏe & Thể chất (Health)",
+      "description": "Thể chất, Tinh thần, Dinh dưỡng & Nhịp sinh học",
+      "children": []
+    },
+    "beauty": {
+      "label": "✨ Sắc vóc & Làm đẹp (Beauty)",
+      "description": "Vóc dáng, Làm đẹp, Skincare & Phong thái Executive",
+      "children": []
+    },
+    "historical_insights": {
+      "failed_methods": [],
+      "effective_methods": [],
+      "productivity_patterns": []
+    },
+    "goals": [],
+    "profile": {},
+    "goal_profile": {},
+    "resources": [],
+    "roadmap": {},
+    "master_schedule": [],
+    "retrospective_logs": [],
+    "user_profile": {
+      "is_onboarded": false,
+      "coaching_stage": "interviewing",
+      "current_situation": "Chưa có mục tiêu",
+      "time_constraints": "0h/ngày"
+    }
+  },
   "mavis252": {
     "career": {
       "label": "💼 Sự nghiệp & Học tập (Career)",
@@ -25,292 +65,18 @@
       "effective_methods": [],
       "productivity_patterns": []
     },
-    "goals": [
-      {
-        "goal_id": "g_ielts75",
-        "category": "Học tập",
-        "goal_name": "IELTS 7.5",
-        "current_level": "B1 Vstep",
-        "duration_days": 60,
-        "daily_hours": 4.0,
-        "preferred_slots": "08:00 - 10:00 sáng & tối linh hoạt",
-        "priority": "high",
-        "is_complete": true,
-        "id": "g_ielts75",
-        "title": "IELTS 7.5",
-        "preferred_time": "08:00 - 10:00 sáng & tối linh hoạt",
-        "status": "active",
-        "breakdown": {
-          "yearly": "Chinh phục IELTS 7.5 và HSK 4 trong 60 ngày",
-          "quarterly": [
-            {
-              "quarter": "Quý 1",
-              "focus": "Tăng tốc ngôn ngữ (IELTS 7.5 & HSK 4)",
-              "target_outcome": "Đạt chứng chỉ IELTS 7.5 và HSK 4"
-            }
-          ],
-          "monthly": [
-            {
-              "month": "Tháng 1",
-              "milestone": "Xây nền tảng IELTS & HSK 4",
-              "resources": "Cambridge IELTS 15-18, HSK 4 Standard Course"
-            },
-            {
-              "month": "Tháng 2",
-              "milestone": "Luyện đề thực chiến & Tối ưu hóa",
-              "resources": "IELTS Mock Tests, HSK 4 Past Papers"
-            }
-          ],
-          "weekly": [
-            {
-              "week": "Tuần 1-4",
-              "milestone": "Hoàn thiện kiến thức nền",
-              "action_items": [
-                "Học 20 từ vựng HSK 4 mỗi ngày",
-                "Luyện nghe chép chính tả IELTS 1h/ngày",
-                "Viết 1 bài luận IELTS theo công thức AREA"
-              ],
-              "estimated_hours": 56.0,
-              "resources": "HSK 4 Standard Course, English Grammar in Use"
-            },
-            {
-              "week": "Tuần 5-8",
-              "milestone": "Luyện đề và khắc phục lỗi sai",
-              "action_items": [
-                "Làm 1 đề Full Test IELTS/tuần",
-                "Làm 2 đề HSK 4/tuần",
-                "Cập nhật Error Log hàng ngày"
-              ],
-              "estimated_hours": 56.0,
-              "resources": "Cambridge IELTS, HSK 4 Past Papers"
-            }
-          ],
-          "resources": [
-            {
-              "title": "HSK 4 Standard Course",
-              "url": "https://www.chinesetest.cn/",
-              "type": "Giáo trình",
-              "how_to_use": "Học theo lộ trình 20 bài, tập trung vào từ vựng và cấu trúc câu trong ngữ cảnh."
-            },
-            {
-              "title": "Cambridge IELTS 15-18",
-              "url": "https://www.cambridgeenglish.org/",
-              "type": "Bộ đề",
-              "how_to_use": "Làm đề dưới áp lực thời gian thực để quản lý nhịp độ thi."
-            },
-            {
-              "title": "IELTS Arena",
-              "url": "https://www.ieltsarena.com/",
-              "type": "Công cụ",
-              "how_to_use": "Sử dụng để chấm điểm bài viết và phân tích lỗi sai theo 4 tiêu chí."
-            },
-            {
-              "note": "Tập trung vào chất lượng thay vì số lượng, giảm tải để tránh kiệt sức"
-            }
-          ]
-        }
-      }
-    ],
-    "goal_profile": {
-      "goal_id": "g_ielts75",
-      "category": "Học tập",
-      "goal_name": "IELTS 7.5",
-      "current_level": "B1 Vstep",
-      "duration_days": 60,
-      "daily_hours": 4.0,
-      "preferred_slots": "08:00 - 10:00 sáng & tối linh hoạt",
-      "priority": "high",
-      "is_complete": true,
-      "id": "g_ielts75",
-      "title": "IELTS 7.5",
-      "preferred_time": "08:00 - 10:00 sáng & tối linh hoạt",
-      "status": "active",
-      "breakdown": {
-        "yearly": "Chinh phục IELTS 7.5 và HSK 4 trong 60 ngày",
-        "quarterly": [
-          {
-            "quarter": "Quý 1",
-            "focus": "Tăng tốc ngôn ngữ (IELTS 7.5 & HSK 4)",
-            "target_outcome": "Đạt chứng chỉ IELTS 7.5 và HSK 4"
-          }
-        ],
-        "monthly": [
-          {
-            "month": "Tháng 1",
-            "milestone": "Xây nền tảng IELTS & HSK 4",
-            "resources": "Cambridge IELTS 15-18, HSK 4 Standard Course"
-          },
-          {
-            "month": "Tháng 2",
-            "milestone": "Luyện đề thực chiến & Tối ưu hóa",
-            "resources": "IELTS Mock Tests, HSK 4 Past Papers"
-          }
-        ],
-        "weekly": [
-          {
-            "week": "Tuần 1-4",
-            "milestone": "Hoàn thiện kiến thức nền",
-            "action_items": [
-              "Học 20 từ vựng HSK 4 mỗi ngày",
-              "Luyện nghe chép chính tả IELTS 1h/ngày",
-              "Viết 1 bài luận IELTS theo công thức AREA"
-            ],
-            "estimated_hours": 56.0,
-            "resources": "HSK 4 Standard Course, English Grammar in Use"
-          },
-          {
-            "week": "Tuần 5-8",
-            "milestone": "Luyện đề và khắc phục lỗi sai",
-            "action_items": [
-              "Làm 1 đề Full Test IELTS/tuần",
-              "Làm 2 đề HSK 4/tuần",
-              "Cập nhật Error Log hàng ngày"
-            ],
-            "estimated_hours": 56.0,
-            "resources": "Cambridge IELTS, HSK 4 Past Papers"
-          }
-        ],
-        "resources": [
-          {
-            "title": "HSK 4 Standard Course",
-            "url": "https://www.chinesetest.cn/",
-            "type": "Giáo trình",
-            "how_to_use": "Học theo lộ trình 20 bài, tập trung vào từ vựng và cấu trúc câu trong ngữ cảnh."
-          },
-          {
-            "title": "Cambridge IELTS 15-18",
-            "url": "https://www.cambridgeenglish.org/",
-            "type": "Bộ đề",
-            "how_to_use": "Làm đề dưới áp lực thời gian thực để quản lý nhịp độ thi."
-          },
-          {
-            "title": "IELTS Arena",
-            "url": "https://www.ieltsarena.com/",
-            "type": "Công cụ",
-            "how_to_use": "Sử dụng để chấm điểm bài viết và phân tích lỗi sai theo 4 tiêu chí."
-          },
-          {
-            "note": "Tập trung vào chất lượng thay vì số lượng, giảm tải để tránh kiệt sức"
-          }
-        ]
-      }
-    },
+    "goals": [],
+    "profile": {},
+    "goal_profile": {},
+    "resources": [],
+    "roadmap": {},
+    "master_schedule": [],
+    "retrospective_logs": [],
     "user_profile": {
-      "current_situation": "Đa mục tiêu: IELTS 7.5",
-      "time_constraints": "4.0h/ngày trên 1 mục tiêu",
-      "is_onboarded": true,
-      "coaching_stage": "action"
-    },
-    "curated_resources": [
-      {
-        "title": "HSK 4 Standard Course",
-        "url": "https://www.chinesetest.cn/",
-        "type": "Giáo trình",
-        "how_to_use": "Học theo lộ trình 20 bài, tập trung vào từ vựng và cấu trúc câu trong ngữ cảnh."
-      },
-      {
-        "title": "Cambridge IELTS 15-18",
-        "url": "https://www.cambridgeenglish.org/",
-        "type": "Bộ đề",
-        "how_to_use": "Làm đề dưới áp lực thời gian thực để quản lý nhịp độ thi."
-      },
-      {
-        "title": "IELTS Arena",
-        "url": "https://www.ieltsarena.com/",
-        "type": "Công cụ",
-        "how_to_use": "Sử dụng để chấm điểm bài viết và phân tích lỗi sai theo 4 tiêu chí."
-      }
-    ],
-    "master_schedule": [
-      {
-        "date": "Thứ Hai",
-        "session": "Sáng",
-        "time_slot": "08:00 - 10:00",
-        "goal_id": "g_ielts75",
-        "goal_title": "IELTS 7.5",
-        "task_detail": "Luyện nghe chép chính tả IELTS 1h và học 20 từ vựng HSK 4",
-        "resource_link": "N/A",
-        "is_done": false
-      },
-      {
-        "date": "Thứ Hai",
-        "session": "Chiều",
-        "time_slot": "14:00 - 16:00",
-        "goal_id": "g_ielts75",
-        "goal_title": "IELTS 7.5",
-        "task_detail": "Viết 1 bài luận IELTS theo công thức AREA",
-        "resource_link": "N/A",
-        "is_done": false
-      },
-      {
-        "date": "Thứ Hai",
-        "session": "Tối",
-        "time_slot": "19:30 - 21:00",
-        "goal_id": "g_ielts75",
-        "goal_title": "IELTS 7.5",
-        "task_detail": "Ôn tập từ vựng và review lỗi sai bài luận trong ngày",
-        "resource_link": "N/A",
-        "is_done": false
-      }
-    ],
-    "retrospective_logs": [
-      {
-        "log_id": "retro_20261121_012515",
-        "timestamp": "2026-11-21T01:25:15.043130",
-        "date": "2026-11-21",
-        "emotion": "overwhelmed",
-        "completion_rate": 0.0,
-        "completed_tasks": [],
-        "uncompleted_tasks": [
-          {
-            "task_detail": "Luyện nghe chép chính tả IELTS 1h và học 20 từ vựng HSK 4",
-            "goal_title": "IELTS 7.5",
-            "reason": "quá tải",
-            "specific_bottleneck": "Khối lượng công việc quá lớn trong một khung giờ"
-          },
-          {
-            "task_detail": "Viết 1 bài luận IELTS theo công thức AREA",
-            "goal_title": "IELTS 7.5",
-            "reason": "quá tải",
-            "specific_bottleneck": "Năng lượng nhận thức cạn kiệt sau các task trước"
-          },
-          {
-            "task_detail": "Ôn tập từ vựng và review lỗi sai bài luận trong ngày",
-            "goal_title": "IELTS 7.5",
-            "reason": "mệt mỏi",
-            "specific_bottleneck": "Kiệt sức cuối ngày"
-          }
-        ],
-        "reflection_notes": "Tôi hiểu cảm giác của bạn, việc dồn quá nhiều áp lực vào một ngày khi cơ thể đang mệt mỏi là điều không ai mong muốn. Hãy nhớ rằng bạn đã từng vượt qua những giai đoạn khó khăn hơn thế này nhờ sự kiên trì bền bỉ, vậy nên đừng quá khắt khe với bản thân hôm nay. Nếu chúng ta điều chỉnh lại khối lượng để bảo vệ năng lượng nhận thức của bạn, bạn nghĩ mình có thể duy trì nhịp độ ổn định hơn trong dài hạn không?",
-        "recommended_adjustments": "Giảm tổng thời gian học từ 8h xuống 4h để phù hợp với ngưỡng chịu đựng hiện tại, ưu tiên bảo vệ năng lượng nhận thức cho các khung giờ vàng."
-      }
-    ]
-  },
-  "mavis": {
-    "career": {
-      "label": "💼 Sự nghiệp & Học tập (Career)",
-      "description": "Học tập, Công việc, Quan hệ đối tác & Sự nghiệp",
-      "children": []
-    },
-    "relationships": {
-      "label": "🤝 Mối quan hệ (Relationships)",
-      "description": "Gia đình, Bạn bè, Tình yêu & Mạng lưới kết nối",
-      "children": []
-    },
-    "health": {
-      "label": "🧘 Sức khỏe & Thể chất (Health)",
-      "description": "Thể chất, Tinh thần, Dinh dưỡng & Nhịp sinh học",
-      "children": []
-    },
-    "beauty": {
-      "label": "✨ Sắc vóc & Làm đẹp (Beauty)",
-      "description": "Vóc dáng, Làm đẹp, Skincare & Phong thái Executive",
-      "children": []
-    },
-    "historical_insights": {
-      "failed_methods": [],
-      "effective_methods": [],
-      "productivity_patterns": []
+      "is_onboarded": false,
+      "coaching_stage": "interviewing",
+      "current_situation": "Chưa có mục tiêu",
+      "time_constraints": "0h/ngày"
     }
   }
 }

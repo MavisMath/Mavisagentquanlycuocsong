@@ -122,14 +122,23 @@ def register_user(username: str, name: str, email: str, password: str) -> bool:
             hashed_password=hashed_pw,
         )
         if db_saved:
-            # Khởi tạo bản ghi ban đầu trong collection 'user_states'
+            # Khởi tạo bản ghi ban đầu TRẮNG HOÀN TOÀN trong collection 'user_states' (Không có mock/seed data)
             db_update_user_state(
                 username=username,
                 state_update={
+                    "goals": [],
                     "profile": {},
+                    "goal_profile": {},
                     "resources": [],
                     "roadmap": {},
-                    "user_profile": {"is_onboarded": False, "coaching_stage": "interviewing"},
+                    "master_schedule": [],
+                    "retrospective_logs": [],
+                    "user_profile": {
+                        "is_onboarded": False,
+                        "coaching_stage": "interviewing",
+                        "current_situation": "Chưa có mục tiêu",
+                        "time_constraints": "0h/ngày",
+                    },
                 },
             )
 

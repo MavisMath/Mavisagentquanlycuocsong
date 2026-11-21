@@ -88,7 +88,7 @@ DEFAULT_USER = "mavis"
 
 
 def get_blank_tree() -> Dict[str, Any]:
-    """Tạo cấu trúc Tree trắng với 4 Root Nodes và Hồ sơ Hành vi Thích nghi (Phase 10 Adaptive Memory)."""
+    """Tạo cấu trúc Tree trắng với 4 Root Nodes và Hồ sơ Hành vi Thích nghi (Phase 10 Adaptive Memory) hoàn toàn trống rỗng cho user mới."""
     tree = {
         root: {
             "label": ROOT_LABELS[root],
@@ -101,6 +101,19 @@ def get_blank_tree() -> Dict[str, Any]:
         "failed_methods": [],
         "effective_methods": [],
         "productivity_patterns": [],
+    }
+    tree["goals"] = []
+    tree["profile"] = {}
+    tree["goal_profile"] = {}
+    tree["resources"] = []
+    tree["roadmap"] = {}
+    tree["master_schedule"] = []
+    tree["retrospective_logs"] = []
+    tree["user_profile"] = {
+        "is_onboarded": False,
+        "coaching_stage": "interviewing",
+        "current_situation": "Chưa có mục tiêu",
+        "time_constraints": "0h/ngày",
     }
     return tree
 
@@ -446,6 +459,8 @@ def load_user_goals(username: str = "mavis") -> List[Dict[str, Any]]:
             p = state.get("profile") or state.get("goal_profile")
             if p and isinstance(p, dict) and (p.get("goal_name") or p.get("title")):
                 return [standardize_goal_schema(p)]
+            # User đã tồn tại trong user_states nhưng chưa có goals -> trả về rỗng, tuyệt đối không nạp mock data
+            return []
 
     # 2. Fallback về goals_ledger.json
     all_data = load_all_users_data()
@@ -625,20 +640,23 @@ def load_user_goal_profile(username: str = "mavis") -> Dict[str, Any]:
         state = db_get_user_state(username)
         if state:
             goals = state.get("goals")
-            if isinstance(goals, list) and len(goals) > 0 and goals[0].get("goal_name"):
+            if isinstance(goals, list) and len(goals) > 0 and (goals[0].get("goal_name") or goals[0].get("title")):
                 return goals[0]
             p = state.get("profile") or state.get("goal_profile")
-            if p and isinstance(p, dict) and p.get("goal_name"):
+            if p and isinstance(p, dict) and (p.get("goal_name") or p.get("title")):
                 return p
+            return {}
 
     # 2. Fallback về goals_ledger.json
     all_data = load_all_users_data()
     user_entry = all_data.get(username, {})
     if isinstance(user_entry, dict):
         goals = user_entry.get("goals")
-        if isinstance(goals, list) and len(goals) > 0 and goals[0].get("goal_name"):
+        if isinstance(goals, list) and len(goals) > 0 and (goals[0].get("goal_name") or goals[0].get("title")):
             return goals[0]
-        return user_entry.get("goal_profile", {})
+        p = user_entry.get("goal_profile", {})
+        if isinstance(p, dict) and (p.get("goal_name") or p.get("title")):
+            return p
     return {}
 
 
@@ -671,10 +689,12 @@ def load_user_resources(username: str = "mavis") -> List[Dict[str, Any]]:
     # 1. Ưu tiên tải từ MongoDB Atlas
     if is_mongodb_available():
         state = db_get_user_state(username)
-        if state and "resources" in state and isinstance(state["resources"], list):
-            return state["resources"]
-        if state and "curated_resources" in state and isinstance(state["curated_resources"], list):
-            return state["curated_resources"]
+        if state:
+            if "resources" in state and isinstance(state["resources"], list):
+                return state["resources"]
+            if "curated_resources" in state and isinstance(state["curated_resources"], list):
+                return state["curated_resources"]
+            return []
 
     # 2. Fallback về goals_ledger.json
     all_data = load_all_users_data()
@@ -717,6 +737,7 @@ def load_user_roadmap(username: str = "mavis") -> Dict[str, Any]:
             rm = state.get("roadmap") or state.get("backcasting_roadmap")
             if rm and isinstance(rm, dict) and rm.get("weekly_milestones"):
                 return rm
+            return {}
 
     # 2. Fallback về goals_ledger.json
     all_data = load_all_users_data()
@@ -757,10 +778,11 @@ def load_master_schedule(username: str = "mavis") -> List[Dict[str, Any]]:
 
     if is_mongodb_available():
         state = db_get_user_state(username)
-        if state and "master_schedule" in state:
+        if state:
             sched = state.get("master_schedule")
             if isinstance(sched, list):
                 return sched
+            return []
 
     all_data = load_all_users_data()
     user_entry = all_data.get(username, {})
