@@ -85,6 +85,7 @@ try:
     load_master_schedule = getattr(mg, "load_master_schedule", lambda *args, **kwargs: [])
     save_master_schedule = getattr(mg, "save_master_schedule", lambda *args, **kwargs: True)
     update_master_schedule_task_status = getattr(mg, "update_master_schedule_task_status", lambda *args, **kwargs: True)
+    defer_master_schedule_task_to_tomorrow = getattr(mg, "defer_master_schedule_task_to_tomorrow", lambda *args, **kwargs: (False, None))
     load_retrospective_logs = getattr(mg, "load_retrospective_logs", lambda *args, **kwargs: [])
     save_retrospective_logs = getattr(mg, "save_retrospective_logs", lambda *args, **kwargs: True)
     append_retrospective_log = getattr(mg, "append_retrospective_log", lambda *args, **kwargs: True)
@@ -129,6 +130,7 @@ except Exception as _goals_import_err:
     def load_master_schedule(*args, **kwargs): return []
     def save_master_schedule(*args, **kwargs): return True
     def update_master_schedule_task_status(*args, **kwargs): return True
+    def defer_master_schedule_task_to_tomorrow(*args, **kwargs): return False, None
     def load_retrospective_logs(*args, **kwargs): return []
     def save_retrospective_logs(*args, **kwargs): return True
     def append_retrospective_log(*args, **kwargs): return True
@@ -252,6 +254,22 @@ def safe_list(val: Any) -> List[Any]:
         except Exception:
             pass
     return []
+
+
+def shorten_task_name(name: str, max_words: int = 5) -> str:
+    """Rút gọn tên task tối đa max_words từ để hiển thị gọn gàng trên lưới Thời khóa biểu."""
+    words = str(name).replace("**", "").replace("__", "").strip().split()
+    if len(words) <= max_words:
+        return " ".join(words)
+    return " ".join(words[:max_words]) + "..."
+
+
+def save_undo_snapshot(username: str, current_ms: List[Dict[str, Any]]):
+    """Lưu snapshot bản sao master_schedule vào session state để hỗ trợ tính năng Undo."""
+    try:
+        st.session_state[f"ms_undo_snapshot_{username}"] = json.loads(json.dumps(current_ms))
+    except Exception:
+        st.session_state[f"ms_undo_snapshot_{username}"] = list(current_ms)
 
 
 def generate_gcal_link(task_title: str, time_slot: str, duration_minutes: int = 120, resource_info: str = "") -> str:
@@ -495,6 +513,22 @@ st.set_page_config(
 st.markdown(
     """
     <style>
+    /* Ghim cứng (Sticky) Cụm Tiêu Đề & Thanh 4 Tab trên cùng màn hình */
+    div[data-testid="stTabs"] > div[data-baseweb="tab-list"] {
+        position: -webkit-sticky !important;
+        position: sticky !important;
+        top: 2.8rem !important;
+        z-index: 999 !important;
+        background-color: #0e1117 !important;
+        border-bottom: 1px solid #262730 !important;
+        padding-top: 0.5rem !important;
+        padding-bottom: 0.5rem !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4) !important;
+    }
+    div[data-testid="stTabs"] > div[data-baseweb="tab-list"] button[role="tab"] {
+        font-weight: 600 !important;
+        font-size: 0.95rem !important;
+    }
     .metric-card {
         background: linear-gradient(135deg, #1e293b, #0f172a);
         border: 1px solid #334155;
@@ -1226,10 +1260,16 @@ with st.sidebar:
 # ==========================================
 # 5. MAIN PANEL: BẢNG CHỈ HUY 4 GIAI ĐOẠN KHÉP KÍN & 4 CHATBOT CHUYÊN BIỆT
 # ==========================================
-st.title("🤖 Mavis AI Executive & Life Coach")
-st.markdown(
-    f"**Không gian làm việc:** `{current_name}` (`@{current_username}`) | Mô hình CEO điều phối 3 giai đoạn khép kín • Tối ưu nhịp sinh học • Đồng bộ Cloud MongoDB"
-)
+with st.container():
+    st.markdown(
+        f"""
+        <div style="position: sticky; top: 2.8rem; z-index: 998; background-color: #0e1117; border-bottom: 1px solid #262730; padding: 0.4rem 0.6rem 0.5rem 0.6rem; border-radius: 6px; margin-bottom: 0.4rem;">
+            <div style="font-size: 1.65rem; font-weight: 700; color: #f8fafc; margin-bottom: 2px;">🤖 Mavis AI Executive & Life Coach</div>
+            <div style="font-size: 0.85rem; color: #94a3b8;"><b>Không gian làm việc:</b> <code>{current_name}</code> (<code>@{current_username}</code>) | Mô hình CEO điều phối 3 giai đoạn khép kín • Tối ưu nhịp sinh học • Đồng bộ Cloud MongoDB</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 # 4 Tab Chuyên biệt theo Chu trình Điều hành Mavis CEO
 tab_ceo, tab_arch, tab_sched, tab_retro = st.tabs([
@@ -1502,12 +1542,34 @@ with tab_arch:
 
     col_dash_arch, col_chat_arch = st.columns([1.15, 0.85], gap="large")
 
+    # Khởi tạo mặc định toàn diện cho dictionary domain_terms và các biến liên quan
+    # để tài khoản mới chưa có mục tiêu vẫn vào app bình thường không bị lỗi NameError
+    default_general_terms = DOMAIN_TERMINOLOGY.get("general", {}) if isinstance(DOMAIN_TERMINOLOGY, dict) else {}
+    domain_terms = {
+        "domain_name": default_general_terms.get("domain_name", "Phát triển Tổng thể"),
+        "role_title": default_general_terms.get("role_title", "AI Strategy Architect"),
+        "chat_title": default_general_terms.get("chat_title", "💬 Trò Chuyện Cùng Strategy Architect"),
+        "chat_caption": default_general_terms.get("chat_caption", "Thảo luận phương pháp • Tinh chỉnh chiến lược • Chốt lộ trình 4 tầng khép kín"),
+        "input_placeholder": default_general_terms.get("input_placeholder", "Thảo luận phương pháp, tinh chỉnh chiến lược hoặc gõ 'chốt phương pháp'..."),
+        "finalize_btn": default_general_terms.get("finalize_btn", "🚀 Chốt phương pháp & Tự động phân rã 4 tầng"),
+        "strategy_label": default_general_terms.get("strategy_label", "💡 Phương pháp chiến lược (Kim chỉ nam):"),
+        "q_label": default_general_terms.get("q_label", "🏆 Giai đoạn chiến lược (Quý)"),
+        "m_resources_label": default_general_terms.get("m_resources_label", "Tài liệu & Công cụ"),
+        "curated_title": default_general_terms.get("curated_title", "📚 Kho Tài Liệu & Công Cụ Thẩm Định (Curated Resources):"),
+        "curated_empty_caption": default_general_terms.get("curated_empty_caption", "*(Chưa có tài liệu)*"),
+        "how_to_use_label": default_general_terms.get("how_to_use_label", "Hướng dẫn khai thác"),
+        "hours_label": "Số giờ/ngày",
+        "resource_label": "Tài liệu & Giáo trình",
+    }
+    selected_goal = None
+    selected_goal_name = "Chưa có mục tiêu"
+    bd = {}
+
     with col_dash_arch:
         user_goals = safe_list(st.session_state.get(goals_key) or load_user_goals(current_username))
 
         if not user_goals:
             st.info("💡 Chưa có mục tiêu nào trong hệ thống. Hãy trao đổi với CEO Coach tại Tab 1 để thẩm định và kích hoạt mục tiêu đầu tiên!")
-            selected_goal = None
         else:
             selected_goal_id_key = f"selected_goal_id_{current_username}"
             all_gids = [str(g.get("id")) for g in user_goals if g.get("id")]
@@ -2138,16 +2200,24 @@ with tab_sched:
             st.markdown("#### 🧭 Góc Nhìn Thời Gian & Lịch Trình Điều Hành:")
             view_options = ["📅 Theo Ngày", "🗓️ Theo Tuần", "📆 Theo Tháng", "📊 Theo Quý"]
             view_key = f"sched_view_mode_{current_username}"
+            pending_view_key = f"pending_sched_view_{current_username}"
+            if pending_view_key in st.session_state:
+                st.session_state[view_key] = st.session_state.pop(pending_view_key)
+
+            cur_selected_view = st.session_state.get(view_key, "📅 Theo Ngày")
+            if cur_selected_view not in view_options:
+                cur_selected_view = "📅 Theo Ngày"
+
             if hasattr(st, "segmented_control"):
                 selected_view = st.segmented_control(
                     "Góc nhìn thời gian:",
                     options=view_options,
-                    default=st.session_state.get(view_key, "📅 Theo Ngày"),
+                    default=cur_selected_view,
                     key=view_key,
                     label_visibility="collapsed",
                 )
             else:
-                default_idx = view_options.index(st.session_state.get(view_key, "📅 Theo Ngày")) if st.session_state.get(view_key) in view_options else 0
+                default_idx = view_options.index(cur_selected_view)
                 selected_view = st.radio(
                     "Góc nhìn thời gian:",
                     options=view_options,
@@ -2213,6 +2283,124 @@ with tab_sched:
                                 st.error(f"❌ {sync_res.get('message')}")
                 else:
                     st.caption("*(Chưa kết nối Google Calendar)*")
+
+            st.markdown("---")
+
+            # ------------------------------------------------------------------
+            # THANH ĐIỀU HƯỚNG THAO TÁC & TIỆN ÍCH THỰC CHIẾN
+            # ------------------------------------------------------------------
+            undo_snapshot_key = f"ms_undo_snapshot_{current_username}"
+            has_undo = bool(st.session_state.get(undo_snapshot_key))
+
+            # Tổng hợp text tóm tắt lịch hôm nay để phục vụ nút Copy 1-Click
+            today_tasks_copy = [
+                t for t in filtered_schedule
+                if t.get("date") == today_date_str
+                or (not str(t.get("date", "")).startswith("202") and t.get("date") == today_vi_day)
+            ]
+            lines_summary = [f"📅 LỊCH TRÌNH HÔM NAY — {today_vi_day}, {today_date.strftime('%d/%m/%Y')}:"]
+            if today_tasks_copy:
+                for t in today_tasks_copy:
+                    status_icon = "✅" if t.get("is_done") else "▫️"
+                    t_slot_disp = t.get("time_slot", "08:00")
+                    t_name_disp = t.get("task_detail", "")
+                    t_energy_disp = t.get("energy_level", "")
+                    lines_summary.append(f"{status_icon} [{t_slot_disp}] {t_name_disp} ({t_energy_disp})")
+            else:
+                lines_summary.append("(Chưa có task nào được lên lịch cho hôm nay)")
+            copy_text_today = "\n".join(lines_summary)
+
+            col_act_left, col_act_undo, col_act_today, col_act_right, col_act_copy = st.columns([0.18, 0.22, 0.20, 0.18, 0.22])
+            with col_act_left:
+                if st.button("⬅️ Back", key=f"btn_global_back_{current_username}", use_container_width=True):
+                    if selected_view == "📅 Theo Ngày":
+                        st.session_state[sel_date_key] = max(min_date_limit, current_picked_date - timedelta(days=1))
+                    elif selected_view == "🗓️ Theo Tuần":
+                        st.session_state[sel_date_key] = max(min_date_limit, current_picked_date - timedelta(days=7))
+                    else:
+                        st.session_state[sel_date_key] = max(min_date_limit, current_picked_date - timedelta(days=30))
+                    st.rerun()
+
+            with col_act_undo:
+                if st.button("↩️ Undo Lịch", key=f"btn_global_undo_{current_username}", disabled=not has_undo, use_container_width=True):
+                    prev_snapshot = st.session_state.pop(undo_snapshot_key, None)
+                    if prev_snapshot:
+                        save_master_schedule(prev_snapshot, username=current_username)
+                        st.session_state[master_schedule_key] = prev_snapshot
+                        st.toast("↩️ Đã hoàn tác thay đổi lịch gần nhất!")
+                        st.rerun()
+
+            with col_act_today:
+                if st.button("📍 Về Hôm Nay", key=f"btn_global_today_{current_username}", use_container_width=True):
+                    st.session_state[sel_date_key] = today_date
+                    st.session_state[pending_view_key] = "📅 Theo Ngày"
+                    st.rerun()
+
+            with col_act_right:
+                if st.button("➡️ Next", key=f"btn_global_next_{current_username}", use_container_width=True):
+                    if selected_view == "📅 Theo Ngày":
+                        st.session_state[sel_date_key] = min(base_target_date, current_picked_date + timedelta(days=1))
+                    elif selected_view == "🗓️ Theo Tuần":
+                        st.session_state[sel_date_key] = min(base_target_date, current_picked_date + timedelta(days=7))
+                    else:
+                        st.session_state[sel_date_key] = min(base_target_date, current_picked_date + timedelta(days=30))
+                    st.rerun()
+
+            with col_act_copy:
+                with st.popover("📋 Copy Lịch Hôm Nay", use_container_width=True):
+                    st.markdown("**📋 Tóm Tắt Lịch Hôm Nay (1-Click Copy):**")
+                    st.code(copy_text_today, language="text")
+                    st.caption("💡 Bấm nút copy ở góc trên bên phải khung text để gửi Zalo / Telegram.")
+
+            # ------------------------------------------------------------------
+            # BỘ CHỌN THÁNG & TUẦN TRONG THÁNG (MỞ NHANH TỪNG TUẦN)
+            # ------------------------------------------------------------------
+            month_list = []
+            cur_m_iter = min_date_limit.replace(day=1)
+            end_m_limit = base_target_date.replace(day=1)
+            while cur_m_iter <= end_m_limit:
+                month_list.append(cur_m_iter)
+                if cur_m_iter.month == 12:
+                    cur_m_iter = cur_m_iter.replace(year=cur_m_iter.year + 1, month=1)
+                else:
+                    cur_m_iter = cur_m_iter.replace(month=cur_m_iter.month + 1)
+
+            if not month_list:
+                month_list = [today_date.replace(day=1)]
+
+            current_month_first = current_picked_date.replace(day=1)
+            m_options = [m.strftime("Tháng %m/%Y") for m in month_list]
+            m_default_idx = month_list.index(current_month_first) if current_month_first in month_list else 0
+
+            with st.expander("🗓️ Bộ Chọn Tháng & Tuần Trong Tháng (Mở nhanh)", expanded=(selected_view in ["🗓️ Theo Tuần", "📆 Theo Tháng"])):
+                col_m_sel, col_w_sel = st.columns([0.35, 0.65])
+                with col_m_sel:
+                    chosen_m_label = st.selectbox(
+                        "Chọn Tháng:",
+                        options=m_options,
+                        index=m_default_idx,
+                        key=f"sel_quick_month_{current_username}",
+                    )
+                    chosen_month_date = month_list[m_options.index(chosen_m_label)]
+                with col_w_sel:
+                    import calendar
+                    _, last_day = calendar.monthrange(chosen_month_date.year, chosen_month_date.month)
+                    weeks_in_month = []
+                    for w_num, (s_day, e_day) in enumerate([(1, 7), (8, 14), (15, 21), (22, 28), (29, last_day)], 1):
+                        if s_day <= last_day:
+                            actual_e = min(e_day, last_day)
+                            w_start = chosen_month_date.replace(day=s_day)
+                            w_end = chosen_month_date.replace(day=actual_e)
+                            weeks_in_month.append((f"Tuần {w_num} ({w_start.strftime('%d/%m')}-{w_end.strftime('%d/%m')})", w_start))
+
+                    st.markdown("**Mở nhanh Tuần:**")
+                    w_cols = st.columns(len(weeks_in_month))
+                    for w_idx, (w_lbl, w_st_date) in enumerate(weeks_in_month):
+                        with w_cols[w_idx]:
+                            if st.button(w_lbl, key=f"btn_quick_wk_{current_username}_{chosen_month_date.strftime('%Y%m')}_{w_idx}", use_container_width=True):
+                                st.session_state[sel_date_key] = w_st_date
+                                st.session_state[pending_view_key] = "🗓️ Theo Tuần"
+                                st.rerun()
 
             st.markdown("---")
 
@@ -2339,6 +2527,7 @@ with tab_sched:
                                     with col_chk:
                                         checked = st.checkbox("", value=is_done_val, key=chk_key, label_visibility="collapsed")
                                         if checked != is_done_val:
+                                            save_undo_snapshot(current_username, ms)
                                             update_master_schedule_task_status(
                                                 task_identifier=t_detail,
                                                 is_done=checked,
@@ -2363,9 +2552,20 @@ with tab_sched:
 
                                         st.caption(f"🏁 **Tiêu chí hoàn thành (DoD):** {clean_dod}")
 
-                                        if t_link:
-                                            btn_lbl = f"📦 Mở Tài Liệu: {t_res_title}" if (t_res_title and len(t_res_title) < 35) else "📦 Mở Tài Liệu Thực Tế (1-Click)"
-                                            st.link_button(label=btn_lbl, url=t_link, use_container_width=False)
+                                        col_btn_link, col_btn_defer = st.columns([0.65, 0.35])
+                                        with col_btn_link:
+                                            if t_link:
+                                                btn_lbl = f"📦 Mở Tài Liệu: {t_res_title[:28]}" if (t_res_title and len(t_res_title) < 28) else "📦 Mở Tài Liệu (1-Click)"
+                                                st.link_button(label=btn_lbl, url=t_link, use_container_width=False)
+                                        with col_btn_defer:
+                                            defer_k = f"btn_def_day_{current_username}_{cur_d_iso}_{sess}_{idx}_{abs(hash(t_detail)) % 100000}"
+                                            if st.button("⏭️ Dời sang mai", key=defer_k, use_container_width=True):
+                                                save_undo_snapshot(current_username, ms)
+                                                ok_def, next_d = defer_master_schedule_task_to_tomorrow(t_detail, cur_d_iso, current_username)
+                                                if ok_def:
+                                                    st.session_state[master_schedule_key] = load_master_schedule(current_username)
+                                                    st.toast(f"⏭️ Đã dời task sang ngày mai ({next_d})!")
+                                                    st.rerun()
 
                     if deferred_tasks:
                         st.markdown("---")
@@ -2377,7 +2577,8 @@ with tab_sched:
                                 st.markdown(f"- ▫️ ⏰ **{dt_slot}**: {dt_title} `[🎯 {dt_goal}]` &nbsp; `:orange[Đã trượt sang ngày mai]`")
 
                 # ==============================================================
-                # GÓC NHÌN 2: 🗓️ THEO TUẦN (WEEKLY MATRIX VIEW THEO NGÀY THỰC TẾ)
+                # GÓC NHÌN 2: 🗓️ THEO TUẦN (TIMETABLE GRID 8 CỘT THEO NGÀY THỰC TẾ)
+                # Cột 1 cố định là Khung Giờ (Time), 7 Cột là Thứ 2 -> Chủ Nhật
                 # ==============================================================
                 elif selected_view == "🗓️ Theo Tuần":
                     mon_of_week = current_picked_date - timedelta(days=current_picked_date.weekday())
@@ -2413,55 +2614,94 @@ with tab_sched:
                         st.metric("⚡ Tiến độ thực thi tuần", f"{pct_wk}%")
 
                     st.progress(pct_wk / 100)
-                    st.caption("💡 Bấm nút '🔍 Mở ngày' trên từng cột để mở ngay chi tiết lịch ngày hôm đó:")
+                    st.caption("💡 Bấm '🔍 Mở' trên từng cột để xem chi tiết Ngày, hoặc bấm '📄 Chi tiết' để dời lịch / mở tài liệu:")
 
-                    # Header 7 cột cho 7 ngày thực tế
-                    col_headers = st.columns(7)
+                    # Header 8 cột cho Thời khóa biểu Tuần (Cột 0: Time, Cột 1-7: Thứ 2 -> Chủ Nhật)
+                    col_timetable_header = st.columns([0.16, 0.12, 0.12, 0.12, 0.12, 0.12, 0.12, 0.12])
+                    with col_timetable_header[0]:
+                        st.markdown("**⏰ Khung Giờ**")
+
                     for d_idx, d_obj in enumerate(week_dates):
                         d_str = d_obj.strftime("%Y-%m-%d")
                         d_short_date = d_obj.strftime("%d/%m")
                         d_name = VIETNAM_WEEKDAYS.get(d_obj.weekday(), "")
-                        d_tasks = [
-                            t for t in filtered_schedule
-                            if t.get("date") == d_str
-                            or (not str(t.get("date", "")).startswith("202") and t.get("date") == d_name)
-                        ]
-                        d_done = sum(1 for t in d_tasks if t.get("is_done") is True)
-                        d_tot = len(d_tasks)
-                        with col_headers[d_idx]:
-                            is_today_col = (d_obj == today_date)
-                            badge_style = "color:#ff4b4b;" if is_today_col else ""
-                            st.markdown(f"<span style='{badge_style}'>**{DAY_SHORT.get(d_name, d_name)}**</span> `({d_short_date})`", unsafe_allow_html=True)
-                            if d_tot > 0:
-                                st.caption(f"{d_done}/{d_tot} xong")
-                            else:
-                                st.caption("Nghỉ")
-                            if st.button("🔍 Mở ngày", key=f"btn_open_wkd_{current_username}_{d_str}", use_container_width=True):
+                        is_today_col = (d_obj == today_date)
+                        badge_style = "color:#ff4b4b;" if is_today_col else ""
+                        with col_timetable_header[d_idx + 1]:
+                            st.markdown(f"<div style='text-align:center;'><span style='{badge_style}'>**{DAY_SHORT.get(d_name, d_name)}**</span><br/><code>{d_short_date}</code></div>", unsafe_allow_html=True)
+                            if st.button("🔍 Mở", key=f"btn_open_wkd_{current_username}_{d_str}", use_container_width=True):
                                 st.session_state[sel_date_key] = d_obj
-                                st.session_state[view_key] = "📅 Theo Ngày"
+                                st.session_state[pending_view_key] = "📅 Theo Ngày"
                                 st.rerun()
 
-                    # 3 Hàng: Sáng / Chiều / Tối
-                    session_defs = [
-                        ("🌅 Buổi Sáng", "Sáng", "06:30 - 11:30"),
-                        ("☀️ Buổi Chiều", "Chiều", "12:00 - 18:30"),
-                        ("🌙 Buổi Tối", "Tối", "19:00 - 22:30"),
+                    # Thu thập và sắp xếp các khung giờ xuất hiện trong tuần
+                    standard_slots = [
+                        "06:30 - 07:30",
+                        "08:00 - 10:00",
+                        "10:30 - 11:30",
+                        "12:00 - 12:30",
+                        "14:00 - 16:00",
+                        "16:30 - 17:30",
+                        "18:00 - 18:30",
+                        "19:30 - 21:00",
+                        "21:30 - 22:30",
                     ]
+                    all_slots_set = set(standard_slots)
+                    for t in week_tasks:
+                        ts = str(t.get("time_slot", "")).strip()
+                        if ts and "-" in ts:
+                            all_slots_set.add(ts)
 
-                    for sess_title, sess_name, sess_time in session_defs:
-                        st.markdown(f"##### {sess_title} ({sess_time}):")
-                        cols_sess = st.columns(7)
+                    def parse_slot_sort_key(slot_str: str) -> int:
+                        try:
+                            start_str = slot_str.split("-")[0].strip()
+                            h, m = map(int, start_str.split(":"))
+                            return h * 60 + m
+                        except Exception:
+                            return 9999
+
+                    sorted_slots = sorted(list(all_slots_set), key=parse_slot_sort_key)
+
+                    # Lọc các slot thực tế có task trong tuần hoặc là slot chính
+                    active_slots = [
+                        slot for slot in sorted_slots
+                        if any(
+                            (t.get("date") == d.strftime("%Y-%m-%d") or (not str(t.get("date", "")).startswith("202") and t.get("date") == VIETNAM_WEEKDAYS.get(d.weekday(), "")))
+                            and str(t.get("time_slot", "")).strip() == slot
+                            for d in week_dates
+                            for t in week_tasks
+                        ) or slot in ["08:00 - 10:00", "12:00 - 12:30", "14:00 - 16:00", "16:30 - 17:30", "19:30 - 21:00"]
+                    ]
+                    if not active_slots:
+                        active_slots = standard_slots
+
+                    # Vẽ từng hàng khung giờ trong bảng 8 cột
+                    for slot_idx, slot in enumerate(active_slots):
+                        st.markdown("<hr style='margin: 4px 0; border: none; border-top: 1px dashed #334155;'/>", unsafe_allow_html=True)
+                        row_cols = st.columns([0.16, 0.12, 0.12, 0.12, 0.12, 0.12, 0.12, 0.12])
+                        with row_cols[0]:
+                            st.markdown(f"<div style='font-size:0.83rem; font-weight:bold; margin-top:6px;'>⏰ <code>{slot}</code></div>", unsafe_allow_html=True)
+
                         for d_idx, d_obj in enumerate(week_dates):
                             d_str = d_obj.strftime("%Y-%m-%d")
                             d_name = VIETNAM_WEEKDAYS.get(d_obj.weekday(), "")
-                            with cols_sess[d_idx]:
-                                cell_tasks = [
+                            with row_cols[d_idx + 1]:
+                                raw_matching = [
                                     t for t in filtered_schedule
                                     if (t.get("date") == d_str or (not str(t.get("date", "")).startswith("202") and t.get("date") == d_name))
-                                    and t.get("session") == sess_name
+                                    and str(t.get("time_slot", "")).strip() == slot
                                 ]
+                                # Tự động loại bỏ task trùng khung giờ trong cùng một ngày
+                                seen_cell_details = set()
+                                cell_tasks = []
+                                for r_tk in raw_matching:
+                                    detail_key = str(r_tk.get("task_detail", "")).strip().lower()
+                                    if detail_key and detail_key not in seen_cell_details:
+                                        seen_cell_details.add(detail_key)
+                                        cell_tasks.append(r_tk)
+
                                 if not cell_tasks:
-                                    st.caption("▫️ *Trống*")
+                                    st.markdown("<p style='color:#475569; text-align:center; margin-top:8px;'>—</p>", unsafe_allow_html=True)
                                 else:
                                     for t_idx, tk in enumerate(cell_tasks):
                                         t_detail = tk.get("task_detail", "Nhiệm vụ")
@@ -2470,37 +2710,45 @@ with tab_sched:
                                         t_is_done = bool(tk.get("is_done", False))
                                         t_dod = tk.get("definition_of_done", "")
                                         t_link = tk.get("resource_url") or tk.get("resource_link", "")
+                                        short_title = shorten_task_name(t_detail, max_words=5)
 
-                                        wk_chk_key = f"chk_wk_{current_username}_{d_str}_{sess_name}_{t_idx}_{abs(hash(t_detail)) % 100000}"
+                                        grid_chk_key = f"chk_grd_{current_username}_{d_str}_{slot_idx}_{t_idx}_{abs(hash(t_detail)) % 100000}"
 
-                                        with st.container(border=True):
-                                            c_w_chk, c_w_txt = st.columns([0.22, 0.78])
-                                            with c_w_chk:
-                                                new_done = st.checkbox("", value=t_is_done, key=wk_chk_key, label_visibility="collapsed")
-                                                if new_done != t_is_done:
-                                                    update_master_schedule_task_status(
-                                                        task_identifier=t_detail,
-                                                        is_done=new_done,
-                                                        date=d_str,
-                                                        username=current_username,
-                                                    )
+                                        new_done = st.checkbox(
+                                            f"{energy_badge} {short_title}",
+                                            value=t_is_done,
+                                            key=grid_chk_key,
+                                        )
+                                        if new_done != t_is_done:
+                                            save_undo_snapshot(current_username, ms)
+                                            update_master_schedule_task_status(
+                                                task_identifier=t_detail,
+                                                is_done=new_done,
+                                                date=d_str,
+                                                username=current_username,
+                                            )
+                                            tk["is_done"] = new_done
+                                            st.session_state[master_schedule_key] = load_master_schedule(current_username)
+                                            st.toast(f"✅ Đã cập nhật: {short_title}...")
+                                            st.rerun()
+
+                                        with st.popover("📄 Chi tiết", use_container_width=True):
+                                            st.markdown(f"**{energy_badge}** | ⏰ **{slot}**")
+                                            st.markdown(f"📌 **{t_detail}**")
+                                            if tk.get("goal_title"):
+                                                st.caption(f"🎯 **Mục tiêu:** {tk.get('goal_title')}")
+                                            if t_dod:
+                                                st.caption(f"🏁 **DoD:** {t_dod}")
+                                            if t_link:
+                                                st.link_button("📦 Mở Tài Liệu", url=t_link, use_container_width=True)
+                                            defer_grid_key = f"btn_def_pop_{grid_chk_key}"
+                                            if st.button("⏭️ Dời sang mai", key=defer_grid_key, use_container_width=True):
+                                                save_undo_snapshot(current_username, ms)
+                                                ok_def, next_d = defer_master_schedule_task_to_tomorrow(t_detail, d_str, current_username)
+                                                if ok_def:
                                                     st.session_state[master_schedule_key] = load_master_schedule(current_username)
-                                                    st.toast(f"✅ Đã cập nhật: {t_detail[:30]}...")
+                                                    st.toast(f"⏭️ Đã dời task sang ngày mai ({next_d})!")
                                                     st.rerun()
-                                            with c_w_txt:
-                                                clean_slot = str(tk.get('time_slot', '')).replace('**', '').replace('__', '').strip()
-                                                clean_detail = str(t_detail).replace('**', '').replace('__', '').strip()
-                                                clean_dod = str(t_dod).replace('**', '').replace('__', '').strip()
-
-                                                st.markdown(f"{energy_badge} **{clean_slot}**")
-                                                if t_is_done:
-                                                    st.markdown(f"<div style='font-size:0.8rem; text-decoration:line-through; color:gray; line-height:1.25; word-break:break-word; margin-bottom:3px;'>{clean_detail}</div>", unsafe_allow_html=True)
-                                                else:
-                                                    st.markdown(f"<div style='font-size:0.82rem; font-weight:600; line-height:1.25; word-break:break-word; margin-bottom:3px;'>{clean_detail}</div>", unsafe_allow_html=True)
-                                                if clean_dod:
-                                                    st.markdown(f"<div style='font-size:0.75rem; color:#555; line-height:1.2; word-break:break-word; margin-bottom:4px;'>🏁 {clean_dod}</div>", unsafe_allow_html=True)
-                                                if t_link:
-                                                    st.link_button("📦 Tài liệu", url=t_link, use_container_width=True)
 
                 # ==============================================================
                 # GÓC NHÌN 3: 📆 THEO THÁNG (MONTHLY GRID THEO NGÀY THỰC TẾ)
@@ -2550,7 +2798,7 @@ with tab_sched:
 
                                     if st.button("🔍 Xem", key=f"btn_mth_open_{current_username}_{w_idx}_{d_idx}_{m_str}", use_container_width=True):
                                         st.session_state[sel_date_key] = curr_m_date
-                                        st.session_state[view_key] = "📅 Theo Ngày"
+                                        st.session_state[pending_view_key] = "📅 Theo Ngày"
                                         st.rerun()
 
                                     if day_tasks:

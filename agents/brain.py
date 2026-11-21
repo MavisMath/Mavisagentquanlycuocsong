@@ -3577,24 +3577,27 @@ CHỈ THỊ KIẾN TRÚC & PHÂN CẤP 4 TẦNG BẮT BUỘC:
     except Exception as e:
         print(f"Lỗi invoke trong architect_chat (Nhịp 2): {e}")
         if target_domain == "health":
+            e_deep_val = domain_terms.get("energy_deep", "🔴 Deep Work")
+            e_shallow_val = domain_terms.get("energy_shallow", "🟡 Shallow Work")
+            e_recharge_val = domain_terms.get("energy_recharge", "🟢 Recharge")
             sample_tasks_w1 = [
                 WeeklyTaskItem(
                     task_name=f"Tập kháng lực toàn thân (Full Body Resistance) cho {goal_title}",
-                    energy_level=domain_terms["energy_deep"],
+                    energy_level=e_deep_val,
                     resource_title="Giáo án Kháng Lực Nền Tảng (Full Body 3 Buổi)",
                     resource_url="https://muscleandstrength.com",
                     definition_of_done="Hoàn thành 4 bài tập (Squat, Push-up, Row, Plank) 3 hiệp x 10-12 lần chuẩn form.",
                 ),
                 WeeklyTaskItem(
                     task_name="Đi bộ dốc Cardio Zone 2 & Chuẩn bị bữa ăn Meal Prep (High Protein)",
-                    energy_level=domain_terms["energy_shallow"],
+                    energy_level=e_shallow_val,
                     resource_title="Bảng tính Calo TDEE & Thực đơn 1.500 kcal",
                     resource_url="https://tdeecalculator.net",
                     definition_of_done="Hoàn thành 35 phút đi bộ dốc nhịp tim Zone 2 và chuẩn bị sẵn 3 hộp ăn trưa đủ 30g protein/hộp.",
                 ),
                 WeeklyTaskItem(
                     task_name="Giãn cơ tĩnh (Stretching / Foam Rolling) & Ngủ đủ 8 tiếng",
-                    energy_level=domain_terms["energy_recharge"],
+                    energy_level=e_recharge_val,
                     resource_title="Bài tập Giãn Cơ & Phục Hồi Thể Lực Chuẩn Khoa Học",
                     resource_url="https://youtube.com",
                     definition_of_done="Thực hiện 20 phút giãn cơ tĩnh các nhóm cơ chính và ngủ sâu giấc trước 22:30.",
@@ -3603,21 +3606,21 @@ CHỈ THỊ KIẾN TRÚC & PHÂN CẤP 4 TẦNG BẮT BUỘC:
             sample_tasks_w2 = [
                 WeeklyTaskItem(
                     task_name=f"Tập kháng lực tăng tiến mức tạ (Progressive Overload) cho {goal_title}",
-                    energy_level=domain_terms["energy_deep"],
+                    energy_level=e_deep_val,
                     resource_title="Giáo án Tăng Tiến Cường Độ Chuẩn Khoa Học",
                     resource_url="https://muscleandstrength.com",
                     definition_of_done="Tăng 5% mức tạ hoặc thêm 2 reps mỗi hiệp, ghi lại nhật ký tập luyện.",
                 ),
                 WeeklyTaskItem(
                     task_name="Cardio Zone 2 đạp xe và Cân đo chỉ số cơ thể định kỳ",
-                    energy_level=domain_terms["energy_shallow"],
+                    energy_level=e_shallow_val,
                     resource_title="Bảng Theo Dõi Calo In / Out & Vòng Eo",
                     resource_url="https://myfitnesspal.com",
                     definition_of_done="Hoàn thành 40 phút đạp xe Zone 2, cân đo cân nặng buổi sáng lúc đói và đo vòng bụng.",
                 ),
                 WeeklyTaskItem(
                     task_name="Ngâm nước ấm thư giãn cơ bắp & Đi ngủ sớm",
-                    energy_level=domain_terms["energy_recharge"],
+                    energy_level=e_recharge_val,
                     resource_title="Hướng dẫn phục hồi cơ bắp và giấc ngủ sâu",
                     resource_url="https://youtube.com",
                     definition_of_done="Nghỉ ngơi hoàn toàn, ngâm chân nước ấm 15 phút và ngủ đủ 8 tiếng.",
@@ -3678,7 +3681,7 @@ CHỈ THỊ KIẾN TRÚC & PHÂN CẤP 4 TẦNG BẮT BUỘC:
                         how_to_use="Thực hiện theo lịch 3-4 buổi/tuần, ghi lại mức tạ để tăng tiến dần.",
                     ),
                 ],
-                architect_response=f"Tôi đã xuất bản toàn diện lộ trình rèn luyện thể chất 4 tầng (Năm ➔ Quý ➔ Tháng ➔ Tuần) dựa trên phương pháp dinh dưỡng & tập luyện '{final_strat}' kèm nhãn năng lượng chuẩn ({domain_terms['energy_deep']}, {domain_terms['energy_shallow']}, {domain_terms['energy_recharge']}), Gói tài liệu 1-Click và Tiêu chí hoàn thành (DoD) cho mục tiêu '{goal_title}'. Trạng thái mục tiêu đã kích hoạt và sẵn sàng thực thi!",
+                architect_response=f"Tôi đã xuất bản toàn diện lộ trình rèn luyện thể chất 4 tầng (Năm ➔ Quý ➔ Tháng ➔ Tuần) dựa trên phương pháp dinh dưỡng & tập luyện '{final_strat}' kèm nhãn năng lượng chuẩn ({e_deep_val}, {e_shallow_val}, {e_recharge_val}), Gói tài liệu 1-Click và Tiêu chí hoàn thành (DoD) cho mục tiêu '{goal_title}'. Trạng thái mục tiêu đã kích hoạt và sẵn sàng thực thi!",
             )
         else:
             sample_tasks_w1 = [

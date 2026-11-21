@@ -9,6 +9,7 @@ from memory.goals import (
     ensure_schedule_covers_date,
     load_master_schedule,
     save_master_schedule,
+    defer_master_schedule_task_to_tomorrow,
     VIETNAM_WEEKDAYS,
 )
 from tools.google_calendar import _convert_task_to_datetime_range, exchange_code_and_save_token
@@ -86,6 +87,26 @@ class TestRealDateAxisAndDetailedSchedule(unittest.TestCase):
         self.assertEqual(s_dt.minute, 0)
         self.assertEqual(e_dt.hour, 12)
         self.assertEqual(e_dt.minute, 30)
+
+
+    def test_defer_master_schedule_task_to_tomorrow(self):
+        """Kiểm tra dời task sang ngày mai trong master_schedule."""
+        test_task = {
+            "task_detail": "Chạy bộ Zone 2 40 phút",
+            "time_slot": "07:00 - 07:40",
+            "date": "2026-11-21",
+            "day_name": "Thứ Bảy",
+            "is_done": False,
+        }
+        save_master_schedule([test_task], username=self.test_username)
+        ok, next_d = defer_master_schedule_task_to_tomorrow("Chạy bộ Zone 2", "2026-11-21", username=self.test_username)
+        self.assertTrue(ok)
+        self.assertEqual(next_d, "2026-11-22")
+
+        updated_sched = load_master_schedule(self.test_username)
+        self.assertEqual(len(updated_sched), 1)
+        self.assertEqual(updated_sched[0]["date"], "2026-11-22")
+        self.assertEqual(updated_sched[0]["day_name"], "Chủ Nhật")
 
 
 if __name__ == "__main__":

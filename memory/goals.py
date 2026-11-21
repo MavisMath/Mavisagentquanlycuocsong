@@ -35,6 +35,7 @@ __all__ = [
     "load_master_schedule",
     "save_master_schedule",
     "update_master_schedule_task_status",
+    "defer_master_schedule_task_to_tomorrow",
     "load_retrospective_logs",
     "save_retrospective_logs",
     "append_retrospective_log",
@@ -801,6 +802,50 @@ def update_master_schedule_task_status(
     if matched:
         save_master_schedule(schedule, username=username)
     return matched
+
+
+def defer_master_schedule_task_to_tomorrow(
+    task_identifier: str,
+    current_date: Optional[str] = None,
+    username: str = "mavis",
+) -> Tuple[bool, Optional[str]]:
+    """Dời một task sang ngày mai trong master_schedule trên MongoDB Atlas."""
+    username = (username or DEFAULT_USER).strip().lower()
+    schedule = load_master_schedule(username)
+    if not schedule:
+        return False, None
+
+    try:
+        cur_dt = datetime.strptime(str(current_date)[:10], "%Y-%m-%d").date()
+    except Exception:
+        cur_dt = get_vietnam_today()
+    next_dt = cur_dt + timedelta(days=1)
+    next_date_str = next_dt.strftime("%Y-%m-%d")
+    next_day_name = VIETNAM_WEEKDAYS.get(next_dt.weekday(), "Thứ Hai")
+
+    matched = False
+    task_clean = task_identifier.strip().lower()
+    for item in schedule:
+        if not isinstance(item, dict):
+            continue
+        t_title = str(item.get("task_detail", "")).lower()
+        if t_title and (task_clean in t_title or t_title in task_clean):
+            item_date = str(item.get("date", ""))
+            date_match = (
+                current_date is None
+                or item_date == current_date
+                or (len(str(current_date)) >= 10 and str(current_date) in item_date)
+            )
+            if date_match:
+                item["date"] = next_date_str
+                item["day_name"] = next_day_name
+                matched = True
+                break
+
+    if matched:
+        save_master_schedule(schedule, username=username)
+        return True, next_date_str
+    return False, None
 
 
 def generate_detailed_master_schedule(
