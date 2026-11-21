@@ -443,6 +443,71 @@ class TestArchitectAndImports(unittest.TestCase):
         self.assertTrue(len(r_logs) >= 1)
         self.assertIn("pattern_analysis", r_logs[-1])
 
+    def test_architect_chat_anti_repetition_and_auto_sync_schedule(self):
+        """Bảo đảm:
+        1. Từ khóa 'chốt phương pháp', 'đồng ý', 'xuất bản lộ trình' tự động kích hoạt phân rã 4 tầng.
+        2. Tự động kích hoạt scheduler_chat để đồng bộ sang master_schedule (Giai đoạn 2).
+        3. Phản hồi xác nhận rõ ràng lộ trình đã được xuất bản và hướng dẫn sang Tab 2.
+        4. Không chứa ký tự markdown ** thô trong master_schedule.
+        5. Khi đã có lộ trình, các lượt chat tiếp theo không lặp lại kịch bản chào mở đầu.
+        """
+        test_goal = {
+            "id": f"goal_{uuid.uuid4().hex[:6]}",
+            "title": "Tập luyện Giảm cân & Săn chắc",
+            "category": "Sức khỏe",
+            "priority": "P1 - Urgent",
+            "preferred_time": "06:00 - 07:30 Sáng",
+            "daily_hours": 1.5,
+            "duration_days": 90,
+            "status": "evaluating",
+            "strategy_summary": "Dinh dưỡng thâm hụt 500 kcal kết hợp kháng lực 3 buổi/tuần.",
+            "breakdown": {},
+        }
+        save_user_goals([test_goal], username=self.test_username)
+
+        # Lượt 1: User gõ từ khóa "đồng ý" để chốt
+        res1 = architect_chat(
+            user_message="Tôi hoàn toàn đồng ý với phương pháp này, xuất bản lộ trình giúp tôi!",
+            username=self.test_username,
+            goal_id=test_goal["id"],
+            chat_history=[{"role": "user", "content": "Tư vấn cho tôi"}, {"role": "assistant", "content": "Đề xuất thâm hụt calo"}],
+        )
+
+        self.assertTrue(res1.get("is_breakdown"), "Phải kích hoạt phân rã 4 tầng khi user nhắn 'đồng ý' / 'xuất bản lộ trình'")
+        resp_text1 = res1.get("response", "")
+        self.assertIn("✅ Lộ trình 4 tầng đã được xuất bản ở cột bên trái!", resp_text1)
+        self.assertIn("Tab Giai đoạn 2", resp_text1)
+
+        # Kiểm tra Master Schedule đã được tự động sinh và lưu vào MongoDB
+        ms = load_master_schedule(self.test_username)
+        self.assertTrue(len(ms) >= 7, f"Master Schedule phải có đủ task 7 ngày, thực tế: {len(ms)}")
+
+        # Kiểm tra không có ký tự markdown ** thô
+        for tk in ms:
+            t_detail = tk.get("task_detail", "")
+            t_dod = tk.get("definition_of_done", "")
+            self.assertNotIn("**", t_detail, f"task_detail chứa ký tự markdown ** thô: {t_detail}")
+            self.assertNotIn("**", t_dod, f"definition_of_done chứa ký tự markdown ** thô: {t_dod}")
+
+        # Lượt 2: Chat tiếp theo khi đã có lộ trình 4 tầng
+        res2 = architect_chat(
+            user_message="Chế độ ăn này có uống sữa tươi không đường được không?",
+            username=self.test_username,
+            goal_id=test_goal["id"],
+            chat_history=[
+                {"role": "user", "content": "Tôi hoàn toàn đồng ý với phương pháp này"},
+                {"role": "assistant", "content": resp_text1},
+            ],
+        )
+
+        resp_text2 = res2.get("response", "")
+        # Không được lặp lại câu chào mở đầu xã giao
+        self.assertNotIn("Chào bạn, với tư cách là", resp_text2)
+        # Vì đã có lộ trình, bot phải nhắc lộ trình đã xuất bản và không kêu gọi gõ 'chốt phương pháp'
+        self.assertIn("Tab Giai đoạn 2", resp_text2)
+        self.assertNotIn("nhắn 'chốt phương pháp'", resp_text2)
+
+
 
 
 if __name__ == "__main__":

@@ -1595,15 +1595,27 @@ with tab_arch:
             if prev_active_gid != current_sel_id:
                 st.session_state[arch_active_goal_key] = current_sel_id
                 if len(st.session_state[chat_arch_key]) <= 1:
-                    st.session_state[chat_arch_key] = [
-                        {
-                            "role": "assistant",
-                            "content": domain_terms.get("opening_greeting", "").format(
-                                name=current_name,
-                                goal_title=selected_goal_name,
-                            ),
-                        }
-                    ]
+                    has_bd = bool(bd and bd.get("quarterly") and bd.get("weekly"))
+                    if has_bd:
+                        st.session_state[chat_arch_key] = [
+                            {
+                                "role": "assistant",
+                                "content": (
+                                    f"Chào **{current_name}**! Mục tiêu **'{selected_goal_name}'** đã có đầy đủ **Lộ trình 4 Tầng** được xuất bản ở cột bên trái.\n\n"
+                                    "✅ Lộ trình 4 tầng đã được xuất bản ở cột bên trái! Hãy chuyển sang **Tab Giai đoạn 2 (Lịch Trình Thực Thi)** để xem và tinh chỉnh lịch chi tiết từng ngày."
+                                ),
+                            }
+                        ]
+                    else:
+                        st.session_state[chat_arch_key] = [
+                            {
+                                "role": "assistant",
+                                "content": domain_terms.get("opening_greeting", "").format(
+                                    name=current_name,
+                                    goal_title=selected_goal_name,
+                                ),
+                            }
+                        ]
 
             st.markdown("---")
             st.markdown(f"#### 🏛️ Phân Rã Lộ Trình 4 Tầng: **{selected_goal_name}**")
@@ -1714,6 +1726,8 @@ with tab_arch:
             with st.container(border=True):
                 st.markdown(f"**{strat_label}**")
                 st.info(current_strat)
+                if bd and bd.get("quarterly") and bd.get("weekly"):
+                    st.success("✅ Lộ trình 4 tầng đã được xuất bản ở cột bên trái! Hãy chuyển sang **Tab Giai đoạn 2 (Lịch Trình Thực Thi)** để xem và tinh chỉnh lịch chi tiết từng ngày.")
 
         chat_container_arch = st.container(height=450)
         with chat_container_arch:
@@ -1741,7 +1755,8 @@ with tab_arch:
                 st.session_state[chat_arch_key].append({"role": "user", "content": finalize_btn_text})
                 st.session_state[chat_arch_key].append({"role": "assistant", "content": arch_rep})
                 st.session_state[goals_key] = load_user_goals(current_username)
-                st.toast("🎉 Đã xuất bản Lộ trình 4 Tầng thành công!")
+                st.session_state[master_schedule_key] = load_master_schedule(current_username)
+                st.toast("🎉 Đã xuất bản Lộ trình 4 Tầng & Lịch trình 7 ngày thành công!")
                 st.rerun()
 
         if arch_input := st.chat_input(
@@ -1767,6 +1782,7 @@ with tab_arch:
                         st.markdown(arch_rep)
                         st.session_state[chat_arch_key].append({"role": "assistant", "content": arch_rep})
                         st.session_state[goals_key] = load_user_goals(current_username)
+                        st.session_state[master_schedule_key] = load_master_schedule(current_username)
                         st.rerun()
 
 
@@ -2189,15 +2205,18 @@ with tab_sched:
                                             st.toast(f"✅ Đã cập nhật: {t_detail[:35]}...")
                                             st.rerun()
                                     with col_card:
+                                        clean_detail = str(t_detail).replace('**', '').replace('__', '').strip()
+                                        clean_dod = str(t_dod).replace('**', '').replace('__', '').strip()
+                                        clean_slot = str(t_slot).replace('**', '').replace('__', '').strip()
                                         if t_goal:
-                                            st.markdown(f"**{t_energy}** &nbsp;|&nbsp; ⏰ **{t_slot}** — **{t_detail}** `[🎯 {t_goal}]`")
+                                            st.markdown(f"**{t_energy}** &nbsp;|&nbsp; ⏰ **{clean_slot}** — **{clean_detail}** `[🎯 {t_goal}]`")
                                         else:
-                                            st.markdown(f"**{t_energy}** &nbsp;|&nbsp; ⏰ **{t_slot}** — **{t_detail}**")
+                                            st.markdown(f"**{t_energy}** &nbsp;|&nbsp; ⏰ **{clean_slot}** — **{clean_detail}**")
 
                                         if is_done_val:
                                             st.caption("✅ :green[**Đã hoàn thành xuất sắc!**]")
 
-                                        st.caption(f"🏁 **Tiêu chí hoàn thành (DoD):** {t_dod}")
+                                        st.caption(f"🏁 **Tiêu chí hoàn thành (DoD):** {clean_dod}")
 
                                         if t_link:
                                             btn_lbl = f"📦 Mở Tài Liệu: {t_res_title}" if (t_res_title and len(t_res_title) < 35) else "📦 Mở Tài Liệu Thực Tế (1-Click)"
@@ -2285,13 +2304,17 @@ with tab_sched:
                                                     st.toast(f"✅ Đã cập nhật: {t_detail[:30]}...")
                                                     st.rerun()
                                             with c_w_txt:
-                                                st.markdown(f"{energy_badge} **{tk.get('time_slot', '')}**")
+                                                clean_slot = str(tk.get('time_slot', '')).replace('**', '').replace('__', '').strip()
+                                                clean_detail = str(t_detail).replace('**', '').replace('__', '').strip()
+                                                clean_dod = str(t_dod).replace('**', '').replace('__', '').strip()
+
+                                                st.markdown(f"{energy_badge} **{clean_slot}**")
                                                 if t_is_done:
-                                                    st.caption(f"~~{t_detail[:40]}~~")
+                                                    st.markdown(f"<div style='font-size:0.8rem; text-decoration:line-through; color:gray; line-height:1.25; word-break:break-word; margin-bottom:3px;'>{clean_detail}</div>", unsafe_allow_html=True)
                                                 else:
-                                                    st.caption(f"**{t_detail[:40]}**")
-                                                if t_dod:
-                                                    st.caption(f"🏁 {t_dod[:40]}...")
+                                                    st.markdown(f"<div style='font-size:0.82rem; font-weight:600; line-height:1.25; word-break:break-word; margin-bottom:3px;'>{clean_detail}</div>", unsafe_allow_html=True)
+                                                if clean_dod:
+                                                    st.markdown(f"<div style='font-size:0.75rem; color:#555; line-height:1.2; word-break:break-word; margin-bottom:4px;'>🏁 {clean_dod}</div>", unsafe_allow_html=True)
                                                 if t_link:
                                                     st.link_button("📦 Tài liệu", url=t_link, use_container_width=True)
 

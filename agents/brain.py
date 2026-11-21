@@ -3266,15 +3266,17 @@ VAI TRÒ CỦA BẠN: Trực tiếp tư vấn chiến lược chuyên sâu, đ�
 
     # Phân định chế độ: Nhịp 1 (Thảo luận & Tư vấn Chiến lược) vs Nhịp 2 (Xuất bản Lộ trình 4 Tầng)
     msg_clean = user_message.strip().lower()
+    explicit_triggers = ["chốt phương pháp", "đồng ý", "xuất bản lộ trình", "chốt lộ trình", "chốt chiến lược", "đồng ý phương pháp"]
     breakdown_triggers = [
-        "chốt phương pháp", "chốt lộ trình", "chốt chiến lược", "chốt luôn",
-        "đồng ý phương pháp", "đồng ý lộ trình", "phân rã 4 tầng", "phân rã bốn tầng",
-        "tự động phân rã", "bắt đầu phân rã", "xuất bản lộ trình", "lập kế hoạch 4 tầng",
+        "chốt phương pháp", "chốt lộ trình", "chốt chiến lược", "chốt luôn", "chốt",
+        "đồng ý phương pháp", "đồng ý lộ trình", "đồng ý", "ok chốt", "ok",
+        "xuất bản lộ trình", "xuất bản", "phân rã 4 tầng", "phân rã bốn tầng",
+        "tự động phân rã", "bắt đầu phân rã", "lập kế hoạch 4 tầng",
         "triển khai 4 tầng", "tạo lộ trình 4 tầng", "finalize", "breakdown"
     ]
     has_trigger = any(trig in msg_clean for trig in breakdown_triggers) or (
         any(w in msg_clean.split() for w in ["chốt", "chốt!", "chốt.", "đồng ý", "đồng ý!"])
-    )
+    ) or any(t in msg_clean for t in explicit_triggers)
     has_existing_breakdown = bool(current_bd and current_bd.get("quarterly") and current_bd.get("weekly"))
     edit_keywords = ["đổi giờ", "chuyển giờ", "đổi khung giờ", "tăng giờ", "giảm giờ", "thêm tài liệu", "bớt tài liệu", "đổi ưu tiên", "chỉnh sửa"]
     is_editing_existing = has_existing_breakdown and any(k in msg_clean for k in edit_keywords)
@@ -3299,6 +3301,45 @@ VAI TRÒ CỦA BẠN: Trực tiếp tư vấn chiến lược chuyên sâu, đ�
     # NHỊP 1: THẢO LUẬN & TƯ VẤN CHIẾN LƯỢC TỔNG (KHI CHƯA CHỐT HOẶC ĐANG BÀN)
     # --------------------------------------------------------------------------
     if not should_breakdown:
+        is_continuation = bool(chat_history and len(chat_history) > 0)
+
+        # Trích xuất và định dạng lịch sử hội thoại gần nhất để duy trì ngữ cảnh
+        history_context_text = ""
+        langchain_history = []
+        if chat_history:
+            recent_msgs = chat_history[-6:]
+            history_lines = []
+            for m in recent_msgs:
+                role = m.get("role", "user")
+                content = m.get("content", "").strip()
+                if role == "user":
+                    langchain_history.append(HumanMessage(content=content))
+                    history_lines.append(f"Người dùng: {content}")
+                elif role == "assistant":
+                    langchain_history.append(AIMessage(content=content))
+                    history_lines.append(f"Architect: {content}")
+            history_context_text = "\n".join(history_lines)
+
+        if has_existing_breakdown:
+            breakdown_guidance = (
+                "5. MỤC TIÊU NÀY ĐÃ CÓ LỘ TRÌNH 4 TẦNG TRONG HỆ THỐNG:\n"
+                "   - TUYỆT ĐỐI KHÔNG kêu gọi người dùng nhắn 'chốt phương pháp' hay bấm nút xuất bản lộ trình nữa.\n"
+                "   - Hãy xác nhận rõ ràng: '✅ Lộ trình 4 tầng đã được xuất bản ở cột bên trái! Hãy chuyển sang Tab Giai đoạn 2 (Lịch Trình Thực Thi) để xem và tinh chỉnh lịch chi tiết từng ngày.'\n"
+                "   - Trả lời thẳng thắn câu hỏi hoặc yêu cầu của người dùng về phương pháp."
+            )
+        else:
+            breakdown_guidance = (
+                f"5. Nhắc người dùng: 'Khi bạn hài lòng với phương pháp này, hãy nhắn \"chốt phương pháp\", \"đồng ý\" hoặc bấm nút \"{domain_terms.get('finalize_btn')}\" ngay bên dưới để AI tự động xuất bản toàn bộ lộ trình 4 tầng!'"
+            )
+
+        anti_repetition_rule = (
+            "QUY TẮC CHỐNG LẶP & GIAO TIẾP TỰ NHIÊN (STRICT ANTI-REPETITION):\n"
+            "- Đây là lượt trao đổi tiếp theo trong hội thoại. TUYỆT ĐỐI KHÔNG lặp lại đoạn chào mở đầu, không giới thiệu lại chức danh ('Chào bạn...', 'Với tư cách là...', 'Tôi là...').\n"
+            "- Đi thẳng vào phân tích ý kiến của người dùng và tiếp tục dòng chảy hội thoại."
+            if is_continuation else
+            "- Chào hỏi mở đầu chuyên nghiệp và đi thẳng vào phân tích chiến lược."
+        )
+
         consultation_prompt = f"""Bạn là {domain_terms.get('role_title', 'Trưởng Kiến Trúc Sư Chiến Lược')} của hệ thống Mavis.
 Nhiệm vụ: NHỊP 1 — TƯ VẤN CHIẾN LƯỢC & PHƯƠNG PHÁP TỔNG THỂ CHO MỤC TIÊU:
 - Tên mục tiêu: {goal_title}
@@ -3309,28 +3350,32 @@ Nhiệm vụ: NHỊP 1 — TƯ VẤN CHIẾN LƯỢC & PHƯƠNG PHÁP TỔNG TH�
 - Thời hạn: {target_goal.get('duration_days', 90)} ngày
 - Phương pháp chiến lược hiện tại: {existing_strategy or 'Chưa có, cần đề xuất mới'}
 
+LỊCH SỬ TRAO ĐỔI GẦN NHẤT VỚI NGƯỜI DÙNG:
+{history_context_text if history_context_text else "Chưa có tin nhắn trước đó (đây là lượt đầu tiên)."}
+
 LỊCH BẬN THỰC TẾ TRÊN GOOGLE CALENDAR (NẾU ĐÃ KẾT NỐI):
 {busy_calendar_info if busy_calendar_info else "Hiện chưa có sự kiện bận nào trên Google Calendar (toàn bộ khung giờ đều rảnh)."}
 
 TÀI NGUYÊN / GIÁO ÁN THỰC TẾ THAM KHẢO TÌM KIẾM ĐƯỢC:
 {json.dumps(raw_search, ensure_ascii=False, indent=2)}
 
-TIN NHẮN CỦA NGƯỜI DÙNG:
+TIN NHẮN HIỆN TẠI CỦA NGƯỜI DÙNG:
 "{user_message}"
 
 CHỈ THỊ TƯ VẤN CHIẾN LƯỢC (NHỊP 1):
+{anti_repetition_rule}
 1. Phân tích bối cảnh và thách thức cốt lõi theo đúng lĩnh vực của mục tiêu ({domain_terms.get('domain_name')}).
-2. Đề xuất 2-3 phương pháp/chiến lược tiếp cận tối ưu nhất. Nêu rõ nguyên lý, cách phân bổ thời gian và lý do phù hợp.
+2. Đề xuất hoặc tinh chỉnh 2-3 phương pháp/chiến lược tiếp cận tối ưu nhất. Nêu rõ nguyên lý, cách phân bổ thời gian và lý do phù hợp.
 3. Nhận diện các khung giờ bận thực tế trên Google Calendar để tư vấn thời gian thực thi tối ưu nhất mà không gây quá tải hay trùng lịch.
 4. Tóm tắt súc tích phương pháp chiến lược đang định hình vào `strategy_summary` (1-2 câu cô đọng để làm kim chỉ nam sau này).
-5. Phản hồi bằng giọng văn cố vấn cấp cao ({domain_terms.get('role_title')}): sắc bén, truyền cảm hứng, giải thích rõ ràng và hỏi ý kiến người dùng về phương pháp họ muốn chọn.
-6. Nhắc người dùng: "Khi bạn hài lòng với phương pháp này, hãy nhắn 'chốt phương pháp' hoặc bấm nút '{domain_terms.get('finalize_btn')}' ngay bên dưới để AI tự động xuất bản toàn bộ lộ trình 4 tầng!"
+{breakdown_guidance}
 """
         try:
             cons_output: ArchitectConsultationOutput = invoke_llm_resilient(
                 preferred_model="gemini-2.5-pro",
                 messages=[
                     SystemMessage(content=architect_system_prompt),
+                    *langchain_history,
                     HumanMessage(content=consultation_prompt),
                 ],
                 structured_schema=ArchitectConsultationOutput,
@@ -3339,6 +3384,27 @@ CHỈ THỊ TƯ VẤN CHIẾN LƯỢC (NHỊP 1):
         except Exception as e:
             print(f"Lỗi invoke tư vấn chiến lược trong architect_chat: {e}")
             if target_domain == "health":
+                fb_intro = (
+                    f"Tôi đã ghi nhận ý kiến của bạn về mục tiêu **'{goal_title}'**. "
+                    "Chiến lược tiếp tục bám sát: 70% Dinh dưỡng (thâm hụt 500 kcal, ăn đủ 1.6-2g protein/kg) + 30% Tập luyện (kháng lực 3-4 buổi kết hợp Cardio Zone 2)."
+                    if is_continuation else
+                    f"Chào bạn! Đối với mục tiêu **'{goal_title}'**, tôi đề xuất chiến lược rèn luyện & dinh dưỡng chuẩn khoa học:\n\n"
+                    "🥗 **1. Chế độ Dinh Dưỡng (Quyết định 70% thành công):**\n"
+                    "- Duy trì thâm hụt calo khoa học ~500 kcal/ngày dưới mức TDEE kết hợp nhịn ăn gián đoạn (Intermittent Fasting 16/8).\n"
+                    "- Nạp đủ 1.6 - 2.0g protein/kg thể trọng (ức gà, trứng, cá, đậu phụ) để giữ cơ bắp, ưu tiên tinh bột chậm (khoai lang, yến mạch) và rau xanh giàu chất xơ.\n\n"
+                    "🏋️ **2. Giáo Án Tập Luyện (Quyết định 30% vóc dáng & săn chắc):**\n"
+                    "- 3-4 buổi kháng lực/tuần (tập tạ / calisthenics) để kích thích trao đổi chất và giữ cơ bắp.\n"
+                    "- 2-3 buổi Cardio Zone 2 (30-45 phút đi bộ dốc hoặc đạp xe) để đốt mỡ bền vững.\n\n"
+                    "📅 **Lộ trình 3 Giai đoạn rõ ràng:**\n"
+                    "- **Giai đoạn 1 (Tháng 1 / 30 ngày đầu):** Thích nghi thể trạng & Giảm 5kg đầu (thải nước dư và mỡ nội tạng ban đầu, hình thành kỷ luật ăn uống).\n"
+                    "- **Giai đoạn 2 (Tháng 2 / Ngày 31-60):** Tăng cường độ (Progressive Overload) & Đốt mỡ lì lợm (giảm tiếp 5kg, siết eo).\n"
+                    "- **Giai đoạn 3 (Tháng 3 / Ngày 61-90):** Siết nét cơ bắp & Về đích hoàn thành mục tiêu (thiết lập calo duy trì để chống hiệu ứng Yo-yo hoàn cân)."
+                )
+                fb_closing = (
+                    "\n\n✅ Lộ trình 4 tầng đã được xuất bản ở cột bên trái! Hãy chuyển sang Tab Giai đoạn 2 (Lịch Trình Thực Thi) để xem và tinh chỉnh lịch chi tiết từng ngày."
+                    if has_existing_breakdown else
+                    f"\n\n💡 *Bạn thấy chế độ dinh dưỡng và giáo án tập luyện này thế nào?* Khi bạn đồng ý, hãy nhắn **'chốt phương pháp'**, **'đồng ý'** hoặc bấm nút **'{domain_terms.get('finalize_btn')}'** ngay bên dưới để xuất bản lộ trình 4 tầng!"
+                )
                 cons_output = ArchitectConsultationOutput(
                     strategic_analysis=(
                         f"Mục tiêu '{goal_title}' đòi hỏi kỷ luật dinh dưỡng nghiêm ngặt (70%) và giáo án tập luyện khoa học (30%). "
@@ -3364,22 +3430,20 @@ CHỈ THỊ TƯ VẤN CHIẾN LƯỢC (NHỊP 1):
                         f"tập kháng lực và Cardio Zone 2 vào khung giờ {target_goal.get('preferred_time', '06:00 - 07:30 Sáng')}."
                     ),
                     ready_to_breakdown=False,
-                    architect_response=(
-                        f"Chào bạn! Đối với mục tiêu **'{goal_title}'**, tôi đề xuất chiến lược rèn luyện & dinh dưỡng chuẩn khoa học:\n\n"
-                        "🥗 **1. Chế độ Dinh Dưỡng (Quyết định 70% thành công):**\n"
-                        "- Duy trì thâm hụt calo khoa học ~500 kcal/ngày dưới mức TDEE kết hợp nhịn ăn gián đoạn (Intermittent Fasting 16/8).\n"
-                        "- Nạp đủ 1.6 - 2.0g protein/kg thể trọng (ức gà, trứng, cá, đậu phụ) để giữ cơ bắp, ưu tiên tinh bột chậm (khoai lang, yến mạch) và rau xanh giàu chất xơ.\n\n"
-                        "🏋️ **2. Giáo Án Tập Luyện (Quyết định 30% vóc dáng & săn chắc):**\n"
-                        "- 3-4 buổi kháng lực/tuần (tập tạ / calisthenics) để kích thích trao đổi chất và giữ cơ bắp.\n"
-                        "- 2-3 buổi Cardio Zone 2 (30-45 phút đi bộ dốc hoặc đạp xe) để đốt mỡ bền vững.\n\n"
-                        "📅 **Lộ trình 3 Giai đoạn rõ ràng:**\n"
-                        "- **Giai đoạn 1 (Tháng 1 / 30 ngày đầu):** Thích nghi thể trạng & Giảm 5kg đầu (thải nước dư và mỡ nội tạng ban đầu, hình thành kỷ luật ăn uống).\n"
-                        "- **Giai đoạn 2 (Tháng 2 / Ngày 31-60):** Tăng cường độ (Progressive Overload) & Đốt mỡ lì lợm (giảm tiếp 5kg, siết eo).\n"
-                        "- **Giai đoạn 3 (Tháng 3 / Ngày 61-90):** Siết nét cơ bắp & Về đích hoàn thành mục tiêu (thiết lập calo duy trì để chống hiệu ứng Yo-yo hoàn cân).\n\n"
-                        f"💡 *Bạn thấy chế độ dinh dưỡng và giáo án tập luyện này thế nào?* Có điểm nào bạn muốn tinh chỉnh không trước khi chúng ta bấm **'{domain_terms.get('finalize_btn')}'**?"
-                    ),
+                    architect_response=f"{fb_intro}{fb_closing}",
                 )
             else:
+                fb_intro = (
+                    f"Tôi đã ghi nhận ý kiến của bạn về mục tiêu **'{goal_title}'**. "
+                    f"Chiến lược tiếp tục tập trung vào {target_goal.get('daily_hours', 1.5)}h/ngày Deep Work vào khung giờ {target_goal.get('preferred_time', '08:00 - 10:00')} kết hợp thực hành chuẩn."
+                    if is_continuation else
+                    f"Chào bạn! Đối với mục tiêu **'{goal_title}'**, tôi đề xuất 2 chiến lược tiếp cận tối ưu:\n\n1. **Deep Work Sprint (90/20):** Tập trung sâu vào khung giờ vàng để giải quyết các phần khó nhất.\n2. **Spaced Repetition & Project-Based:** Học qua bài tập thực hành thực tế để chống quên và duy trì phản xạ.\n\n💡 *Phương pháp đề xuất tổng quát:* **{target_goal.get('daily_hours', 1.5)}h/ngày vào khung giờ {target_goal.get('preferred_time', '08:00 - 10:00')}**."
+                )
+                fb_closing = (
+                    "\n\n✅ Lộ trình 4 tầng đã được xuất bản ở cột bên trái! Hãy chuyển sang Tab Giai đoạn 2 (Lịch Trình Thực Thi) để xem và tinh chỉnh lịch chi tiết từng ngày."
+                    if has_existing_breakdown else
+                    f"\n\nBạn cảm thấy phương pháp này đã phù hợp với nhịp sinh hoạt chưa? Khi bạn đồng ý, hãy nhắn **'chốt phương pháp'**, **'đồng ý'** hoặc bấm nút **'{domain_terms.get('finalize_btn')}'** ngay bên dưới để tôi xuất bản toàn bộ lộ trình!"
+                )
                 cons_output = ArchitectConsultationOutput(
                     strategic_analysis=f"Mục tiêu '{goal_title}' thuộc nhóm {target_goal.get('category', 'Học tập')}. Điểm mấu chốt để thành công là tính nhất quán hàng ngày và phương pháp học chủ động (Active Learning), tránh tình trạng xem tài liệu thụ động.",
                     proposed_methods=[
@@ -3398,7 +3462,7 @@ CHỈ THỊ TƯ VẤN CHIẾN LƯỢC (NHỊP 1):
                     ],
                     strategy_summary=f"Ứng dụng Deep Work Sprint {target_goal.get('daily_hours', 1.5)}h/ngày vào khung giờ {target_goal.get('preferred_time', '08:00 - 10:00')} kết hợp Spaced Repetition và bài tập thực hành chuẩn.",
                     ready_to_breakdown=False,
-                    architect_response=f"Chào bạn! Đối với mục tiêu **'{goal_title}'**, tôi đề xuất 2 chiến lược tiếp cận tối ưu:\n\n1. **Deep Work Sprint (90/20):** Tập trung sâu vào khung giờ vàng để giải quyết các phần khó nhất.\n2. **Spaced Repetition & Project-Based:** Học qua bài tập thực hành thực tế để chống quên và duy trì phản xạ.\n\n💡 *Phương pháp đề xuất tổng quát:* **{target_goal.get('daily_hours', 1.5)}h/ngày vào khung giờ {target_goal.get('preferred_time', '08:00 - 10:00')}**.\n\nBạn cảm thấy phương pháp này đã phù hợp với nhịp sinh hoạt chưa? Khi bạn đồng ý, hãy nhắn **'chốt phương pháp'** hoặc bấm nút **'{domain_terms.get('finalize_btn')}'** ngay bên dưới để tôi xuất bản toàn bộ lộ trình!",
+                    architect_response=f"{fb_intro}{fb_closing}",
                 )
 
         # Lưu lại phương pháp đã thảo luận vào strategy_summary của mục tiêu trên MongoDB
@@ -3736,8 +3800,29 @@ CHỈ THỊ KIẾN TRÚC & PHÂN CẤP 4 TẦNG BẮT BUỘC:
     save_user_goals(goals, username=username)
     save_user_resources(updated_bd["resources"], username=username)
 
+    # Tự động kích hoạt scheduler_chat để sinh lịch chi tiết 7 ngày (Ăn gì + Tập gì) đẩy thẳng sang Giai đoạn 2 (master_schedule)
+    try:
+        sched_instruction = (
+            f"Tự động lập lịch chi tiết 7 ngày (Thứ Hai đến Chủ Nhật) cho mục tiêu '{goal_title}' vừa được xuất bản lộ trình. "
+            f"Phương pháp: {target_goal['strategy_summary']}. "
+            f"Tách rõ các hạng mục Tập luyện / Học tập chuyên sâu (bài tập cụ thể, hiệp/reps hoặc module) "
+            f"và Dinh dưỡng/Thói quen đời sống (Ăn gì: thực đơn & calo cụ thể, Uống gì, Ngủ mấy giờ) "
+            f"vào từng buổi Sáng, Chiều, Tối không trùng lặp!"
+        )
+        scheduler_chat(
+            user_message=sched_instruction,
+            username=username,
+        )
+    except Exception as e_sched:
+        print(f"Lỗi tự động kích hoạt Master Schedule trong architect_chat: {e_sched}")
+
+    success_notice = "✅ Lộ trình 4 tầng đã được xuất bản ở cột bên trái! Hãy chuyển sang Tab Giai đoạn 2 (Lịch Trình Thực Thi) để xem và tinh chỉnh lịch chi tiết từng ngày."
+    final_resp = result.architect_response or ""
+    if success_notice not in final_resp:
+        final_resp = f"{success_notice}\n\n{final_resp}"
+
     return {
-        "response": result.architect_response,
+        "response": final_resp,
         "strategy_summary": target_goal["strategy_summary"],
         "is_breakdown": True,
         "updated_goal": target_goal,
@@ -3907,9 +3992,18 @@ YÊU CẦU CỦA NGƯỜI DÙNG:
                         t_dod = chosen_task_obj.get("definition_of_done") or f"Hoàn thành trọn vẹn nội dung '{t_detail}' và ghi chú tiến độ."
                     else:
                         if g_domain == "health":
-                            t_detail = f"Tập luyện và duy trì thực đơn dinh dưỡng cho {g_title}"
-                            t_energy = "🔴 Deep Work" if day_idx % 2 == 0 else "🟢 Recharge"
-                            t_dod = "Hoàn thành bài tập đúng form và ghi nhật ký dinh dưỡng trong ngày."
+                            if day_idx in (0, 2, 4):  # Thứ Hai, Thứ Tư, Thứ Sáu: Kháng lực
+                                t_detail = f"Tập kháng lực toàn thân (Squat, Push-up, Dumbbell Row, Plank) 4 hiệp x 10-12 lần cho {g_title}"
+                                t_energy = "🔴 Deep Work"
+                                t_dod = "Hoàn thành 4 bài tập đúng kỹ thuật, nghỉ giữa hiệp 90 giây và ghi chép mức tạ."
+                            elif day_idx in (1, 3, 5):  # Thứ Ba, Thứ Năm, Thứ Bảy: Cardio
+                                t_detail = f"Cardio Zone 2 (Đi bộ dốc 12% hoặc đạp xe) 40 phút đốt mỡ cho {g_title}"
+                                t_energy = "🟡 Shallow Work"
+                                t_dod = "Duy trì nhịp tim vùng Zone 2 (120-135 bpm) trong 40 phút liên tục."
+                            else:  # Chủ Nhật: Phục hồi
+                                t_detail = f"Giãn cơ tĩnh toàn thân & Lăn bọt Foam Rolling phục hồi cho {g_title}"
+                                t_energy = "🟢 Recharge"
+                                t_dod = "20 phút kéo giãn các nhóm cơ chính, thả lỏng hoàn toàn và ngâm chân nước ấm."
                         elif g_domain == "language":
                             t_detail = f"Luyện tập kỹ năng trọng tâm và mở rộng vốn từ vựng cho {g_title}"
                             t_energy = "🔴 Deep Work" if idx == 0 else "🟡 Shallow Work"
@@ -4014,6 +4108,17 @@ YÊU CẦU CỦA NGƯỜI DÙNG:
         rescheduled_tasks = []
         is_rescheduled = False
         response_text = "Tôi đã phân rã toàn bộ các mục tiêu Active vào Master Schedule đầy đủ 7 ngày (Thứ Hai đến Chủ Nhật) theo đúng nguyên tắc nhịp sinh học kèm đầy đủ 4 hạng mục đời sống: Ăn gì (thực đơn cụ thể), Uống gì, Tập gì/Học gì, và Ngủ mấy giờ mà không trùng lặp giờ giấc!"
+
+    # Loại bỏ triệt để các ký tự markdown ** hoặc __ thô khỏi tất cả các trường
+    for item in schedule_dicts:
+        if "task_detail" in item and item["task_detail"]:
+            item["task_detail"] = str(item["task_detail"]).replace("**", "").replace("__", "").replace("~~", "").strip()
+        if "definition_of_done" in item and item["definition_of_done"]:
+            item["definition_of_done"] = str(item["definition_of_done"]).replace("**", "").replace("__", "").replace("~~", "").strip()
+        if "time_slot" in item and item["time_slot"]:
+            item["time_slot"] = str(item["time_slot"]).replace("**", "").replace("__", "").strip()
+        if "resource_title" in item and item["resource_title"]:
+            item["resource_title"] = str(item["resource_title"]).replace("**", "").replace("__", "").strip()
 
     save_master_schedule(schedule_dicts, username=username)
 
