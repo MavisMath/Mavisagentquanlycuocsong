@@ -107,11 +107,65 @@ def get_google_client_config() -> Optional[Dict[str, Any]]:
     return None
 
 
-def get_oauth_authorization_url(redirect_uri: str = "http://localhost:8501") -> Tuple[Optional[str], Optional[str]]:
+def get_default_redirect_uri() -> str:
+    """
+    Lấy URI chuyển hướng mặc định từ st.secrets, .env, credentials.json hoặc request context.
+    """
+    # 1. Thử lấy từ streamlit secrets
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets"):
+            if "GOOGLE_REDIRECT_URI" in st.secrets:
+                return str(st.secrets["GOOGLE_REDIRECT_URI"]).strip()
+            if "google_calendar" in st.secrets and isinstance(st.secrets["google_calendar"], dict):
+                g_uri = st.secrets["google_calendar"].get("redirect_uri") or st.secrets["google_calendar"].get("GOOGLE_REDIRECT_URI")
+                if g_uri:
+                    return str(g_uri).strip()
+    except Exception:
+        pass
+
+    # 2. Thử lấy từ biến môi trường (.env)
+    env_uri = os.getenv("GOOGLE_REDIRECT_URI")
+    if env_uri and env_uri.strip():
+        return env_uri.strip()
+
+    # 3. Thử đọc từ credentials.json nếu có
+    if os.path.exists("credentials.json"):
+        try:
+            with open("credentials.json", "r", encoding="utf-8") as f:
+                cdata = json.load(f)
+                web_or_installed = cdata.get("web") or cdata.get("installed") or {}
+                r_uris = web_or_installed.get("redirect_uris")
+                if r_uris and isinstance(r_uris, list) and len(r_uris) > 0:
+                    return str(r_uris[0]).strip()
+        except Exception:
+            pass
+
+    # 4. Thử lấy từ Streamlit context headers (nếu đang chạy trên server/cloud)
+    try:
+        import streamlit as st
+        if hasattr(st, "context") and hasattr(st.context, "headers"):
+            headers = st.context.headers
+            host = headers.get("host")
+            if host:
+                proto = headers.get("x-forwarded-proto", "http")
+                if "streamlit.app" in host or "herokuapp.com" in host or "render.com" in host or "ngrok" in host:
+                    proto = "https"
+                return f"{proto}://{host}"
+    except Exception:
+        pass
+
+    return "http://localhost:8501"
+
+
+def get_oauth_authorization_url(redirect_uri: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
     """
     Tạo đường dẫn đăng nhập Google OAuth 2.0.
     Trả về (authorization_url, state).
     """
+    if not redirect_uri:
+        redirect_uri = get_default_redirect_uri()
+
     client_config = get_google_client_config()
     if not client_config or not GOOGLE_CALENDAR_SDK_AVAILABLE:
         return None, None
@@ -133,10 +187,13 @@ def get_oauth_authorization_url(redirect_uri: str = "http://localhost:8501") -> 
         return None, None
 
 
-def exchange_code_and_save_token(code: str, redirect_uri: str = "http://localhost:8501", username: str = "mavis") -> bool:
+def exchange_code_and_save_token(code: str, redirect_uri: Optional[str] = None, username: str = "mavis") -> bool:
     """
     Đổi authorization code lấy Access Token / Refresh Token và lưu bền vững vào MongoDB Atlas.
     """
+    if not redirect_uri:
+        redirect_uri = get_default_redirect_uri()
+
     client_config = get_google_client_config()
     if not client_config or not GOOGLE_CALENDAR_SDK_AVAILABLE:
         return False

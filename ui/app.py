@@ -206,6 +206,7 @@ try:
     fetch_busy_events = getattr(tgc, "fetch_busy_events", lambda username, days=7: [])
     sync_schedule_to_google_calendar = getattr(tgc, "sync_schedule_to_google_calendar", lambda username, ms: {"success": False, "message": "Chưa sẵn sàng", "synced_count": 0})
     get_google_client_config = getattr(tgc, "get_google_client_config", lambda: None)
+    get_default_redirect_uri = getattr(tgc, "get_default_redirect_uri", lambda: "http://localhost:8501")
     update_rescheduled_calendar_event = getattr(tgc, "update_rescheduled_calendar_event", lambda *args, **kwargs: False)
 except Exception as _gcal_err:
     def is_calendar_connected(username): return False
@@ -215,6 +216,7 @@ except Exception as _gcal_err:
     def fetch_busy_events(username, days=7): return []
     def sync_schedule_to_google_calendar(username, ms): return {"success": False, "message": "Module Google Calendar chưa sẵn sàng", "synced_count": 0}
     def get_google_client_config(): return None
+    def get_default_redirect_uri(): return "http://localhost:8501"
     def update_rescheduled_calendar_event(*args, **kwargs): return False
 
 
@@ -1353,11 +1355,17 @@ with tab_arch:
     # --------------------------------------------------------------------------
     # TÍCH HỢP GOOGLE CALENDAR OAUTH 2.0 (2 CHIỀU THỜI GIAN THỰC)
     # --------------------------------------------------------------------------
+    default_redir = get_default_redirect_uri()
+    redir_session_key = f"active_gcal_redir_{current_username}"
+    if redir_session_key not in st.session_state:
+        st.session_state[redir_session_key] = default_redir
+
     # Bắt mã authorization code nếu Google OAuth redirect về với query param 'code'
     if "code" in st.query_params:
         auth_code = st.query_params.get("code")
         if auth_code:
-            ok = exchange_code_and_save_token(auth_code, username=current_username)
+            current_redir = st.session_state.get(redir_session_key, default_redir)
+            ok = exchange_code_and_save_token(auth_code, redirect_uri=current_redir, username=current_username)
             if ok:
                 st.toast("🎉 Kết nối Google Calendar thành công!")
                 try:
@@ -1365,6 +1373,8 @@ with tab_arch:
                 except Exception:
                     pass
                 st.rerun()
+            else:
+                st.error("❌ Không thể đổi Authorization Code thành Access Token. Hãy kiểm tra lại Redirect URI.")
 
     cal_connected = is_calendar_connected(current_username)
     with st.container(border=True):
@@ -1384,11 +1394,73 @@ with tab_arch:
                     st.rerun()
             else:
                 client_cfg = get_google_client_config()
-                auth_url, _ = get_oauth_authorization_url()
+                current_redir = st.session_state.get(redir_session_key, default_redir)
+                auth_url, _ = get_oauth_authorization_url(redirect_uri=current_redir)
                 if auth_url:
                     st.link_button("🔗 Kết Nối Google Calendar", url=auth_url, use_container_width=True)
                 else:
                     st.caption("*(Chưa cấu hình GOOGLE_CLIENT_ID trong st.secrets)*")
+
+        if not cal_connected:
+            with st.expander("🛠️ Khắc phục Lỗi 400: redirect_uri_mismatch (Chỉ mất 1 phút)", expanded=False):
+                st.markdown(
+                    "Google yêu cầu **URI chuyển hướng (Redirect URI)** gửi đi từ ứng dụng phải trùng khớp 100% với danh sách đã đăng ký trong **Google Cloud Console**.\n\n"
+                    "👉 **Cách xử lý triệt để trong 3 bước:**\n"
+                    "1. Truy cập [Google Cloud Console Credentials](https://console.cloud.google.com/apis/credentials).\n"
+                    "2. Nhấp vào tên **OAuth 2.0 Client ID** của bạn (loại Web Application).\n"
+                    "3. Tại mục **Authorized redirect URIs (URI chuyển hướng được phép)**, nhấn **+ ADD URI** và thêm các dòng sau:\n"
+                )
+                st.code(
+                    "http://localhost:8501\n"
+                    "http://localhost:8501/\n"
+                    "http://127.0.0.1:8501\n"
+                    "http://127.0.0.1:8501/",
+                    language="text",
+                )
+                st.markdown("*(Nếu bạn đang deploy ứng dụng lên Streamlit Cloud, hãy thêm cả `https://ten-app-cua-ban.streamlit.app` và `https://ten-app-cua-ban.streamlit.app/`)*")
+                st.markdown("4. Nhấn nút **LƯU (SAVE)** ở cuối trang của Google và đợi 1-2 phút để Google cập nhật.")
+                st.markdown("---")
+                st.markdown("**Hoặc chuyển đổi Redirect URI ứng dụng đang gửi đi tại đây:**")
+                preset_options = [
+                    "http://localhost:8501",
+                    "http://localhost:8501/",
+                    "http://127.0.0.1:8501",
+                    "http://127.0.0.1:8501/",
+                    "Tùy chỉnh URI khác...",
+                ]
+                cur_val = st.session_state.get(redir_session_key, default_redir)
+                cur_idx = preset_options.index(cur_val) if cur_val in preset_options else 4
+                chosen_opt = st.selectbox(
+                    "Chọn Redirect URI gửi sang Google:",
+                    options=preset_options,
+                    index=cur_idx,
+                    key=f"sel_redir_preset_{current_username}",
+                )
+                if chosen_opt == "Tùy chỉnh URI khác...":
+                    custom_uri = st.text_input("Nhập Redirect URI đã đăng ký trên Google Console:", value=cur_val, key=f"txt_custom_uri_{current_username}")
+                    if custom_uri and custom_uri.strip() != st.session_state.get(redir_session_key):
+                        st.session_state[redir_session_key] = custom_uri.strip()
+                        st.rerun()
+                else:
+                    if chosen_opt != st.session_state.get(redir_session_key):
+                        st.session_state[redir_session_key] = chosen_opt
+                        st.rerun()
+
+            with st.expander("🔑 Nhập Mã Xác Thực Thủ Công (Không sợ lỗi Redirect)", expanded=False):
+                st.markdown(
+                    "Nếu Google chặn chuyển hướng tự động, sau khi bạn đăng nhập tài khoản Google thành công, "
+                    "hãy nhìn lên thanh địa chỉ trình duyệt, copy toàn bộ đoạn mã nằm sau `code=` và dán vào đây:"
+                )
+                manual_code = st.text_input("Dán Authorization Code từ Google vào đây:", key=f"txt_manual_gcode_{current_username}")
+                if st.button("Xác Nhận Kết Nối", key=f"btn_submit_gcode_{current_username}"):
+                    if manual_code and manual_code.strip():
+                        current_redir = st.session_state.get(redir_session_key, default_redir)
+                        ok = exchange_code_and_save_token(manual_code.strip(), redirect_uri=current_redir, username=current_username)
+                        if ok:
+                            st.success("✅ Kết nối Google Calendar thành công!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Mã không hợp lệ hoặc không khớp với Redirect URI đang chọn.")
 
         if cal_connected:
             c_sync1, c_sync2 = st.columns([0.55, 0.45])
@@ -1410,17 +1482,6 @@ with tab_arch:
                             st.markdown(f"- ⏰ **{bev.get('start', '')}**: {bev.get('summary', 'Bận')}")
                     else:
                         st.info("Không có lịch bận nào trong 7 ngày tới trên Google Calendar.")
-        else:
-            with st.expander("🔑 Nhập Mã Xác Thực Thủ Công (Nhanh)", expanded=False):
-                manual_code = st.text_input("Dán Authorization Code từ Google vào đây:", key=f"txt_manual_gcode_{current_username}")
-                if st.button("Xác Nhận Kết Nối", key=f"btn_submit_gcode_{current_username}"):
-                    if manual_code and manual_code.strip():
-                        ok = exchange_code_and_save_token(manual_code.strip(), username=current_username)
-                        if ok:
-                            st.success("✅ Kết nối Google Calendar thành công!")
-                            st.rerun()
-                        else:
-                            st.error("❌ Mã không hợp lệ hoặc đã hết hạn.")
 
     st.markdown("---")
 
