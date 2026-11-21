@@ -43,6 +43,18 @@ __all__ = [
     "update_user_goal_details",
     "delete_user_goal",
     "calculate_user_streak",
+    "append_resource_to_goal",
+    "get_goals_summary_text",
+    "get_active_tasks_and_milestones",
+    "detect_and_resolve_priority_conflicts",
+    "check_and_trigger_unpause",
+    "apply_backcasting_master_ai",
+    "append_opportunity_and_networking_tasks",
+    "load_tree_goals",
+    "save_tree_goals",
+    "append_insight",
+    "get_historical_insights_summary_text",
+    "init_user_tree",
 ]
 
 LEDGER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "goals_ledger.json")
@@ -395,7 +407,104 @@ def standardize_goal_schema(g: Dict[str, Any]) -> Dict[str, Any]:
         bd["resources"] = clean.get("resources", [])
     clean["breakdown"] = bd
 
+    # 6. Phương pháp chiến lược tổng (Strategy Summary - Quy trình 2 Nhịp)
+    if "strategy_summary" in clean and clean["strategy_summary"]:
+        clean["strategy_summary"] = str(clean["strategy_summary"]).strip()
+    else:
+        clean["strategy_summary"] = clean.get("strategy_summary", "")
+
     return clean
+
+
+# ==============================================================================
+# MASTER SCHEDULE PERSISTENCE (LỊCH TỔNG HỢP GỘP TẤT CẢ ACTIVE GOALS)
+# ==============================================================================
+
+def save_master_schedule(schedule: List[Dict[str, Any]], username: str = "mavis") -> bool:
+    """
+    Lưu lịch trình tổng hợp Master Schedule gộp tất cả active goals vào collection 'user_states'
+    trên MongoDB Atlas và đồng bộ dự phòng vào goals_ledger.json.
+    Mỗi slot: date, session (Sáng/Chiều/Tối), time_slot, goal_id, goal_title, task_detail, resource_link, is_done.
+    """
+    username = (username or DEFAULT_USER).strip().lower()
+    clean_schedule = [s for s in schedule if isinstance(s, dict)]
+
+    # 1. Lưu vào MongoDB Atlas
+    if is_mongodb_available():
+        db_update_user_state(
+            username=username,
+            state_update={"master_schedule": clean_schedule},
+        )
+
+    # 2. Lưu dự phòng vào goals_ledger.json
+    all_data = load_all_users_data()
+    if username not in all_data or not isinstance(all_data[username], dict):
+        all_data[username] = get_blank_tree()
+    all_data[username]["master_schedule"] = clean_schedule
+    return save_all_users_data(all_data)
+
+
+def load_master_schedule(username: str = "mavis") -> List[Dict[str, Any]]:
+    """Tải lịch trình tổng hợp Master Schedule từ MongoDB Atlas hoặc goals_ledger.json."""
+    username = (username or DEFAULT_USER).strip().lower()
+
+    if is_mongodb_available():
+        state = db_get_user_state(username)
+        if state:
+            sched = state.get("master_schedule")
+            if isinstance(sched, list):
+                return sched
+            return []
+
+    all_data = load_all_users_data()
+    user_entry = all_data.get(username, {})
+    if isinstance(user_entry, dict) and "master_schedule" in user_entry:
+        sched = user_entry.get("master_schedule")
+        if isinstance(sched, list):
+            return sched
+
+    return []
+
+
+def update_master_schedule_task_status(
+    task_identifier: str,
+    is_done: bool = True,
+    date: Optional[str] = None,
+    username: str = "mavis",
+) -> bool:
+    """Cập nhật trạng thái is_done cho task trong master_schedule trên MongoDB Atlas."""
+    username = (username or DEFAULT_USER).strip().lower()
+    schedule = load_master_schedule(username)
+    if not schedule:
+        return False
+
+    matched = False
+    task_clean = task_identifier.strip().lower()
+
+    for item in schedule:
+        if not isinstance(item, dict):
+            continue
+        # Cấu trúc phẳng từng task
+        t_title = str(item.get("task_detail", "")).lower()
+        if t_title and (task_clean in t_title or t_title in task_clean):
+            if date is None or item.get("date") == date:
+                item["is_done"] = is_done
+                matched = True
+
+        # Cấu trúc theo ngày / sessions
+        if "sessions" in item and isinstance(item["sessions"], dict):
+            for sess_name, task_list in item["sessions"].items():
+                if isinstance(task_list, list):
+                    for t in task_list:
+                        if isinstance(t, dict):
+                            st_title = str(t.get("task_detail", "")).lower()
+                            if st_title and (task_clean in st_title or st_title in task_clean):
+                                t["is_done"] = is_done
+                                matched = True
+
+    if matched:
+        save_master_schedule(schedule, username=username)
+    return matched
 
 
 def save_user_goals(goals: List[Dict[str, Any]], username: str = "mavis") -> bool:
@@ -783,97 +892,6 @@ def load_user_roadmap(username: str = "mavis") -> Dict[str, Any]:
     # 2. Fallback về goals_ledger.json
     all_data = load_all_users_data()
     return all_data.get(username, {}).get("backcasting_roadmap", {})
-
-
-# ==============================================================================
-# MASTER SCHEDULE PERSISTENCE (LỊCH TỔNG HỢP GỘP TẤT CẢ ACTIVE GOALS)
-# ==============================================================================
-
-def save_master_schedule(schedule: List[Dict[str, Any]], username: str = "mavis") -> bool:
-    """
-    Lưu lịch trình tổng hợp Master Schedule gộp tất cả active goals vào collection 'user_states'
-    trên MongoDB Atlas và đồng bộ dự phòng vào goals_ledger.json.
-    Mỗi slot: date, session (Sáng/Chiều/Tối), time_slot, goal_id, goal_title, task_detail, resource_link, is_done.
-    """
-    username = (username or DEFAULT_USER).strip().lower()
-    clean_schedule = [s for s in schedule if isinstance(s, dict)]
-
-    # 1. Lưu vào MongoDB Atlas
-    if is_mongodb_available():
-        db_update_user_state(
-            username=username,
-            state_update={"master_schedule": clean_schedule},
-        )
-
-    # 2. Lưu dự phòng vào goals_ledger.json
-    all_data = load_all_users_data()
-    if username not in all_data or not isinstance(all_data[username], dict):
-        all_data[username] = get_blank_tree()
-    all_data[username]["master_schedule"] = clean_schedule
-    return save_all_users_data(all_data)
-
-
-def load_master_schedule(username: str = "mavis") -> List[Dict[str, Any]]:
-    """Tải lịch trình tổng hợp Master Schedule từ MongoDB Atlas hoặc goals_ledger.json."""
-    username = (username or DEFAULT_USER).strip().lower()
-
-    if is_mongodb_available():
-        state = db_get_user_state(username)
-        if state:
-            sched = state.get("master_schedule")
-            if isinstance(sched, list):
-                return sched
-            return []
-
-    all_data = load_all_users_data()
-    user_entry = all_data.get(username, {})
-    if isinstance(user_entry, dict) and "master_schedule" in user_entry:
-        sched = user_entry.get("master_schedule")
-        if isinstance(sched, list):
-            return sched
-
-    return []
-
-
-def update_master_schedule_task_status(
-    task_identifier: str,
-    is_done: bool = True,
-    date: Optional[str] = None,
-    username: str = "mavis",
-) -> bool:
-    """Cập nhật trạng thái is_done cho task trong master_schedule trên MongoDB Atlas."""
-    username = (username or DEFAULT_USER).strip().lower()
-    schedule = load_master_schedule(username)
-    if not schedule:
-        return False
-
-    matched = False
-    task_clean = task_identifier.strip().lower()
-
-    for item in schedule:
-        if not isinstance(item, dict):
-            continue
-        # Cấu trúc phẳng từng task
-        t_title = str(item.get("task_detail", "")).lower()
-        if t_title and (task_clean in t_title or t_title in task_clean):
-            if date is None or item.get("date") == date:
-                item["is_done"] = is_done
-                matched = True
-
-        # Cấu trúc theo ngày / sessions
-        if "sessions" in item and isinstance(item["sessions"], dict):
-            for sess_name, task_list in item["sessions"].items():
-                if isinstance(task_list, list):
-                    for t in task_list:
-                        if isinstance(t, dict):
-                            st_title = str(t.get("task_detail", "")).lower()
-                            if st_title and (task_clean in st_title or st_title in task_clean):
-                                t["is_done"] = is_done
-                                matched = True
-
-    if matched:
-        save_master_schedule(schedule, username=username)
-    return matched
 
 
 # ==============================================================================

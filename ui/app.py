@@ -63,35 +63,35 @@ except Exception as _mongo_import_err:
 try:
     import memory.goals as mg
 
-    load_goals = getattr(mg, "load_goals")
-    save_goals = getattr(mg, "save_goals")
-    add_goal = getattr(mg, "add_goal")
-    update_goal = getattr(mg, "update_goal")
+    load_goals = getattr(mg, "load_goals", lambda *args, **kwargs: [])
+    save_goals = getattr(mg, "save_goals", lambda *args, **kwargs: True)
+    add_goal = getattr(mg, "add_goal", lambda *args, **kwargs: True)
+    update_goal = getattr(mg, "update_goal", lambda *args, **kwargs: True)
     CATEGORY_LABELS = getattr(mg, "CATEGORY_LABELS", {})
-    load_historical_insights = getattr(mg, "load_historical_insights")
-    save_historical_insights = getattr(mg, "save_historical_insights")
-    load_user_profile = getattr(mg, "load_user_profile")
-    save_user_profile = getattr(mg, "save_user_profile")
-    load_user_goal_profile = getattr(mg, "load_user_goal_profile")
-    save_user_goal_profile = getattr(mg, "save_user_goal_profile")
-    load_user_goals = getattr(mg, "load_user_goals")
-    save_user_goals = getattr(mg, "save_user_goals")
-    load_user_resources = getattr(mg, "load_user_resources")
-    save_user_resources = getattr(mg, "save_user_resources")
-    load_user_roadmap = getattr(mg, "load_user_roadmap")
-    save_user_roadmap = getattr(mg, "save_user_roadmap")
-    load_categorized_goals = getattr(mg, "load_categorized_goals")
-    save_categorized_goals = getattr(mg, "save_categorized_goals")
-    load_master_schedule = getattr(mg, "load_master_schedule")
-    save_master_schedule = getattr(mg, "save_master_schedule")
-    update_master_schedule_task_status = getattr(mg, "update_master_schedule_task_status")
-    load_retrospective_logs = getattr(mg, "load_retrospective_logs")
-    save_retrospective_logs = getattr(mg, "save_retrospective_logs")
-    append_retrospective_log = getattr(mg, "append_retrospective_log")
-    get_user_state_full = getattr(mg, "get_user_state_full")
-    update_user_goal_status = getattr(mg, "update_user_goal_status")
-    update_user_goal_details = getattr(mg, "update_user_goal_details")
-    delete_user_goal = getattr(mg, "delete_user_goal")
+    load_historical_insights = getattr(mg, "load_historical_insights", lambda *args, **kwargs: {})
+    save_historical_insights = getattr(mg, "save_historical_insights", lambda *args, **kwargs: True)
+    load_user_profile = getattr(mg, "load_user_profile", lambda *args, **kwargs: {})
+    save_user_profile = getattr(mg, "save_user_profile", lambda *args, **kwargs: True)
+    load_user_goal_profile = getattr(mg, "load_user_goal_profile", lambda *args, **kwargs: {})
+    save_user_goal_profile = getattr(mg, "save_user_goal_profile", lambda *args, **kwargs: True)
+    load_user_goals = getattr(mg, "load_user_goals", lambda *args, **kwargs: [])
+    save_user_goals = getattr(mg, "save_user_goals", lambda *args, **kwargs: True)
+    load_user_resources = getattr(mg, "load_user_resources", lambda *args, **kwargs: [])
+    save_user_resources = getattr(mg, "save_user_resources", lambda *args, **kwargs: True)
+    load_user_roadmap = getattr(mg, "load_user_roadmap", lambda *args, **kwargs: {})
+    save_user_roadmap = getattr(mg, "save_user_roadmap", lambda *args, **kwargs: True)
+    load_categorized_goals = getattr(mg, "load_categorized_goals", lambda *args, **kwargs: {})
+    save_categorized_goals = getattr(mg, "save_categorized_goals", lambda *args, **kwargs: True)
+    load_master_schedule = getattr(mg, "load_master_schedule", lambda *args, **kwargs: [])
+    save_master_schedule = getattr(mg, "save_master_schedule", lambda *args, **kwargs: True)
+    update_master_schedule_task_status = getattr(mg, "update_master_schedule_task_status", lambda *args, **kwargs: True)
+    load_retrospective_logs = getattr(mg, "load_retrospective_logs", lambda *args, **kwargs: [])
+    save_retrospective_logs = getattr(mg, "save_retrospective_logs", lambda *args, **kwargs: True)
+    append_retrospective_log = getattr(mg, "append_retrospective_log", lambda *args, **kwargs: True)
+    get_user_state_full = getattr(mg, "get_user_state_full", lambda *args, **kwargs: {})
+    update_user_goal_status = getattr(mg, "update_user_goal_status", lambda *args, **kwargs: True)
+    update_user_goal_details = getattr(mg, "update_user_goal_details", lambda *args, **kwargs: True)
+    delete_user_goal = getattr(mg, "delete_user_goal", lambda *args, **kwargs: True)
     calculate_user_streak = getattr(mg, "calculate_user_streak", lambda u="mavis": 1)
 except Exception as _goals_import_err:
     import traceback
@@ -167,8 +167,10 @@ from langchain_core.messages import HumanMessage, AIMessage
 # 5. Khởi tạo an toàn Agent Graph
 try:
     import agents.graph as ag
-    build_graph = getattr(ag, "build_graph")
-    mavis_agent = getattr(ag, "mavis_agent", None) or build_graph()
+    build_graph = getattr(ag, "build_graph", None)
+    mavis_agent = getattr(ag, "mavis_agent", None) or (build_graph() if callable(build_graph) else None)
+    if mavis_agent is None:
+        raise ImportError("Không thể khởi tạo mavis_agent từ agents.graph")
 except Exception as _graph_import_err:
     import traceback
     st.error(f"⚠️ Phát hiện cảnh báo khi khởi tạo Multi-Agent Graph: {_graph_import_err}")
@@ -1571,16 +1573,45 @@ with tab_arch:
     with col_chat_arch:
         arch_title = f"💬 Trò Chuyện Cùng Strategy Architect: {selected_goal_name}" if ('selected_goal_name' in locals() and selected_goal_name) else "💬 Trò Chuyện Cùng Strategy Architect"
         st.markdown(f"#### {arch_title}")
-        st.caption("Thêm/bớt tài liệu • Đổi giờ học • Phân rã lại tuần hoặc tinh chỉnh độ ưu tiên")
+        st.caption("Thảo luận phương pháp • Tinh chỉnh chiến lược • Chốt lộ trình 4 tầng khép kín")
 
-        chat_container_arch = st.container(height=520)
+        # Hiển thị phương pháp chiến lược đang định hình (nếu có)
+        current_strat = (selected_goal.get("strategy_summary", "") if ('selected_goal' in locals() and selected_goal) else "").strip()
+        if current_strat:
+            with st.container(border=True):
+                st.markdown("💡 **Phương pháp chiến lược (Kim chỉ nam):**")
+                st.info(current_strat)
+
+        chat_container_arch = st.container(height=450)
         with chat_container_arch:
             for msg in st.session_state[chat_arch_key]:
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"])
 
+        # Nút Chốt phương pháp & Tự động phân rã 4 tầng (Quy trình 2 Nhịp)
+        target_gid = selected_goal.get("id") if ('selected_goal' in locals() and selected_goal) else None
+        btn_strat_key = f"btn_finalize_strat_{target_gid or current_username}"
+        if st.button("🚀 Chốt phương pháp & Tự động phân rã 4 tầng", key=btn_strat_key, type="primary", use_container_width=True):
+            with st.spinner("AI Strategy Architect đang phân rã lộ trình 4 tầng theo phương pháp đã chốt..."):
+                if architect_chat is not None:
+                    res = architect_chat(
+                        user_message="Hãy chốt phương pháp chiến lược trên và tự động phân rã đầy đủ lộ trình 4 tầng cho mục tiêu này!",
+                        username=current_username,
+                        goal_id=target_gid,
+                        chat_history=st.session_state[chat_arch_key],
+                        force_breakdown=True,
+                    )
+                    arch_rep = res.get("response", "Đã chốt phương pháp và phân rã lộ trình 4 tầng thành công!")
+                else:
+                    arch_rep = "Hệ thống đang đồng bộ kết nối AI. Vui lòng thử lại sau giây lát."
+                st.session_state[chat_arch_key].append({"role": "user", "content": "🚀 Chốt phương pháp & Tự động phân rã 4 tầng"})
+                st.session_state[chat_arch_key].append({"role": "assistant", "content": arch_rep})
+                st.session_state[goals_key] = load_user_goals(current_username)
+                st.toast("🎉 Đã xuất bản Lộ trình 4 Tầng thành công!")
+                st.rerun()
+
         if arch_input := st.chat_input(
-            "Yêu cầu thêm tài liệu, đổi giờ học hoặc phân rã lại...",
+            "Thảo luận phương pháp, tinh chỉnh chiến lược hoặc gõ 'chốt phương pháp'...",
             key=f"input_arch_{current_username}",
         ):
             st.session_state[chat_arch_key].append({"role": "user", "content": arch_input})
@@ -1588,8 +1619,7 @@ with tab_arch:
                 with st.chat_message("user"):
                     st.markdown(arch_input)
                 with st.chat_message("assistant"):
-                    with st.spinner("Strategy Architect đang tìm kiếm tài liệu chuẩn và tái cấu trúc lộ trình..."):
-                        target_gid = selected_goal.get("id") if 'selected_goal' in locals() and selected_goal else None
+                    with st.spinner("Strategy Architect đang phân tích chiến lược & tài liệu chuẩn..."):
                         if architect_chat is not None:
                             res = architect_chat(
                                 user_message=arch_input,
@@ -1597,7 +1627,7 @@ with tab_arch:
                                 goal_id=target_gid,
                                 chat_history=st.session_state[chat_arch_key],
                             )
-                            arch_rep = res.get("response", "Tôi đã cập nhật lộ trình vào hệ thống.")
+                            arch_rep = res.get("response", "Tôi đã cập nhật chiến lược vào hệ thống.")
                         else:
                             arch_rep = "Hệ thống đang đồng bộ kết nối AI. Vui lòng thử lại sau giây lát."
                         st.markdown(arch_rep)

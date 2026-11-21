@@ -52,42 +52,79 @@ except Exception:
         return []
     def execute_resource_search(query: str, max_results: int = 4):
         return []
-from memory.goals import (
-    load_goals,
-    save_goals,
-    add_goal,
-    append_resource_to_goal,
-    get_goals_summary_text,
-    get_active_tasks_and_milestones,
-    update_goal,
-    detect_and_resolve_priority_conflicts,
-    check_and_trigger_unpause,
-    apply_backcasting_master_ai,
-    append_opportunity_and_networking_tasks,
-    load_tree_goals,
-    save_tree_goals,
-    save_user_profile,
-    load_user_profile,
-    load_historical_insights,
-    save_historical_insights,
-    append_insight,
-    get_historical_insights_summary_text,
-    save_user_goal_profile,
-    load_user_goal_profile,
-    save_user_goals,
-    load_user_goals,
-    save_user_resources,
-    load_user_resources,
-    save_user_roadmap,
-    load_user_roadmap,
-    save_master_schedule,
-    load_master_schedule,
-    update_master_schedule_task_status,
-    save_retrospective_logs,
-    load_retrospective_logs,
-    append_retrospective_log,
-    get_user_state_full,
-)
+try:
+    from memory.goals import (
+        load_goals,
+        save_goals,
+        add_goal,
+        append_resource_to_goal,
+        get_goals_summary_text,
+        get_active_tasks_and_milestones,
+        update_goal,
+        detect_and_resolve_priority_conflicts,
+        check_and_trigger_unpause,
+        apply_backcasting_master_ai,
+        append_opportunity_and_networking_tasks,
+        load_tree_goals,
+        save_tree_goals,
+        save_user_profile,
+        load_user_profile,
+        load_historical_insights,
+        save_historical_insights,
+        append_insight,
+        get_historical_insights_summary_text,
+        save_user_goal_profile,
+        load_user_goal_profile,
+        save_user_goals,
+        load_user_goals,
+        save_user_resources,
+        load_user_resources,
+        save_user_roadmap,
+        load_user_roadmap,
+        save_master_schedule,
+        load_master_schedule,
+        update_master_schedule_task_status,
+        save_retrospective_logs,
+        load_retrospective_logs,
+        append_retrospective_log,
+        get_user_state_full,
+    )
+except Exception:
+    import memory.goals as _mg
+    load_goals = getattr(_mg, "load_goals", lambda *args, **kwargs: [])
+    save_goals = getattr(_mg, "save_goals", lambda *args, **kwargs: True)
+    add_goal = getattr(_mg, "add_goal", lambda *args, **kwargs: True)
+    append_resource_to_goal = getattr(_mg, "append_resource_to_goal", lambda *args, **kwargs: True)
+    get_goals_summary_text = getattr(_mg, "get_goals_summary_text", lambda *args, **kwargs: "")
+    get_active_tasks_and_milestones = getattr(_mg, "get_active_tasks_and_milestones", lambda *args, **kwargs: [])
+    update_goal = getattr(_mg, "update_goal", lambda *args, **kwargs: True)
+    detect_and_resolve_priority_conflicts = getattr(_mg, "detect_and_resolve_priority_conflicts", lambda *args, **kwargs: [])
+    check_and_trigger_unpause = getattr(_mg, "check_and_trigger_unpause", lambda *args, **kwargs: [])
+    apply_backcasting_master_ai = getattr(_mg, "apply_backcasting_master_ai", lambda *args, **kwargs: {})
+    append_opportunity_and_networking_tasks = getattr(_mg, "append_opportunity_and_networking_tasks", lambda *args, **kwargs: True)
+    load_tree_goals = getattr(_mg, "load_tree_goals", lambda *args, **kwargs: {})
+    save_tree_goals = getattr(_mg, "save_tree_goals", lambda *args, **kwargs: True)
+    save_user_profile = getattr(_mg, "save_user_profile", lambda *args, **kwargs: True)
+    load_user_profile = getattr(_mg, "load_user_profile", lambda *args, **kwargs: {})
+    load_historical_insights = getattr(_mg, "load_historical_insights", lambda *args, **kwargs: {})
+    save_historical_insights = getattr(_mg, "save_historical_insights", lambda *args, **kwargs: True)
+    append_insight = getattr(_mg, "append_insight", lambda *args, **kwargs: True)
+    get_historical_insights_summary_text = getattr(_mg, "get_historical_insights_summary_text", lambda *args, **kwargs: "")
+    save_user_goal_profile = getattr(_mg, "save_user_goal_profile", lambda *args, **kwargs: True)
+    load_user_goal_profile = getattr(_mg, "load_user_goal_profile", lambda *args, **kwargs: {})
+    save_user_goals = getattr(_mg, "save_user_goals", lambda *args, **kwargs: True)
+    load_user_goals = getattr(_mg, "load_user_goals", lambda *args, **kwargs: [])
+    save_user_resources = getattr(_mg, "save_user_resources", lambda *args, **kwargs: True)
+    load_user_resources = getattr(_mg, "load_user_resources", lambda *args, **kwargs: [])
+    save_user_roadmap = getattr(_mg, "save_user_roadmap", lambda *args, **kwargs: True)
+    load_user_roadmap = getattr(_mg, "load_user_roadmap", lambda *args, **kwargs: {})
+    save_master_schedule = getattr(_mg, "save_master_schedule", lambda *args, **kwargs: True)
+    load_master_schedule = getattr(_mg, "load_master_schedule", lambda *args, **kwargs: [])
+    update_master_schedule_task_status = getattr(_mg, "update_master_schedule_task_status", lambda *args, **kwargs: True)
+    save_retrospective_logs = getattr(_mg, "save_retrospective_logs", lambda *args, **kwargs: True)
+    load_retrospective_logs = getattr(_mg, "load_retrospective_logs", lambda *args, **kwargs: [])
+    append_retrospective_log = getattr(_mg, "append_retrospective_log", lambda *args, **kwargs: True)
+    get_user_state_full = getattr(_mg, "get_user_state_full", lambda *args, **kwargs: {})
 from agents.task_estimator import analyze_and_estimate_goal
 try:
     from tools.document_ingestor import scan_and_retrieve_context
@@ -3052,7 +3089,23 @@ class QuarterlyMilestoneItem(BaseModel):
     target_outcome: str = Field(description="Kết quả đầu ra kỳ vọng")
 
 
+class StrategicMethodOption(BaseModel):
+    method_name: str = Field(description="Tên chiến lược/phương pháp tiếp cận (VD: Deep Work Sprint 90/20, Immersion & Spaced Repetition, Micro-habit Stacking...)")
+    core_principle: str = Field(description="Nguyên lý cốt lõi & cơ chế vận hành của phương pháp")
+    time_allocation: str = Field(description="Cách phân bổ thời gian và nhịp độ (VD: 90 phút sáng sớm tập trung cao + 30 phút tối ôn tập nhẹ)")
+    suitability: str = Field(description="Tại sao phương pháp này tối ưu cho mục tiêu và bối cảnh người dùng")
+
+
+class ArchitectConsultationOutput(BaseModel):
+    strategic_analysis: str = Field(description="Phân tích sâu sắc bối cảnh mục tiêu, điểm nghẽn và thách thức cốt lõi theo lĩnh vực (Ngoại ngữ, Sức khỏe, Kỹ thuật, Sự nghiệp...)")
+    proposed_methods: List[StrategicMethodOption] = Field(description="2-3 phương pháp/chiến lược tiếp cận tối ưu nhất")
+    strategy_summary: str = Field(description="Tóm tắt ngắn gọn súc tích (1-2 câu) phương pháp chiến lược đang được định hình hoặc đã thống nhất")
+    ready_to_breakdown: bool = Field(default=False, description="True nếu người dùng đã hài lòng/đồng ý chốt phương pháp để chuyển sang phân rã 4 tầng")
+    architect_response: str = Field(description="Phản hồi đối thoại sắc sảo, tự nhiên của Strategy Architect, đề xuất các lựa chọn và hỏi ý kiến người dùng")
+
+
 class ArchitectGoalBreakdown(BaseModel):
+    strategy_summary: Optional[str] = Field(default="", description="Tóm tắt phương pháp chiến lược đã chốt để làm kim chỉ nam phân rã 4 tầng")
     updated_preferred_time: Optional[str] = Field(None, description="Khung giờ ưu tiên được cập nhật nếu user yêu cầu đổi")
     updated_priority: Optional[str] = Field(None, description="Độ ưu tiên được cập nhật nếu user yêu cầu đổi")
     updated_daily_hours: Optional[float] = Field(None, description="Số giờ mỗi ngày được cập nhật nếu user yêu cầu đổi")
@@ -3069,12 +3122,15 @@ def architect_chat(
     username: str = "mavis",
     goal_id: Optional[str] = None,
     chat_history: Optional[List[Dict[str, str]]] = None,
+    force_breakdown: bool = False,
 ) -> Dict[str, Any]:
     """
-    Hàm Chatbot 2: Architect Chat (Chuyên trách Giai đoạn 1).
-    Sử dụng gemini-2.5-pro kết hợp tìm kiếm tài liệu chuẩn.
-    Nhận yêu cầu chỉnh sửa giờ giấc, độ ưu tiên, thêm/bớt tài liệu theo Năm/Quý/Tháng/Tuần
-    và cập nhật thẳng vào MongoDB goals.breakdown.
+    Hàm Chatbot 2: Strategy Architect (Chuyên trách Giai đoạn 1).
+    Quy trình 2 Nhịp:
+    - Nhịp 1 (Tư vấn chiến lược & phương pháp tổng): Phân tích bối cảnh theo lĩnh vực, đề xuất 2-3 phương pháp tiếp cận tối ưu,
+      thảo luận tinh chỉnh và lưu strategy_summary vào MongoDB.
+    - Nhịp 2 (Xuất bản Lộ trình 4 Tầng từ phương pháp đã chốt): Khi user bấm nút hoặc nhắn 'chốt phương pháp',
+      AI phân rã 4 tầng (Yearly -> Quarterly -> Monthly -> Weekly) kèm nhãn năng lượng (🔴/🟡/🟢), 1-Click tài liệu và DoD.
     """
     username = (username or "mavis").strip().lower()
     goals = load_user_goals(username)
@@ -3122,6 +3178,7 @@ def architect_chat(
             "daily_hours": 1.5,
             "duration_days": 90,
             "status": "evaluating",
+            "strategy_summary": "",
             "breakdown": {},
         }
         goals.append(target_goal)
@@ -3129,21 +3186,124 @@ def architect_chat(
 
     goal_title = target_goal.get("title") or target_goal.get("goal_name", "Mục tiêu phát triển")
     current_bd = target_goal.get("breakdown", {})
+    existing_strategy = target_goal.get("strategy_summary", "")
+
+    # Phân định chế độ: Nhịp 1 (Thảo luận & Tư vấn Chiến lược) vs Nhịp 2 (Xuất bản Lộ trình 4 Tầng)
+    msg_clean = user_message.strip().lower()
+    breakdown_triggers = [
+        "chốt phương pháp", "chốt lộ trình", "chốt chiến lược", "chốt luôn",
+        "đồng ý phương pháp", "đồng ý lộ trình", "phân rã 4 tầng", "phân rã bốn tầng",
+        "tự động phân rã", "bắt đầu phân rã", "xuất bản lộ trình", "lập kế hoạch 4 tầng",
+        "triển khai 4 tầng", "tạo lộ trình 4 tầng", "finalize", "breakdown"
+    ]
+    has_trigger = any(trig in msg_clean for trig in breakdown_triggers) or (
+        any(w in msg_clean.split() for w in ["chốt", "chốt!", "chốt.", "đồng ý", "đồng ý!"])
+    )
+    has_existing_breakdown = bool(current_bd and current_bd.get("quarterly") and current_bd.get("weekly"))
+    edit_keywords = ["đổi giờ", "chuyển giờ", "đổi khung giờ", "tăng giờ", "giảm giờ", "thêm tài liệu", "bớt tài liệu", "đổi ưu tiên", "chỉnh sửa"]
+    is_editing_existing = has_existing_breakdown and any(k in msg_clean for k in edit_keywords)
+
+    should_breakdown = force_breakdown or has_trigger or is_editing_existing
 
     # Tìm kiếm tài liệu thực tế bổ trợ qua Google / Tavily Search Grounding
     search_query = f"{goal_title} tài liệu giáo trình lộ trình chính thức uy tín bài tập thực hành"
     raw_search = execute_resource_search(search_query, max_results=5)
 
+    # --------------------------------------------------------------------------
+    # NHỊP 1: THẢO LUẬN & TƯ VẤN CHIẾN LƯỢC TỔNG (KHI CHƯA CHỐT HOẶC ĐANG BÀN)
+    # --------------------------------------------------------------------------
+    if not should_breakdown:
+        consultation_prompt = f"""Bạn là Trưởng Kiến Trúc Sư Chiến Lược (Senior Strategy Architect) của hệ thống Mavis.
+Nhiệm vụ: NHỊP 1 — TƯ VẤN CHIẾN LƯỢC & PHƯƠNG PHÁP TỔNG THỂ CHO MỤC TIÊU:
+- Tên mục tiêu: {goal_title}
+- Lĩnh vực: {target_goal.get('category', 'Học tập')}
+- Mức ưu tiên: {target_goal.get('priority', 'P2 - High')}
+- Khung giờ ưu tiên: {target_goal.get('preferred_time', '08:00 - 10:00 Sáng')}
+- Quỹ thời gian: {target_goal.get('daily_hours', 1.5)} giờ/ngày
+- Thời hạn: {target_goal.get('duration_days', 90)} ngày
+- Phương pháp chiến lược hiện tại: {existing_strategy or 'Chưa có, cần đề xuất mới'}
+
+TÀI NGUYÊN THỰC TẾ THAM KHẢO TÌM KIẾM ĐƯỢC:
+{json.dumps(raw_search, ensure_ascii=False, indent=2)}
+
+TIN NHẮN CỦA NGƯỜI DÙNG:
+"{user_message}"
+
+CHỈ THỊ TƯ VẤN CHIẾN LƯỢC (NHỊP 1):
+1. Phân tích bối cảnh và thách thức cốt lõi theo đúng lĩnh vực của mục tiêu (Ngoại ngữ, Sức khỏe/Thể thao, Lập trình/AI, Sự nghiệp...).
+2. Đề xuất 2-3 phương pháp/chiến lược tiếp cận tối ưu nhất (VD: Deep Work Sprint 90/20, Phương pháp Spaced Repetition + Active Recall, Progressive Overload, Project-based Learning...). Nêu rõ nguyên lý, cách phân bổ thời gian và lý do phù hợp.
+3. Tóm tắt súc tích phương pháp chiến lược đang định hình vào `strategy_summary` (1-2 câu cô đọng để làm kim chỉ nam sau này).
+4. Phản hồi bằng giọng văn cố vấn cấp cao (Senior Executive Architect): sắc bén, truyền cảm hứng, giải thích rõ ràng và hỏi ý kiến người dùng về phương pháp họ muốn chọn.
+5. Nhắc người dùng: "Khi bạn hài lòng với phương pháp này, hãy nhắn 'chốt phương pháp' hoặc bấm nút '🚀 Chốt phương pháp & Tự động phân rã 4 tầng' ngay bên dưới để AI tự động xuất bản toàn bộ lộ trình Năm -> Quý -> Tháng -> Tuần!"
+"""
+        try:
+            cons_output: ArchitectConsultationOutput = invoke_llm_resilient(
+                preferred_model="gemini-2.5-pro",
+                messages=[
+                    SystemMessage(content=SYSTEM_PROMPT),
+                    HumanMessage(content=consultation_prompt),
+                ],
+                structured_schema=ArchitectConsultationOutput,
+                temperature=0.3,
+            )
+        except Exception as e:
+            print(f"Lỗi invoke tư vấn chiến lược trong architect_chat: {e}")
+            cons_output = ArchitectConsultationOutput(
+                strategic_analysis=f"Mục tiêu '{goal_title}' thuộc nhóm {target_goal.get('category', 'Học tập')}. Điểm mấu chốt để thành công là tính nhất quán hàng ngày và phương pháp học chủ động (Active Learning), tránh tình trạng xem tài liệu thụ động.",
+                proposed_methods=[
+                    StrategicMethodOption(
+                        method_name="Phương pháp Deep Work Sprint (90/20)",
+                        core_principle="Tập trung 100% nhận thức trong 90 phút liên tục vào khung giờ vàng, sau đó nghỉ ngơi 20 phút phục hồi não bộ.",
+                        time_allocation=f"{target_goal.get('daily_hours', 1.5)}h vào khung giờ {target_goal.get('preferred_time', '08:00 - 10:00')}.",
+                        suitability="Phù hợp tối đa với các mục tiêu đòi hỏi tư duy logic và tiếp thu kiến thức nặng não.",
+                    ),
+                    StrategicMethodOption(
+                        method_name="Phương pháp Spaced Repetition & Project-Based",
+                        core_principle="Học lý thuyết ngắn gọn 30% và dành 70% thời gian thực hành bài tập thực tế kết hợp lặp lại ngắt quãng.",
+                        time_allocation="Phân bổ 5 ngày thực chiến + 1 ngày tổng kết review mỗi tuần.",
+                        suitability="Giúp khắc sâu kiến thức vào trí nhớ dài hạn và tạo ra sản phẩm thực tế có thể nghiệm thu.",
+                    ),
+                ],
+                strategy_summary=f"Ứng dụng Deep Work Sprint {target_goal.get('daily_hours', 1.5)}h/ngày vào khung giờ {target_goal.get('preferred_time', '08:00 - 10:00')} kết hợp Spaced Repetition và bài tập thực hành chuẩn.",
+                ready_to_breakdown=False,
+                architect_response=f"Chào bạn! Đối với mục tiêu **'{goal_title}'**, tôi đề xuất 2 chiến lược tiếp cận tối ưu:\n\n1. **Deep Work Sprint (90/20):** Tập trung sâu vào khung giờ vàng để giải quyết các phần khó nhất.\n2. **Spaced Repetition & Project-Based:** Học qua bài tập thực hành thực tế để chống quên và duy trì phản xạ.\n\n💡 *Phương pháp đề xuất tổng quát:* **{target_goal.get('daily_hours', 1.5)}h/ngày vào khung giờ {target_goal.get('preferred_time', '08:00 - 10:00')}**.\n\nBạn cảm thấy phương pháp này đã phù hợp với nhịp sinh hoạt chưa? Khi bạn đồng ý, hãy nhắn **'chốt phương pháp'** hoặc bấm nút **'🚀 Chốt phương pháp & Tự động phân rã 4 tầng'** ngay bên dưới để tôi xuất bản toàn bộ lộ trình!",
+            )
+
+        # Lưu lại phương pháp đã thảo luận vào strategy_summary của mục tiêu trên MongoDB
+        target_goal["strategy_summary"] = cons_output.strategy_summary
+        if target_idx is not None and target_idx < len(goals):
+            goals[target_idx] = target_goal
+        else:
+            goals.append(target_goal)
+        save_user_goals(goals, username=username)
+
+        return {
+            "response": cons_output.architect_response,
+            "strategy_summary": cons_output.strategy_summary,
+            "proposed_methods": [m.model_dump() for m in cons_output.proposed_methods],
+            "ready_to_breakdown": cons_output.ready_to_breakdown,
+            "is_breakdown": False,
+            "updated_goal": target_goal,
+            "goals": load_user_goals(username),
+            "goal_id": target_goal.get("id"),
+        }
+
+    # --------------------------------------------------------------------------
+    # NHỊP 2: XUẤT BẢN LỘ TRÌNH 4 TẦNG TỪ PHƯƠNG PHÁP ĐÃ CHỐT
+    # --------------------------------------------------------------------------
+    final_strat = existing_strategy or f"Ứng dụng Deep Work {target_goal.get('daily_hours', 1.5)}h/ngày vào khung giờ {target_goal.get('preferred_time', '08:00 - 10:00')} kết hợp thực hành chuẩn mực."
+
     architect_prompt = f"""Bạn là Trưởng Kiến Trúc Sư Chiến Lược (AI Roadmap & Resource Architect) của hệ thống Mavis.
-Nhiệm vụ: Chuyên trách GIAI ĐOẠN 1 — Phân rã lộ trình khép kín 4 tầng (Yearly -> Quarterly -> Monthly -> Weekly) kết hợp cơ chế Quản Trị Năng Lượng & Chống Quá Tải (Burnout Shield) và Gói tài liệu 1-Click cho mục tiêu:
+Nhiệm vụ: NHỊP 2 — XUẤT BẢN LỘ TRÌNH 4 TẦNG TỪ PHƯƠNG PHÁP ĐÃ CHỐT:
 - Tên mục tiêu: {goal_title}
 - Phân loại: {target_goal.get('category', 'Học tập')}
 - Mức ưu tiên hiện tại: {target_goal.get('priority', 'P2 - High')}
 - Khung giờ ưu tiên hiện tại: {target_goal.get('preferred_time', '08:00 - 10:00 Sáng')}
 - Quỹ thời gian: {target_goal.get('daily_hours', 1.5)} giờ/ngày
 - Thời hạn: {target_goal.get('duration_days', 90)} ngày
-- Trạng thái hiện tại của breakdown:
-{json.dumps(current_bd, ensure_ascii=False, indent=2)}
+
+PHƯƠNG PHÁP CHIẾN LƯỢC ĐÃ THỐNG NHẤT (KIM CHỈ NAM BẮT BUỘC TUÂN THỦ):
+"{final_strat}"
 
 KHO TÀI LIỆU THỰC TẾ TÌM KIẾM ĐƯỢC (BẮT BUỘC ưu tiên trích xuất link URL thực tế này vào Gói tài liệu 1-Click):
 {json.dumps(raw_search, ensure_ascii=False, indent=2)}
@@ -3152,13 +3312,13 @@ YÊU CẦU CỦA NGƯỜI DÙNG:
 "{user_message}"
 
 CHỈ THỊ KIẾN TRÚC & QUẢN TRỊ NĂNG LƯỢNG (BURNOUT SHIELD) BẮT BUỘC:
-1. Nếu người dùng yêu cầu chỉnh sửa giờ giấc, độ ưu tiên hoặc quỹ giờ, hãy cập nhật vào updated_preferred_time / updated_priority / updated_daily_hours.
-2. Xây dựng phân cấp chi tiết khép kín 4 tầng:
+1. Dựa trên PHƯƠNG PHÁP ĐÃ THỐNG NHẤT ở trên, xây dựng phân cấp chi tiết khép kín 4 tầng:
+   - strategy_summary: Ghi lại tóm tắt phương pháp đã chốt.
    - yearly: Tầm nhìn chiến lược 1 năm.
    - quarterly: Phân kỳ các Quý (quarter, focus, target_outcome).
    - monthly: Phân rã từng Tháng (month, milestone, resources).
    - weekly: Kế hoạch hành động từng Tuần (week, milestone, tasks, action_items, estimated_hours, resources).
-3. ĐẶC BIỆT — BẮT BUỘC GẮN ĐỦ 3 THUỘC TÍNH CHO MỖI TASK TRONG TUẦN (WeeklyTaskItem):
+2. ĐẶC BIỆT — BẮT BUỘC GẮN ĐỦ 3 THUỘC TÍNH CHO MỖI TASK TRONG TUẦN (WeeklyTaskItem):
    - Nhãn độ nặng não (energy_level):
      * '🔴 Deep Work': Tập trung nhận thức cao độ, học kiến thức mới/khó, giải đề thi chuẩn, lập trình, viết luận. Khung giờ vàng 08:00 - 10:00 sáng.
      * '🟡 Shallow Work': Ôn tập nhẹ nhàng, luyện phát âm, flashcard từ vựng, dọn dẹp ghi chú, xem video bài giảng.
@@ -3167,10 +3327,10 @@ CHỈ THỊ KIẾN TRÚC & QUẢN TRỊ NĂNG LƯỢNG (BURNOUT SHIELD) BẮT BU
      * resource_title: Tên tài liệu cụ thể của task đó.
      * resource_url: Đường link chính thức uy tín dẫn thẳng tới tài liệu (lấy từ kho tài liệu tìm kiếm ở trên hoặc link chuẩn).
    - Tiêu chí hoàn thành (definition_of_done - DoD):
-     * Định nghĩa cụ thể, rõ ràng, có thể đo lường được để nghiệm thu buổi học/làm (VD: 'Giải xong 40 câu Listening Cam 18, đạt tối thiểu 30 câu đúng và phân tích lý do sai').
-4. NGUYÊN TẮC BURNOUT SHIELD: Không xếp toàn bộ là task '🔴 Deep Work' trong một tuần. Bắt buộc có sự cân bằng giữa '🔴 Deep Work', '🟡 Shallow Work' và '🟢 Recharge' để chống kiệt sức nhận thức.
-5. resources: 2-3 tài liệu, giáo trình hoặc công cụ chuẩn mực nhất kèm link URL thật.
-6. Xuất ra đầy đủ dữ liệu có cấu trúc để hệ thống lưu trực tiếp vào MongoDB goals.breakdown.
+     * Định nghĩa cụ thể, rõ ràng, có thể đo lường được để nghiệm thu buổi học/làm.
+3. NGUYÊN TẮC BURNOUT SHIELD: Không xếp toàn bộ là task '🔴 Deep Work' trong một tuần. Bắt buộc có sự cân bằng giữa '🔴 Deep Work', '🟡 Shallow Work' và '🟢 Recharge' để chống kiệt sức nhận thức.
+4. resources: 2-3 tài liệu, giáo trình hoặc công cụ chuẩn mực nhất kèm link URL thật.
+5. Xuất ra đầy đủ dữ liệu có cấu trúc để hệ thống lưu trực tiếp vào MongoDB goals.breakdown.
 """
 
     try:
@@ -3184,7 +3344,7 @@ CHỈ THỊ KIẾN TRÚC & QUẢN TRỊ NĂNG LƯỢNG (BURNOUT SHIELD) BẮT BU
             temperature=0.2,
         )
     except Exception as e:
-        print(f"Lỗi invoke trong architect_chat: {e}")
+        print(f"Lỗi invoke trong architect_chat (Nhịp 2): {e}")
         # Fallback an toàn với đầy đủ nhãn năng lượng, 1-Click resource, và DoD
         sample_tasks_w1 = [
             WeeklyTaskItem(
@@ -3233,6 +3393,7 @@ CHỈ THỊ KIẾN TRÚC & QUẢN TRỊ NĂNG LƯỢNG (BURNOUT SHIELD) BẮT BU
             ),
         ]
         result = ArchitectGoalBreakdown(
+            strategy_summary=final_strat,
             yearly=f"Chinh phục toàn diện {goal_title}",
             quarterly=[
                 QuarterlyMilestoneItem(quarter="Quý 1", focus="Nền tảng & Cốt lõi", target_outcome="Hoàn thiện 50% kiến thức trọng tâm"),
@@ -3267,7 +3428,7 @@ CHỈ THỊ KIẾN TRÚC & QUẢN TRỊ NĂNG LƯỢNG (BURNOUT SHIELD) BẮT BU
                     how_to_use="Học đều đặn theo khung giờ vàng đã thiết lập.",
                 )
             ],
-            architect_response=f"Tôi đã phân rã toàn diện lộ trình 4 tầng (Năm -> Quý -> Tháng -> Tuần) kèm nhãn năng lượng (🔴 Deep Work, 🟡 Shallow Work, 🟢 Recharge), Gói tài liệu 1-Click và Tiêu chí hoàn thành (DoD) cho mục tiêu '{goal_title}'. Trạng thái mục tiêu đã kích hoạt và sẵn sàng thực thi!",
+            architect_response=f"Tôi đã phân rã toàn diện lộ trình 4 tầng (Năm -> Quý -> Tháng -> Tuần) dựa trên phương pháp chiến lược '{final_strat}' kèm nhãn năng lượng (🔴 Deep Work, 🟡 Shallow Work, 🟢 Recharge), Gói tài liệu 1-Click và Tiêu chí hoàn thành (DoD) cho mục tiêu '{goal_title}'. Trạng thái mục tiêu đã kích hoạt và sẵn sàng thực thi!",
         )
 
     # Cập nhật mục tiêu và lưu vào MongoDB Atlas
@@ -3289,6 +3450,7 @@ CHỈ THỊ KIẾN TRÚC & QUẢN TRỊ NĂNG LƯỢNG (BURNOUT SHIELD) BẮT BU
         "resources": [r.model_dump() for r in result.resources],
     }
     target_goal["breakdown"] = updated_bd
+    target_goal["strategy_summary"] = result.strategy_summary or final_strat
 
     if result.updated_preferred_time:
         target_goal["preferred_time"] = result.updated_preferred_time
@@ -3311,6 +3473,8 @@ CHỈ THỊ KIẾN TRÚC & QUẢN TRỊ NĂNG LƯỢNG (BURNOUT SHIELD) BẮT BU
 
     return {
         "response": result.architect_response,
+        "strategy_summary": target_goal["strategy_summary"],
+        "is_breakdown": True,
         "updated_goal": target_goal,
         "goals": load_user_goals(username),
         "goal_id": target_goal.get("id"),
