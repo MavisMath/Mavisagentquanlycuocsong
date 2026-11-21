@@ -88,6 +88,8 @@ try:
         load_retrospective_logs,
         append_retrospective_log,
         get_user_state_full,
+        detect_goal_domain,
+        DOMAIN_TERMINOLOGY,
     )
 except Exception:
     import memory.goals as _mg
@@ -125,6 +127,8 @@ except Exception:
     load_retrospective_logs = getattr(_mg, "load_retrospective_logs", lambda *args, **kwargs: [])
     append_retrospective_log = getattr(_mg, "append_retrospective_log", lambda *args, **kwargs: True)
     get_user_state_full = getattr(_mg, "get_user_state_full", lambda *args, **kwargs: {})
+    detect_goal_domain = getattr(_mg, "detect_goal_domain", lambda *args, **kwargs: "general")
+    DOMAIN_TERMINOLOGY = getattr(_mg, "DOMAIN_TERMINOLOGY", {})
 from agents.task_estimator import analyze_and_estimate_goal
 try:
     from tools.document_ingestor import scan_and_retrieve_context
@@ -3188,6 +3192,68 @@ def architect_chat(
     current_bd = target_goal.get("breakdown", {})
     existing_strategy = target_goal.get("strategy_summary", "")
 
+    # Tự động nhận diện lĩnh vực chuyên biệt (Domain-Aware Persona)
+    target_domain = detect_goal_domain(target_goal, goal_title, target_goal.get("category", ""))
+    domain_terms = DOMAIN_TERMINOLOGY.get(target_domain, DOMAIN_TERMINOLOGY.get("general", {}))
+
+    # Xây dựng System Prompt chuyên sâu theo từng lĩnh vực
+    prohibited_note = ""
+    if domain_terms.get("prohibited_terms"):
+        prohibited_str = ", ".join(f"'{p}'" for p in domain_terms["prohibited_terms"])
+        prohibited_note = f"\n- TUYỆT ĐỐI CẤM (STRICT PROHIBITION): TUYỆT ĐỐI KHÔNG DÙNG các từ sau: {prohibited_str}."
+
+    preferred_note = ""
+    if domain_terms.get("preferred_terms"):
+        pref_str = ", ".join(f"'{p}'" for p in domain_terms["preferred_terms"])
+        preferred_note = f"\n- TỪ NGỮ CHUẨN MỰC BẮT BUỘC SỬ DỤNG: {pref_str}."
+
+    domain_guideline = ""
+    if target_domain == "health":
+        domain_guideline = """
+- BẮT BUỘC ÁP DỤNG CÔNG THỨC VÀNG CHO SỨC KHỎE & GIẢM CÂN / THỂ CHẤT:
+  1. 70% DINH DƯỠNG:
+     * Kiểm soát calo khoa học: Calo In < Calo Out với mức thâm hụt an toàn (~500 kcal/ngày dưới mức TDEE).
+     * Nhịn ăn gián đoạn (Intermittent Fasting 16/8): Cửa sổ ăn 8 tiếng (12:00 - 20:00), nhịn 16 tiếng để kích hoạt tự thực bào (Autophagy) và ổn định đường huyết/insulin.
+     * Tỷ lệ Macro: Nạp đủ 1.6 - 2.0g protein/kg thể trọng để bảo toàn khối cơ, ưu tiên tinh bột chậm (khoai lang, yến mạch, gạo lứt) và rau xanh nhiều xơ, cắt giảm tối đa đường tinh luyện.
+  2. 30% TẬP LUYỆN:
+     * Tập kháng lực (Resistance Training / Tạ / Calisthenics): 3-4 buổi/tuần để kích thích tổng hợp protein cơ, giữ tỷ lệ trao đổi chất cơ bản (BMR) không bị tụt.
+     * Cardio Zone 2 (30-45 phút đi bộ dốc / đạp xe): Giữ nhịp tim ở 60-70% max để đốt cháy mỡ thừa bền vững mà không làm dị hóa cơ bắp.
+  3. LỘ TRÌNH 3 GIAI ĐOẠN 30-90 NGÀY RÕ RÀNG:
+     * Giai đoạn 1 (Tháng 1 / 30 ngày đầu): Thích nghi thể trạng & Giảm 5kg đầu (thải nước dư và mỡ nội tạng ban đầu, hình thành thói quen kiểm soát calo).
+     * Giai đoạn 2 (Tháng 2 / Ngày 31-60): Tăng tiến cường độ (Progressive Overload) & Đốt mỡ lì lợm (giảm tiếp 5kg, siết vòng eo).
+     * Giai đoạn 3 (Tháng 3 / Ngày 61-90): Siết nét cơ bắp & Về đích hoàn thành mục tiêu (thiết lập mức calo duy trì TDEE mới để ngăn ngừa triệt để hiệu ứng Yo-yo hoàn cân).
+  4. CUỐI PHẢN HỒI: Hỏi người dùng có muốn tinh chỉnh điểm nào về thực đơn hay giáo án tập luyện không để chốt lộ trình 4 tầng.
+"""
+    elif target_domain == "language":
+        domain_guideline = """
+- BẮT BUỘC ÁP DỤNG CHIẾN LƯỢC HỌC NGOẠI NGỮ KHOA HỌC:
+  * Phương pháp Spaced Repetition (Lặp lại ngắt quãng) & Active Recall (Chủ động truy xuất).
+  * Phân chia nhịp Deep Work 90/20 vào khung giờ vàng nhận thức sáng sớm.
+  * Lộ trình chia 2 pha: Pha 1 củng cố gốc từ vựng/ngữ pháp và phản xạ, Pha 2 giải đề thi chuẩn và bấm giờ thực chiến.
+"""
+    elif target_domain == "tech_study":
+        domain_guideline = """
+- BẮT BUỘC ÁP DỤNG CHIẾN LƯỢC KỸ THUẬT & DỰ ÁN THỰC CHIẾN:
+  * Phương pháp Project-Based Learning: 30% lý thuyết kiến trúc + 70% code thực chiến tạo ra sản phẩm hoàn chỉnh.
+  * Phân bổ thời gian Deep Work lập trình và tối ưu hóa giải thuật.
+"""
+    elif target_domain == "career_finance":
+        domain_guideline = """
+- BẮT BUỘC ÁP DỤNG CHIẾN LƯỢC ĐIỀU HÀNH & QUẢN TRỊ NGUỒN LỰC:
+  * Khung quản trị mục tiêu (OKRs/KPIs) với các mốc bàn giao đo lường được.
+  * Tối ưu hóa dòng tiền và kiểm soát rủi ro thực thi.
+"""
+
+    architect_system_prompt = f"""Bạn là {domain_terms.get('role_title', 'Trưởng Kiến Trúc Sư Chiến Lược')} của hệ thống Mavis.
+MỤC TIÊU NÀY ĐÃ ĐƯỢC CEO COACH CHÍNH THỨC PHÊ DUYỆT ĐƯA VÀO CUỘC ĐỜI NGƯỜI DÙNG.
+NGHIÊM CẤM TUYỆT ĐỐI:
+1. TUYỆT ĐỐI KHÔNG hỏi lại câu hỏi thẩm định như 'Bạn có muốn tôi chính thức đưa mục tiêu này vào cuộc đời bạn không?'.
+2. TUYỆT ĐỐI KHÔNG hành xử như bot thẩm định hay làm phiền người dùng bằng các câu hỏi thủ tục.{prohibited_note}{preferred_note}
+
+VAI TRÒ CỦA BẠN: Trực tiếp tư vấn chiến lược chuyên sâu, đề xuất phương pháp tối ưu và thiết kế lộ trình 4 tầng (Năm ➔ Quý ➔ Tháng ➔ Tuần).
+{domain_guideline}
+"""
+
     # Phân định chế độ: Nhịp 1 (Thảo luận & Tư vấn Chiến lược) vs Nhịp 2 (Xuất bản Lộ trình 4 Tầng)
     msg_clean = user_message.strip().lower()
     breakdown_triggers = [
@@ -3207,40 +3273,42 @@ def architect_chat(
 
     # Tìm kiếm tài liệu thực tế bổ trợ qua Google / Tavily Search Grounding
     search_query = f"{goal_title} tài liệu giáo trình lộ trình chính thức uy tín bài tập thực hành"
+    if target_domain == "health":
+        search_query = f"{goal_title} giáo án bài tập kháng lực cardio thực đơn thâm hụt calo khoa học"
     raw_search = execute_resource_search(search_query, max_results=5)
 
     # --------------------------------------------------------------------------
     # NHỊP 1: THẢO LUẬN & TƯ VẤN CHIẾN LƯỢC TỔNG (KHI CHƯA CHỐT HOẶC ĐANG BÀN)
     # --------------------------------------------------------------------------
     if not should_breakdown:
-        consultation_prompt = f"""Bạn là Trưởng Kiến Trúc Sư Chiến Lược (Senior Strategy Architect) của hệ thống Mavis.
+        consultation_prompt = f"""Bạn là {domain_terms.get('role_title', 'Trưởng Kiến Trúc Sư Chiến Lược')} của hệ thống Mavis.
 Nhiệm vụ: NHỊP 1 — TƯ VẤN CHIẾN LƯỢC & PHƯƠNG PHÁP TỔNG THỂ CHO MỤC TIÊU:
 - Tên mục tiêu: {goal_title}
-- Lĩnh vực: {target_goal.get('category', 'Học tập')}
+- Lĩnh vực: {target_goal.get('category', domain_terms.get('domain_name', 'Học tập'))}
 - Mức ưu tiên: {target_goal.get('priority', 'P2 - High')}
 - Khung giờ ưu tiên: {target_goal.get('preferred_time', '08:00 - 10:00 Sáng')}
 - Quỹ thời gian: {target_goal.get('daily_hours', 1.5)} giờ/ngày
 - Thời hạn: {target_goal.get('duration_days', 90)} ngày
 - Phương pháp chiến lược hiện tại: {existing_strategy or 'Chưa có, cần đề xuất mới'}
 
-TÀI NGUYÊN THỰC TẾ THAM KHẢO TÌM KIẾM ĐƯỢC:
+TÀI NGUYÊN / GIÁO ÁN THỰC TẾ THAM KHẢO TÌM KIẾM ĐƯỢC:
 {json.dumps(raw_search, ensure_ascii=False, indent=2)}
 
 TIN NHẮN CỦA NGƯỜI DÙNG:
 "{user_message}"
 
 CHỈ THỊ TƯ VẤN CHIẾN LƯỢC (NHỊP 1):
-1. Phân tích bối cảnh và thách thức cốt lõi theo đúng lĩnh vực của mục tiêu (Ngoại ngữ, Sức khỏe/Thể thao, Lập trình/AI, Sự nghiệp...).
-2. Đề xuất 2-3 phương pháp/chiến lược tiếp cận tối ưu nhất (VD: Deep Work Sprint 90/20, Phương pháp Spaced Repetition + Active Recall, Progressive Overload, Project-based Learning...). Nêu rõ nguyên lý, cách phân bổ thời gian và lý do phù hợp.
+1. Phân tích bối cảnh và thách thức cốt lõi theo đúng lĩnh vực của mục tiêu ({domain_terms.get('domain_name')}).
+2. Đề xuất 2-3 phương pháp/chiến lược tiếp cận tối ưu nhất. Nêu rõ nguyên lý, cách phân bổ thời gian và lý do phù hợp.
 3. Tóm tắt súc tích phương pháp chiến lược đang định hình vào `strategy_summary` (1-2 câu cô đọng để làm kim chỉ nam sau này).
-4. Phản hồi bằng giọng văn cố vấn cấp cao (Senior Executive Architect): sắc bén, truyền cảm hứng, giải thích rõ ràng và hỏi ý kiến người dùng về phương pháp họ muốn chọn.
-5. Nhắc người dùng: "Khi bạn hài lòng với phương pháp này, hãy nhắn 'chốt phương pháp' hoặc bấm nút '🚀 Chốt phương pháp & Tự động phân rã 4 tầng' ngay bên dưới để AI tự động xuất bản toàn bộ lộ trình Năm -> Quý -> Tháng -> Tuần!"
+4. Phản hồi bằng giọng văn cố vấn cấp cao ({domain_terms.get('role_title')}): sắc bén, truyền cảm hứng, giải thích rõ ràng và hỏi ý kiến người dùng về phương pháp họ muốn chọn.
+5. Nhắc người dùng: "Khi bạn hài lòng với phương pháp này, hãy nhắn 'chốt phương pháp' hoặc bấm nút '{domain_terms.get('finalize_btn')}' ngay bên dưới để AI tự động xuất bản toàn bộ lộ trình 4 tầng!"
 """
         try:
             cons_output: ArchitectConsultationOutput = invoke_llm_resilient(
                 preferred_model="gemini-2.5-pro",
                 messages=[
-                    SystemMessage(content=SYSTEM_PROMPT),
+                    SystemMessage(content=architect_system_prompt),
                     HumanMessage(content=consultation_prompt),
                 ],
                 structured_schema=ArchitectConsultationOutput,
@@ -3248,26 +3316,68 @@ CHỈ THỊ TƯ VẤN CHIẾN LƯỢC (NHỊP 1):
             )
         except Exception as e:
             print(f"Lỗi invoke tư vấn chiến lược trong architect_chat: {e}")
-            cons_output = ArchitectConsultationOutput(
-                strategic_analysis=f"Mục tiêu '{goal_title}' thuộc nhóm {target_goal.get('category', 'Học tập')}. Điểm mấu chốt để thành công là tính nhất quán hàng ngày và phương pháp học chủ động (Active Learning), tránh tình trạng xem tài liệu thụ động.",
-                proposed_methods=[
-                    StrategicMethodOption(
-                        method_name="Phương pháp Deep Work Sprint (90/20)",
-                        core_principle="Tập trung 100% nhận thức trong 90 phút liên tục vào khung giờ vàng, sau đó nghỉ ngơi 20 phút phục hồi não bộ.",
-                        time_allocation=f"{target_goal.get('daily_hours', 1.5)}h vào khung giờ {target_goal.get('preferred_time', '08:00 - 10:00')}.",
-                        suitability="Phù hợp tối đa với các mục tiêu đòi hỏi tư duy logic và tiếp thu kiến thức nặng não.",
+            if target_domain == "health":
+                cons_output = ArchitectConsultationOutput(
+                    strategic_analysis=(
+                        f"Mục tiêu '{goal_title}' đòi hỏi kỷ luật dinh dưỡng nghiêm ngặt (70%) và giáo án tập luyện khoa học (30%). "
+                        "Chìa khóa cốt lõi để giảm mỡ bền vững mà không bị suy nhược hay mất cơ là kiểm soát thâm hụt calo chuẩn mực "
+                        "kết hợp kích thích cơ bắp định kỳ và Cardio Zone 2."
                     ),
-                    StrategicMethodOption(
-                        method_name="Phương pháp Spaced Repetition & Project-Based",
-                        core_principle="Học lý thuyết ngắn gọn 30% và dành 70% thời gian thực hành bài tập thực tế kết hợp lặp lại ngắt quãng.",
-                        time_allocation="Phân bổ 5 ngày thực chiến + 1 ngày tổng kết review mỗi tuần.",
-                        suitability="Giúp khắc sâu kiến thức vào trí nhớ dài hạn và tạo ra sản phẩm thực tế có thể nghiệm thu.",
+                    proposed_methods=[
+                        StrategicMethodOption(
+                            method_name="Chiến Lược Thâm Hụt Calo Khoa Học & Nhịn Ăn Gián Đoạn (IF 16/8)",
+                            core_principle="Kiểm soát Calo In < Calo Out với mức thâm hụt ~500 kcal/ngày dưới mức TDEE, nạp đủ 1.6-2g protein/kg và nhịn ăn 16 tiếng để kích hoạt tự thực bào (Autophagy) đốt mỡ tự nhiên.",
+                            time_allocation="Cửa sổ ăn uống 12:00 - 20:00, nhịn từ 20:00 đến 12:00 trưa hôm sau.",
+                            suitability="Giảm mỡ nhanh, cải thiện độ nhạy insulin, không gây mệt mỏi hay mất cơ bắp.",
+                        ),
+                        StrategicMethodOption(
+                            method_name="Giáo Án Kháng Lực Kết Hợp Cardio Zone 2 Đốt Mỡ Tối Đa",
+                            core_principle="Tập kháng lực 3-4 buổi/tuần (Full-body hoặc Upper/Lower) để duy trì mật độ cơ bắp + 30-45 phút Cardio Zone 2 đi bộ dốc/đạp xe để oxy hóa mỡ thừa bền vững.",
+                            time_allocation=f"{target_goal.get('daily_hours', 1.5)}h/ngày vào khung giờ {target_goal.get('preferred_time', '06:00 - 07:30 Sáng')}.",
+                            suitability="Tối ưu hóa vóc dáng săn chắc, tăng trao đổi chất và chống tình trạng da chảy xệ sau khi giảm cân.",
+                        ),
+                    ],
+                    strategy_summary=(
+                        f"Dinh dưỡng thâm hụt 500 kcal (IF 16/8, giàu protein) kết hợp {target_goal.get('daily_hours', 1.5)}h/ngày "
+                        f"tập kháng lực và Cardio Zone 2 vào khung giờ {target_goal.get('preferred_time', '06:00 - 07:30 Sáng')}."
                     ),
-                ],
-                strategy_summary=f"Ứng dụng Deep Work Sprint {target_goal.get('daily_hours', 1.5)}h/ngày vào khung giờ {target_goal.get('preferred_time', '08:00 - 10:00')} kết hợp Spaced Repetition và bài tập thực hành chuẩn.",
-                ready_to_breakdown=False,
-                architect_response=f"Chào bạn! Đối với mục tiêu **'{goal_title}'**, tôi đề xuất 2 chiến lược tiếp cận tối ưu:\n\n1. **Deep Work Sprint (90/20):** Tập trung sâu vào khung giờ vàng để giải quyết các phần khó nhất.\n2. **Spaced Repetition & Project-Based:** Học qua bài tập thực hành thực tế để chống quên và duy trì phản xạ.\n\n💡 *Phương pháp đề xuất tổng quát:* **{target_goal.get('daily_hours', 1.5)}h/ngày vào khung giờ {target_goal.get('preferred_time', '08:00 - 10:00')}**.\n\nBạn cảm thấy phương pháp này đã phù hợp với nhịp sinh hoạt chưa? Khi bạn đồng ý, hãy nhắn **'chốt phương pháp'** hoặc bấm nút **'🚀 Chốt phương pháp & Tự động phân rã 4 tầng'** ngay bên dưới để tôi xuất bản toàn bộ lộ trình!",
-            )
+                    ready_to_breakdown=False,
+                    architect_response=(
+                        f"Chào bạn! Đối với mục tiêu **'{goal_title}'**, tôi đề xuất chiến lược rèn luyện & dinh dưỡng chuẩn khoa học:\n\n"
+                        "🥗 **1. Chế độ Dinh Dưỡng (Quyết định 70% thành công):**\n"
+                        "- Duy trì thâm hụt calo khoa học ~500 kcal/ngày dưới mức TDEE kết hợp nhịn ăn gián đoạn (Intermittent Fasting 16/8).\n"
+                        "- Nạp đủ 1.6 - 2.0g protein/kg thể trọng (ức gà, trứng, cá, đậu phụ) để giữ cơ bắp, ưu tiên tinh bột chậm (khoai lang, yến mạch) và rau xanh giàu chất xơ.\n\n"
+                        "🏋️ **2. Giáo Án Tập Luyện (Quyết định 30% vóc dáng & săn chắc):**\n"
+                        "- 3-4 buổi kháng lực/tuần (tập tạ / calisthenics) để kích thích trao đổi chất và giữ cơ bắp.\n"
+                        "- 2-3 buổi Cardio Zone 2 (30-45 phút đi bộ dốc hoặc đạp xe) để đốt mỡ bền vững.\n\n"
+                        "📅 **Lộ trình 3 Giai đoạn rõ ràng:**\n"
+                        "- **Giai đoạn 1 (Tháng 1 / 30 ngày đầu):** Thích nghi thể trạng & Giảm 5kg đầu (thải nước dư và mỡ nội tạng ban đầu, hình thành kỷ luật ăn uống).\n"
+                        "- **Giai đoạn 2 (Tháng 2 / Ngày 31-60):** Tăng cường độ (Progressive Overload) & Đốt mỡ lì lợm (giảm tiếp 5kg, siết eo).\n"
+                        "- **Giai đoạn 3 (Tháng 3 / Ngày 61-90):** Siết nét cơ bắp & Về đích hoàn thành mục tiêu (thiết lập calo duy trì để chống hiệu ứng Yo-yo hoàn cân).\n\n"
+                        f"💡 *Bạn thấy chế độ dinh dưỡng và giáo án tập luyện này thế nào?* Có điểm nào bạn muốn tinh chỉnh không trước khi chúng ta bấm **'{domain_terms.get('finalize_btn')}'**?"
+                    ),
+                )
+            else:
+                cons_output = ArchitectConsultationOutput(
+                    strategic_analysis=f"Mục tiêu '{goal_title}' thuộc nhóm {target_goal.get('category', 'Học tập')}. Điểm mấu chốt để thành công là tính nhất quán hàng ngày và phương pháp học chủ động (Active Learning), tránh tình trạng xem tài liệu thụ động.",
+                    proposed_methods=[
+                        StrategicMethodOption(
+                            method_name="Phương pháp Deep Work Sprint (90/20)",
+                            core_principle="Tập trung 100% nhận thức trong 90 phút liên tục vào khung giờ vàng, sau đó nghỉ ngơi 20 phút phục hồi não bộ.",
+                            time_allocation=f"{target_goal.get('daily_hours', 1.5)}h vào khung giờ {target_goal.get('preferred_time', '08:00 - 10:00')}.",
+                            suitability="Phù hợp tối đa với các mục tiêu đòi hỏi tư duy logic và tiếp thu kiến thức nặng não.",
+                        ),
+                        StrategicMethodOption(
+                            method_name="Phương pháp Spaced Repetition & Project-Based",
+                            core_principle="Học lý thuyết ngắn gọn 30% và dành 70% thời gian thực hành bài tập thực tế kết hợp lặp lại ngắt quãng.",
+                            time_allocation="Phân bổ 5 ngày thực chiến + 1 ngày tổng kết review mỗi tuần.",
+                            suitability="Giúp khắc sâu kiến thức vào trí nhớ dài hạn và tạo ra sản phẩm thực tế có thể nghiệm thu.",
+                        ),
+                    ],
+                    strategy_summary=f"Ứng dụng Deep Work Sprint {target_goal.get('daily_hours', 1.5)}h/ngày vào khung giờ {target_goal.get('preferred_time', '08:00 - 10:00')} kết hợp Spaced Repetition và bài tập thực hành chuẩn.",
+                    ready_to_breakdown=False,
+                    architect_response=f"Chào bạn! Đối với mục tiêu **'{goal_title}'**, tôi đề xuất 2 chiến lược tiếp cận tối ưu:\n\n1. **Deep Work Sprint (90/20):** Tập trung sâu vào khung giờ vàng để giải quyết các phần khó nhất.\n2. **Spaced Repetition & Project-Based:** Học qua bài tập thực hành thực tế để chống quên và duy trì phản xạ.\n\n💡 *Phương pháp đề xuất tổng quát:* **{target_goal.get('daily_hours', 1.5)}h/ngày vào khung giờ {target_goal.get('preferred_time', '08:00 - 10:00')}**.\n\nBạn cảm thấy phương pháp này đã phù hợp với nhịp sinh hoạt chưa? Khi bạn đồng ý, hãy nhắn **'chốt phương pháp'** hoặc bấm nút **'{domain_terms.get('finalize_btn')}'** ngay bên dưới để tôi xuất bản toàn bộ lộ trình!",
+                )
 
         # Lưu lại phương pháp đã thảo luận vào strategy_summary của mục tiêu trên MongoDB
         target_goal["strategy_summary"] = cons_output.strategy_summary
@@ -3291,12 +3401,29 @@ CHỈ THỊ TƯ VẤN CHIẾN LƯỢC (NHỊP 1):
     # --------------------------------------------------------------------------
     # NHỊP 2: XUẤT BẢN LỘ TRÌNH 4 TẦNG TỪ PHƯƠNG PHÁP ĐÃ CHỐT
     # --------------------------------------------------------------------------
-    final_strat = existing_strategy or f"Ứng dụng Deep Work {target_goal.get('daily_hours', 1.5)}h/ngày vào khung giờ {target_goal.get('preferred_time', '08:00 - 10:00')} kết hợp thực hành chuẩn mực."
+    if target_domain == "health":
+        final_strat = existing_strategy or f"Dinh dưỡng thâm hụt 500 kcal kết hợp {target_goal.get('daily_hours', 1.5)}h tập luyện kháng lực và Cardio Zone 2 vào khung giờ {target_goal.get('preferred_time', '06:00 - 07:30')}."
+        energy_breakdown_instruction = f"""
+   - Nhãn năng lượng & độ nặng (energy_level):
+     * '{domain_terms["energy_deep"]}': Bài tập kháng lực trọng tâm (Push/Pull/Legs hoặc Full-Body), tạ hoặc Calisthenics cường độ cao.
+     * '{domain_terms["energy_shallow"]}': Vận động nhẹ, đi bộ dốc Cardio Zone 2 (30-45 phút), chuẩn bị bữa ăn Meal Prep (cân đo protein/calo).
+     * '{domain_terms["energy_recharge"]}': Giãn cơ tĩnh, lăn bọt (Foam rolling), tắm nước ấm, ngủ sâu phục hồi cơ bắp.
+     * TUYỆT ĐỐI KHÔNG gắn nhãn 'Deep Work' cho các hoạt động thể chất và dinh dưỡng!
+"""
+    else:
+        final_strat = existing_strategy or f"Ứng dụng Deep Work {target_goal.get('daily_hours', 1.5)}h/ngày vào khung giờ {target_goal.get('preferred_time', '08:00 - 10:00')} kết hợp thực hành chuẩn mực."
+        energy_breakdown_instruction = """
+   - Nhãn độ nặng não (energy_level):
+     * '🔴 Deep Work': Tập trung nhận thức cao độ, học kiến thức mới/khó, giải đề thi chuẩn, lập trình, viết luận. Khung giờ vàng 08:00 - 10:00 sáng.
+     * '🟡 Shallow Work': Ôn tập nhẹ nhàng, luyện phát âm, flashcard từ vựng, dọn dẹp ghi chú, xem video bài giảng.
+     * '🟢 Recharge': Vận động thể chất, đi bộ, giãn cơ, nghe podcast thụ động, phục hồi nhận thức.
+"""
 
-    architect_prompt = f"""Bạn là Trưởng Kiến Trúc Sư Chiến Lược (AI Roadmap & Resource Architect) của hệ thống Mavis.
+    architect_prompt = f"""Bạn là {domain_terms.get('role_title', 'Trưởng Kiến Trúc Sư Chiến Lược')} của hệ thống Mavis.
 Nhiệm vụ: NHỊP 2 — XUẤT BẢN LỘ TRÌNH 4 TẦNG TỪ PHƯƠNG PHÁP ĐÃ CHỐT:
 - Tên mục tiêu: {goal_title}
-- Phân loại: {target_goal.get('category', 'Học tập')}
+- Phân loại: {target_goal.get('category', domain_terms.get('domain_name', 'Học tập'))}
+- Lĩnh vực chuyên biệt: {domain_terms.get('domain_name', 'Tổng quát')}
 - Mức ưu tiên hiện tại: {target_goal.get('priority', 'P2 - High')}
 - Khung giờ ưu tiên hiện tại: {target_goal.get('preferred_time', '08:00 - 10:00 Sáng')}
 - Quỹ thời gian: {target_goal.get('daily_hours', 1.5)} giờ/ngày
@@ -3305,31 +3432,35 @@ Nhiệm vụ: NHỊP 2 — XUẤT BẢN LỘ TRÌNH 4 TẦNG TỪ PHƯƠNG PHÁP
 PHƯƠNG PHÁP CHIẾN LƯỢC ĐÃ THỐNG NHẤT (KIM CHỈ NAM BẮT BUỘC TUÂN THỦ):
 "{final_strat}"
 
-KHO TÀI LIỆU THỰC TẾ TÌM KIẾM ĐƯỢC (BẮT BUỘC ưu tiên trích xuất link URL thực tế này vào Gói tài liệu 1-Click):
+KHO TÀI LIỆU / CÔNG CỤ THỰC TẾ TÌM KIẾM ĐƯỢC:
 {json.dumps(raw_search, ensure_ascii=False, indent=2)}
 
 YÊU CẦU CỦA NGƯỜI DÙNG:
 "{user_message}"
 
-CHỈ THỊ KIẾN TRÚC & QUẢN TRỊ NĂNG LƯỢNG (BURNOUT SHIELD) BẮT BUỘC:
+CHỈ THỊ KIẾN TRÚC & PHÂN CẤP 4 TẦNG BẮT BUỘC:
 1. Dựa trên PHƯƠNG PHÁP ĐÃ THỐNG NHẤT ở trên, xây dựng phân cấp chi tiết khép kín 4 tầng:
    - strategy_summary: Ghi lại tóm tắt phương pháp đã chốt.
-   - yearly: Tầm nhìn chiến lược 1 năm.
-   - quarterly: Phân kỳ các Quý (quarter, focus, target_outcome).
+   - yearly: Tầm nhìn chiến lược 1 năm (Ví dụ: Chinh phục vóc dáng lý tưởng và giảm 15kg mỡ thừa bền vững).
+   - quarterly: BẮT BUỘC đặt tên Quý rõ ràng theo từng giai đoạn 30-90 ngày kèm mục tiêu cốt lõi và kết quả bàn giao.
+     Ví dụ với Sức khỏe:
+       * quarter: "Giai đoạn 1 (30 ngày đầu): Thích nghi thể chất & Giảm 5kg đầu", focus: "Thiết lập kỷ luật thâm hụt 500 kcal và làm quen giáo án kháng lực 3 buổi/tuần", target_outcome: "Cân nặng giảm 5kg, cơ thể nhẹ nhàng, bụng phẳng hơn"
+       * quarter: "Giai đoạn 2 (Ngày 31-60): Tăng tiến cường độ & Đốt mỡ lì lợm", focus: "Áp dụng Progressive Overload trong các bài tập và tăng thời lượng Cardio Zone 2", target_outcome: "Giảm thêm 5kg (tổng 10kg), vòng eo giảm 4-6cm"
+       * quarter: "Giai đoạn 3 (Ngày 61-90): Siết cơ nét & Về đích 15kg bền vững", focus: "Hoàn thiện mốc cân nặng, siết cơ và chuyển dịch về mức calo duy trì để chống Yo-yo", target_outcome: "Giảm trọn vẹn 15kg, hình thành vóc dáng săn chắc, duy trì ổn định"
+     Ví dụ với Ngoại ngữ / Học tập:
+       * quarter: "Giai đoạn 1 (Quý 1): Củng cố nền tảng ngữ pháp & từ vựng cốt lõi", focus: "Học 1.000 từ vựng và chuẩn hóa phát âm", target_outcome: "Đạt mốc 5.5 IELTS"
+     TUYỆT ĐỐI KHÔNG chỉ ghi nhãn cộc lốc như "Quý 1", "Quý 2".
    - monthly: Phân rã từng Tháng (month, milestone, resources).
    - weekly: Kế hoạch hành động từng Tuần (week, milestone, tasks, action_items, estimated_hours, resources).
 2. ĐẶC BIỆT — BẮT BUỘC GẮN ĐỦ 3 THUỘC TÍNH CHO MỖI TASK TRONG TUẦN (WeeklyTaskItem):
-   - Nhãn độ nặng não (energy_level):
-     * '🔴 Deep Work': Tập trung nhận thức cao độ, học kiến thức mới/khó, giải đề thi chuẩn, lập trình, viết luận. Khung giờ vàng 08:00 - 10:00 sáng.
-     * '🟡 Shallow Work': Ôn tập nhẹ nhàng, luyện phát âm, flashcard từ vựng, dọn dẹp ghi chú, xem video bài giảng.
-     * '🟢 Recharge': Vận động thể chất, đi bộ, giãn cơ, nghe podcast thụ động, phục hồi nhận thức.
-   - Gói tài liệu 1-Click:
-     * resource_title: Tên tài liệu cụ thể của task đó.
-     * resource_url: Đường link chính thức uy tín dẫn thẳng tới tài liệu (lấy từ kho tài liệu tìm kiếm ở trên hoặc link chuẩn).
+{energy_breakdown_instruction}
+   - Gói tài liệu / công cụ 1-Click:
+     * resource_title: Tên tài liệu / bài tập / công cụ cụ thể của task đó.
+     * resource_url: Đường link chính thức uy tín dẫn thẳng tới tài liệu hoặc công cụ (lấy từ kho tìm kiếm ở trên hoặc URL chuẩn mực).
    - Tiêu chí hoàn thành (definition_of_done - DoD):
-     * Định nghĩa cụ thể, rõ ràng, có thể đo lường được để nghiệm thu buổi học/làm.
-3. NGUYÊN TẮC BURNOUT SHIELD: Không xếp toàn bộ là task '🔴 Deep Work' trong một tuần. Bắt buộc có sự cân bằng giữa '🔴 Deep Work', '🟡 Shallow Work' và '🟢 Recharge' để chống kiệt sức nhận thức.
-4. resources: 2-3 tài liệu, giáo trình hoặc công cụ chuẩn mực nhất kèm link URL thật.
+     * Định nghĩa cụ thể, rõ ràng, có thể đo lường và nghiệm thu được ngay trong buổi đó.
+3. NGUYÊN TẮC BURNOUT SHIELD: Bắt buộc có sự cân bằng giữa các task cường độ cao và phục hồi để tránh kiệt sức.
+4. resources: 2-3 tài nguyên, giáo án, công cụ hoặc tài liệu chuẩn mực nhất theo đúng lĩnh vực {domain_terms.get('domain_name')}.
 5. Xuất ra đầy đủ dữ liệu có cấu trúc để hệ thống lưu trực tiếp vào MongoDB goals.breakdown.
 """
 
@@ -3337,7 +3468,7 @@ CHỈ THỊ KIẾN TRÚC & QUẢN TRỊ NĂNG LƯỢNG (BURNOUT SHIELD) BẮT BU
         result: ArchitectGoalBreakdown = invoke_llm_resilient(
             preferred_model="gemini-2.5-pro",
             messages=[
-                SystemMessage(content=SYSTEM_PROMPT),
+                SystemMessage(content=architect_system_prompt),
                 HumanMessage(content=architect_prompt),
             ],
             structured_schema=ArchitectGoalBreakdown,
@@ -3345,91 +3476,203 @@ CHỈ THỊ KIẾN TRÚC & QUẢN TRỊ NĂNG LƯỢNG (BURNOUT SHIELD) BẮT BU
         )
     except Exception as e:
         print(f"Lỗi invoke trong architect_chat (Nhịp 2): {e}")
-        # Fallback an toàn với đầy đủ nhãn năng lượng, 1-Click resource, và DoD
-        sample_tasks_w1 = [
-            WeeklyTaskItem(
-                task_name=f"Học lý thuyết nền tảng & kỹ năng cốt lõi cho {goal_title}",
-                energy_level="🔴 Deep Work",
-                resource_title=f"Giáo trình chuẩn mực {goal_title}",
-                resource_url="https://cambridgeenglish.org",
-                definition_of_done="Hoàn thành đọc 20 trang giáo trình và ghi chú tóm tắt 5 nguyên lý cốt lõi.",
-            ),
-            WeeklyTaskItem(
-                task_name="Học từ vựng & thuật ngữ chuyên ngành qua Flashcard",
-                energy_level="🟡 Shallow Work",
-                resource_title="Kho thuật ngữ & từ vựng trích xuất",
-                resource_url="https://quizlet.com",
-                definition_of_done="Ghi nhớ 30 từ vựng mới và vượt qua bài test ôn tập đạt 90%.",
-            ),
-            WeeklyTaskItem(
-                task_name="Đi bộ 30 phút kết hợp nghe Podcast thụ động",
-                energy_level="🟢 Recharge",
-                resource_title="Kênh Podcast thực tế chất lượng cao",
-                resource_url="https://spotify.com",
-                definition_of_done="Đi bộ đạt 4.000 bước và nghe trọn vẹn 1 tập podcast chuyên đề.",
-            ),
-        ]
-        sample_tasks_w2 = [
-            WeeklyTaskItem(
-                task_name=f"Giải bộ đề thực hành số 1 cho {goal_title}",
-                energy_level="🔴 Deep Work",
-                resource_title=f"Bộ đề thi thử chuẩn quốc tế {goal_title}",
-                resource_url="https://cambridgeenglish.org",
-                definition_of_done="Bấm giờ chuẩn điều kiện thi, hoàn thành 100% đề và phân tích chi tiết các lỗi sai.",
-            ),
-            WeeklyTaskItem(
-                task_name="Phân loại lỗi sai & hệ thống hóa công thức",
-                energy_level="🟡 Shallow Work",
-                resource_title="Sổ tay tối ưu lỗi sai (Error Log)",
-                resource_url="https://notion.so",
-                definition_of_done="Nhập toàn bộ các câu sai vào Error Log kèm giải thích cách khắc phục.",
-            ),
-            WeeklyTaskItem(
-                task_name="Giãn cơ và nghỉ ngơi hồi phục nhận thức",
-                energy_level="🟢 Recharge",
-                resource_title="Hướng dẫn phục hồi năng lượng não bộ",
-                resource_url="https://youtube.com",
-                definition_of_done="Thực hiện 20 phút giãn cơ nhẹ nhàng và ngủ đủ giấc.",
-            ),
-        ]
-        result = ArchitectGoalBreakdown(
-            strategy_summary=final_strat,
-            yearly=f"Chinh phục toàn diện {goal_title}",
-            quarterly=[
-                QuarterlyMilestoneItem(quarter="Quý 1", focus="Nền tảng & Cốt lõi", target_outcome="Hoàn thiện 50% kiến thức trọng tâm"),
-                QuarterlyMilestoneItem(quarter="Quý 2", focus="Thực chiến & Luyện đề", target_outcome="Đạt điểm mục tiêu chuẩn hóa"),
-            ],
-            monthly=[
-                MonthlyMilestoneItem(month="Tháng 1", milestone="Củng cố kiến thức gốc và phương pháp", resources="Tài liệu chuyên ngành chuẩn"),
-                MonthlyMilestoneItem(month="Tháng 2", milestone="Tăng tốc giải bài tập nâng cao", resources="Bộ đề luyện thi chính thức"),
-                MonthlyMilestoneItem(month="Tháng 3", milestone="Tổng ôn và thi thử chuẩn điều kiện", resources="Mock tests chính thức"),
-            ],
-            weekly=[
-                WeeklyMilestoneItem(
-                    week="Tuần 1",
-                    milestone="Đánh giá năng lực và học module mở đầu",
-                    tasks=sample_tasks_w1,
-                    action_items=[f"[{t.energy_level}] {t.task_name} — DoD: {t.definition_of_done}" for t in sample_tasks_w1],
-                    estimated_hours=7.0,
+        if target_domain == "health":
+            sample_tasks_w1 = [
+                WeeklyTaskItem(
+                    task_name=f"Tập kháng lực toàn thân (Full Body Resistance) cho {goal_title}",
+                    energy_level=domain_terms["energy_deep"],
+                    resource_title="Giáo án Kháng Lực Nền Tảng (Full Body 3 Buổi)",
+                    resource_url="https://muscleandstrength.com",
+                    definition_of_done="Hoàn thành 4 bài tập (Squat, Push-up, Row, Plank) 3 hiệp x 10-12 lần chuẩn form.",
                 ),
-                WeeklyMilestoneItem(
-                    week="Tuần 2",
-                    milestone="Nâng cao kỹ năng phân tích và phản xạ",
-                    tasks=sample_tasks_w2,
-                    action_items=[f"[{t.energy_level}] {t.task_name} — DoD: {t.definition_of_done}" for t in sample_tasks_w2],
-                    estimated_hours=7.0,
+                WeeklyTaskItem(
+                    task_name="Đi bộ dốc Cardio Zone 2 & Chuẩn bị bữa ăn Meal Prep (High Protein)",
+                    energy_level=domain_terms["energy_shallow"],
+                    resource_title="Bảng tính Calo TDEE & Thực đơn 1.500 kcal",
+                    resource_url="https://tdeecalculator.net",
+                    definition_of_done="Hoàn thành 35 phút đi bộ dốc nhịp tim Zone 2 và chuẩn bị sẵn 3 hộp ăn trưa đủ 30g protein/hộp.",
                 ),
-            ],
-            resources=[
-                ResourceItemDetail(
-                    title=f"Giáo trình chuẩn mực cho {goal_title}",
-                    url="https://cambridgeenglish.org",
-                    type="Giáo trình",
-                    how_to_use="Học đều đặn theo khung giờ vàng đã thiết lập.",
-                )
-            ],
-            architect_response=f"Tôi đã phân rã toàn diện lộ trình 4 tầng (Năm -> Quý -> Tháng -> Tuần) dựa trên phương pháp chiến lược '{final_strat}' kèm nhãn năng lượng (🔴 Deep Work, 🟡 Shallow Work, 🟢 Recharge), Gói tài liệu 1-Click và Tiêu chí hoàn thành (DoD) cho mục tiêu '{goal_title}'. Trạng thái mục tiêu đã kích hoạt và sẵn sàng thực thi!",
-        )
+                WeeklyTaskItem(
+                    task_name="Giãn cơ tĩnh (Stretching / Foam Rolling) & Ngủ đủ 8 tiếng",
+                    energy_level=domain_terms["energy_recharge"],
+                    resource_title="Bài tập Giãn Cơ & Phục Hồi Thể Lực Chuẩn Khoa Học",
+                    resource_url="https://youtube.com",
+                    definition_of_done="Thực hiện 20 phút giãn cơ tĩnh các nhóm cơ chính và ngủ sâu giấc trước 22:30.",
+                ),
+            ]
+            sample_tasks_w2 = [
+                WeeklyTaskItem(
+                    task_name=f"Tập kháng lực tăng tiến mức tạ (Progressive Overload) cho {goal_title}",
+                    energy_level=domain_terms["energy_deep"],
+                    resource_title="Giáo án Tăng Tiến Cường Độ Chuẩn Khoa Học",
+                    resource_url="https://muscleandstrength.com",
+                    definition_of_done="Tăng 5% mức tạ hoặc thêm 2 reps mỗi hiệp, ghi lại nhật ký tập luyện.",
+                ),
+                WeeklyTaskItem(
+                    task_name="Cardio Zone 2 đạp xe và Cân đo chỉ số cơ thể định kỳ",
+                    energy_level=domain_terms["energy_shallow"],
+                    resource_title="Bảng Theo Dõi Calo In / Out & Vòng Eo",
+                    resource_url="https://myfitnesspal.com",
+                    definition_of_done="Hoàn thành 40 phút đạp xe Zone 2, cân đo cân nặng buổi sáng lúc đói và đo vòng bụng.",
+                ),
+                WeeklyTaskItem(
+                    task_name="Ngâm nước ấm thư giãn cơ bắp & Đi ngủ sớm",
+                    energy_level=domain_terms["energy_recharge"],
+                    resource_title="Hướng dẫn phục hồi cơ bắp và giấc ngủ sâu",
+                    resource_url="https://youtube.com",
+                    definition_of_done="Nghỉ ngơi hoàn toàn, ngâm chân nước ấm 15 phút và ngủ đủ 8 tiếng.",
+                ),
+            ]
+            result = ArchitectGoalBreakdown(
+                strategy_summary=final_strat,
+                yearly=f"Chinh phục vóc dáng lý tưởng và hoàn thành xuất sắc mục tiêu {goal_title}",
+                quarterly=[
+                    QuarterlyMilestoneItem(
+                        quarter="Giai đoạn 1 (30 ngày đầu): Thích Nghi Thể Chất & Giảm 5kg Đầu",
+                        focus="Thiết lập kỷ luật thâm hụt 500 kcal, ăn giàu protein và tập kháng lực 3 buổi/tuần",
+                        target_outcome="Cân nặng giảm 5kg, cơ thể săn chắc, giảm mỡ bụng rõ rệt",
+                    ),
+                    QuarterlyMilestoneItem(
+                        quarter="Giai đoạn 2 (Ngày 31-60): Tăng Tiến Cường Độ & Đốt Mỡ Lì Lợm",
+                        focus="Áp dụng Progressive Overload trong các bài tập và tăng thời lượng Cardio Zone 2",
+                        target_outcome="Giảm thêm 5kg (tổng 10kg), tỷ lệ mỡ cơ thể giảm 4-5%",
+                    ),
+                    QuarterlyMilestoneItem(
+                        quarter="Giai đoạn 3 (Ngày 61-90): Siết Cơ Nét & Về Đích 15kg Bền Vững",
+                        focus="Hoàn thành chỉ tiêu cân nặng, siết cơ nét và chuyển dịch về calo duy trì TDEE mới",
+                        target_outcome="Cân nặng giảm trọn vẹn 15kg, hình thành vóc dáng lý tưởng và chống hoàn cân",
+                    ),
+                ],
+                monthly=[
+                    MonthlyMilestoneItem(month="Tháng 1", milestone="Thích nghi ăn thâm hụt calo và rèn luyện thể lực cơ bản", resources="Thực đơn thâm hụt calo & Bảng tính TDEE"),
+                    MonthlyMilestoneItem(month="Tháng 2", milestone="Tăng tải kháng lực và tối ưu hóa đốt mỡ thừa Zone 2", resources="Giáo án Progressive Overload & Timer Cardio"),
+                    MonthlyMilestoneItem(month="Tháng 3", milestone="Siết nét vóc dáng và thiết lập chế độ giữ cân bền vững", resources="Kế hoạch duy trì TDEE dài hạn chống Yo-yo"),
+                ],
+                weekly=[
+                    WeeklyMilestoneItem(
+                        week="Tuần 1",
+                        milestone="Thích nghi nhịp sinh hoạt, tính calo TDEE và tập bài mở đầu",
+                        tasks=sample_tasks_w1,
+                        action_items=[f"[{t.energy_level}] {t.task_name} — DoD: {t.definition_of_done}" for t in sample_tasks_w1],
+                        estimated_hours=7.0,
+                    ),
+                    WeeklyMilestoneItem(
+                        week="Tuần 2",
+                        milestone="Tăng tiến áp lực kháng lực và duy trì thâm hụt calo chuẩn",
+                        tasks=sample_tasks_w2,
+                        action_items=[f"[{t.energy_level}] {t.task_name} — DoD: {t.definition_of_done}" for t in sample_tasks_w2],
+                        estimated_hours=7.0,
+                    ),
+                ],
+                resources=[
+                    ResourceItemDetail(
+                        title="Bảng Tính TDEE & Thâm Hụt Calo Khoa Học",
+                        url="https://tdeecalculator.net",
+                        type="Công cụ",
+                        how_to_use="Nhập chỉ số cân nặng, chiều cao hàng tuần để cân chỉnh mức calo nạp vào.",
+                    ),
+                    ResourceItemDetail(
+                        title="Giáo Án Kháng Lực Đốt Mỡ Tăng Cơ Chuẩn Khoa Học",
+                        url="https://muscleandstrength.com",
+                        type="Giáo án",
+                        how_to_use="Thực hiện theo lịch 3-4 buổi/tuần, ghi lại mức tạ để tăng tiến dần.",
+                    ),
+                ],
+                architect_response=f"Tôi đã xuất bản toàn diện lộ trình rèn luyện thể chất 4 tầng (Năm ➔ Quý ➔ Tháng ➔ Tuần) dựa trên phương pháp dinh dưỡng & tập luyện '{final_strat}' kèm nhãn năng lượng chuẩn ({domain_terms['energy_deep']}, {domain_terms['energy_shallow']}, {domain_terms['energy_recharge']}), Gói tài liệu 1-Click và Tiêu chí hoàn thành (DoD) cho mục tiêu '{goal_title}'. Trạng thái mục tiêu đã kích hoạt và sẵn sàng thực thi!",
+            )
+        else:
+            sample_tasks_w1 = [
+                WeeklyTaskItem(
+                    task_name=f"Học lý thuyết nền tảng & kỹ năng cốt lõi cho {goal_title}",
+                    energy_level="🔴 Deep Work",
+                    resource_title=f"Giáo trình chuẩn mực {goal_title}",
+                    resource_url="https://cambridgeenglish.org",
+                    definition_of_done="Hoàn thành đọc 20 trang giáo trình và ghi chú tóm tắt 5 nguyên lý cốt lõi.",
+                ),
+                WeeklyTaskItem(
+                    task_name="Học từ vựng & thuật ngữ chuyên ngành qua Flashcard",
+                    energy_level="🟡 Shallow Work",
+                    resource_title="Kho thuật ngữ & từ vựng trích xuất",
+                    resource_url="https://quizlet.com",
+                    definition_of_done="Ghi nhớ 30 từ vựng mới và vượt qua bài test ôn tập đạt 90%.",
+                ),
+                WeeklyTaskItem(
+                    task_name="Đi bộ 30 phút kết hợp nghe Podcast thụ động",
+                    energy_level="🟢 Recharge",
+                    resource_title="Kênh Podcast thực tế chất lượng cao",
+                    resource_url="https://spotify.com",
+                    definition_of_done="Đi bộ đạt 4.000 bước và nghe trọn vẹn 1 tập podcast chuyên đề.",
+                ),
+            ]
+            sample_tasks_w2 = [
+                WeeklyTaskItem(
+                    task_name=f"Giải bộ đề thực hành số 1 cho {goal_title}",
+                    energy_level="🔴 Deep Work",
+                    resource_title=f"Bộ đề thi thử chuẩn quốc tế {goal_title}",
+                    resource_url="https://cambridgeenglish.org",
+                    definition_of_done="Bấm giờ chuẩn điều kiện thi, hoàn thành 100% đề và phân tích chi tiết các lỗi sai.",
+                ),
+                WeeklyTaskItem(
+                    task_name="Phân loại lỗi sai & hệ thống hóa công thức",
+                    energy_level="🟡 Shallow Work",
+                    resource_title="Sổ tay tối ưu lỗi sai (Error Log)",
+                    resource_url="https://notion.so",
+                    definition_of_done="Nhập toàn bộ các câu sai vào Error Log kèm giải thích cách khắc phục.",
+                ),
+                WeeklyTaskItem(
+                    task_name="Giãn cơ và nghỉ ngơi hồi phục nhận thức",
+                    energy_level="🟢 Recharge",
+                    resource_title="Hướng dẫn phục hồi năng lượng não bộ",
+                    resource_url="https://youtube.com",
+                    definition_of_done="Thực hiện 20 phút giãn cơ nhẹ nhàng và ngủ đủ giấc.",
+                ),
+            ]
+            result = ArchitectGoalBreakdown(
+                strategy_summary=final_strat,
+                yearly=f"Chinh phục toàn diện {goal_title}",
+                quarterly=[
+                    QuarterlyMilestoneItem(
+                        quarter="Giai đoạn 1 (Quý 1): Nền Tảng & Củng Cố Cốt Lõi",
+                        focus="Xây dựng nền tảng vững chắc và hình thành phản xạ",
+                        target_outcome="Hoàn thiện 50% kiến thức và kỹ năng trọng tâm",
+                    ),
+                    QuarterlyMilestoneItem(
+                        quarter="Giai đoạn 2 (Quý 2): Thực Chiến & Luyện Đề Chuẩn",
+                        focus="Giải đề thi bấm giờ thực tế và lấp đầy lỗ hổng",
+                        target_outcome="Đạt điểm mục tiêu chuẩn hóa",
+                    ),
+                ],
+                monthly=[
+                    MonthlyMilestoneItem(month="Tháng 1", milestone="Củng cố kiến thức gốc và phương pháp", resources="Tài liệu chuyên ngành chuẩn"),
+                    MonthlyMilestoneItem(month="Tháng 2", milestone="Tăng tốc giải bài tập nâng cao", resources="Bộ đề luyện thi chính thức"),
+                    MonthlyMilestoneItem(month="Tháng 3", milestone="Tổng ôn và thi thử chuẩn điều kiện", resources="Mock tests chính thức"),
+                ],
+                weekly=[
+                    WeeklyMilestoneItem(
+                        week="Tuần 1",
+                        milestone="Đánh giá năng lực và học module mở đầu",
+                        tasks=sample_tasks_w1,
+                        action_items=[f"[{t.energy_level}] {t.task_name} — DoD: {t.definition_of_done}" for t in sample_tasks_w1],
+                        estimated_hours=7.0,
+                    ),
+                    WeeklyMilestoneItem(
+                        week="Tuần 2",
+                        milestone="Nâng cao kỹ năng phân tích và phản xạ",
+                        tasks=sample_tasks_w2,
+                        action_items=[f"[{t.energy_level}] {t.task_name} — DoD: {t.definition_of_done}" for t in sample_tasks_w2],
+                        estimated_hours=7.0,
+                    ),
+                ],
+                resources=[
+                    ResourceItemDetail(
+                        title=f"Giáo trình chuẩn mực cho {goal_title}",
+                        url="https://cambridgeenglish.org",
+                        type="Giáo trình",
+                        how_to_use="Học đều đặn theo khung giờ vàng đã thiết lập.",
+                    )
+                ],
+                architect_response=f"Tôi đã phân rã toàn diện lộ trình 4 tầng (Năm -> Quý -> Tháng -> Tuần) dựa trên phương pháp chiến lược '{final_strat}' kèm nhãn năng lượng (🔴 Deep Work, 🟡 Shallow Work, 🟢 Recharge), Gói tài liệu 1-Click và Tiêu chí hoàn thành (DoD) cho mục tiêu '{goal_title}'. Trạng thái mục tiêu đã kích hoạt và sẵn sàng thực thi!",
+            )
 
     # Cập nhật mục tiêu và lưu vào MongoDB Atlas
     weekly_dicts = []

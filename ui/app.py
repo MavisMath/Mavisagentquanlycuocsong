@@ -93,6 +93,8 @@ try:
     update_user_goal_details = getattr(mg, "update_user_goal_details", lambda *args, **kwargs: True)
     delete_user_goal = getattr(mg, "delete_user_goal", lambda *args, **kwargs: True)
     calculate_user_streak = getattr(mg, "calculate_user_streak", lambda u="mavis": 1)
+    detect_goal_domain = getattr(mg, "detect_goal_domain", lambda *args, **kwargs: "general")
+    DOMAIN_TERMINOLOGY = getattr(mg, "DOMAIN_TERMINOLOGY", {})
 except Exception as _goals_import_err:
     import traceback
     st.error(f"⚠️ Cảnh báo nạp module `memory.goals`: {_goals_import_err}")
@@ -129,6 +131,8 @@ except Exception as _goals_import_err:
     def update_user_goal_details(*args, **kwargs): return True
     def delete_user_goal(*args, **kwargs): return True
     def calculate_user_streak(*args, **kwargs): return 1
+    def detect_goal_domain(*args, **kwargs): return "general"
+    DOMAIN_TERMINOLOGY = {}
 
 # 3. Nạp an toàn module memory.auth
 try:
@@ -749,9 +753,9 @@ if chat_arch_key not in st.session_state:
         {
             "role": "assistant",
             "content": (
-                f"Chào **{current_name}**! Tôi là **Strategy & Resource Architect** (Chuyên trách Giai đoạn 1).\n\n"
-                "Tôi chịu trách nhiệm phân rã mục tiêu thành lộ trình 4 tầng (**Năm ➔ Quý ➔ Tháng ➔ Tuần**) và thẩm định giáo trình/tài liệu chuẩn.\n\n"
-                "👉 Bạn có thể yêu cầu tôi đổi giờ học, đổi mức ưu tiên hoặc thêm/bớt tài liệu bất kỳ lúc nào!"
+                f"Chào **{current_name}**! Tôi là **Strategy & Roadmap Architect** (Chuyên trách Giai đoạn 1).\n\n"
+                "Tôi chịu trách nhiệm phân tích chiến lược, đề xuất phương pháp tối ưu và phân rã mục tiêu thành lộ trình 4 tầng (**Năm ➔ Quý ➔ Tháng ➔ Tuần**).\n\n"
+                "👉 Hãy chọn mục tiêu ở bảng điều khiển bên cạnh để bắt đầu thảo luận phương pháp hoặc tinh chỉnh lộ trình!"
             ),
         }
     ]
@@ -1486,6 +1490,26 @@ with tab_arch:
             selected_goal_name = selected_goal.get("title") or selected_goal.get("goal_name", "Mục tiêu")
             bd = safe_dict(selected_goal.get("breakdown"))
 
+            # Nhận diện lĩnh vực chuyên biệt (Domain-Aware Persona)
+            target_domain = detect_goal_domain(selected_goal, selected_goal_name, selected_goal.get("category", ""))
+            domain_terms = DOMAIN_TERMINOLOGY.get(target_domain, DOMAIN_TERMINOLOGY.get("general", {}))
+
+            # Đồng bộ lời chào mở đầu thích ứng theo mục tiêu đang chọn
+            arch_active_goal_key = f"arch_active_gid_{current_username}"
+            prev_active_gid = st.session_state.get(arch_active_goal_key)
+            if prev_active_gid != current_sel_id:
+                st.session_state[arch_active_goal_key] = current_sel_id
+                if len(st.session_state[chat_arch_key]) <= 1:
+                    st.session_state[chat_arch_key] = [
+                        {
+                            "role": "assistant",
+                            "content": domain_terms.get("opening_greeting", "").format(
+                                name=current_name,
+                                goal_title=selected_goal_name,
+                            ),
+                        }
+                    ]
+
             st.markdown("---")
             st.markdown(f"#### 🏛️ Phân Rã Lộ Trình 4 Tầng: **{selected_goal_name}**")
 
@@ -1494,20 +1518,27 @@ with tab_arch:
             st.markdown("**🌟 TẦNG 1 — TẦM NHÌN DÀI HẠN (YEARLY):**")
             st.info(f"🎯 **{yearly_vision}**")
 
-            # Tầng 2: Quý
+            # Tầng 2: Quý (Làm rõ giai đoạn 30-90 ngày, mục tiêu trọng tâm và kết quả bàn giao)
             quarterly_items = safe_list(bd.get("quarterly", []))
-            st.markdown("**🏆 TẦNG 2 — PHÂN KỲ CHIẾN LƯỢC (QUARTERLY):**")
+            q_header_label = domain_terms.get('q_label', '🏆 Giai đoạn chiến lược (Quý)').upper()
+            st.markdown(f"**{q_header_label}:**")
             if quarterly_items:
                 q_cols = st.columns(min(len(quarterly_items), 3) or 1)
                 for q_idx, q in enumerate(quarterly_items[:3]):
                     q_dict = safe_dict(q)
+                    raw_q = str(q_dict.get('quarter', f'Quý {q_idx+1}'))
+                    if "giai đoạn" not in raw_q.lower() and "tháng" not in raw_q.lower():
+                        q_display_title = f"🏆 Giai đoạn {q_idx+1} ({raw_q})"
+                    else:
+                        q_display_title = f"🏆 {raw_q}"
+
                     with q_cols[q_idx % len(q_cols)]:
                         with st.container(border=True):
-                            st.markdown(f"**{q_dict.get('quarter', f'Quý {q_idx+1}')}**")
-                            st.caption(f"🎯 *Trọng tâm:* {q_dict.get('focus', 'Nền tảng')}")
-                            st.caption(f"🏁 *Kết quả:* {q_dict.get('target_outcome', 'Đạt chuẩn')}")
+                            st.markdown(f"##### {q_display_title}")
+                            st.markdown(f"🎯 **Trọng tâm 30-90 ngày:**\n{q_dict.get('focus', 'Nền tảng & Kỹ năng cốt lõi')}")
+                            st.markdown(f"🏁 **Cột mốc kết quả (Target Outcome):**\n{q_dict.get('target_outcome', 'Đạt chuẩn kỳ vọng')}")
             else:
-                st.caption("*(Chưa có phân kỳ Quý. Hãy chat với Architect Bot ở cột phải để tự động phân rã)*")
+                st.caption(f"*(Chưa có phân kỳ giai đoạn. Hãy chat với {domain_terms.get('role_title', 'Architect')} ở cột bên cạnh để tự động phân rã)*")
 
             # Tầng 3: Tháng
             monthly_items = safe_list(bd.get("monthly", []))
@@ -1515,7 +1546,9 @@ with tab_arch:
             if monthly_items:
                 for m_idx, m in enumerate(monthly_items, 1):
                     m_dict = safe_dict(m)
-                    st.markdown(f"- **{m_dict.get('month', f'Tháng {m_idx}')}:** {m_dict.get('milestone', '')} *(Tài liệu: {m_dict.get('resources', 'Giáo trình chuẩn')})*")
+                    m_res = m_dict.get('resources', '') or 'Định kỳ theo tuần'
+                    m_res_label = domain_terms.get('m_resources_label', 'Tài liệu')
+                    st.markdown(f"- **{m_dict.get('month', f'Tháng {m_idx}')}:** {m_dict.get('milestone', '')} *({m_res_label}: {m_res})*")
             else:
                 st.caption("*(Chưa có phân rã Tháng)*")
 
@@ -1556,30 +1589,35 @@ with tab_arch:
             # Tài nguyên chuẩn
             resources_items = safe_list(bd.get("resources", []))
             st.markdown("---")
-            st.markdown("#### 📚 Kho Tài Liệu & Công Cụ Thẩm Định (Curated Resources):")
+            curated_header = domain_terms.get('curated_title', '📚 Kho Tài Liệu & Công Cụ Thẩm Định (Curated Resources):')
+            st.markdown(f"#### {curated_header}")
             if resources_items:
                 for r_idx, r in enumerate(resources_items, 1):
                     r_dict = safe_dict(r)
-                    r_title = r_dict.get("title", f"Tài liệu {r_idx}")
+                    r_title = r_dict.get("title", f"Tài nguyên {r_idx}")
                     r_url = r_dict.get("url", "#")
-                    r_type = r_dict.get("type", "Giáo trình")
-                    r_how = r_dict.get("how_to_use", "Học tập và làm bài tập theo khung giờ đã định.")
+                    r_type = r_dict.get("type", "Tài liệu")
+                    r_how = r_dict.get("how_to_use", "Áp dụng theo lịch trình đã định.")
+                    how_label = domain_terms.get('how_to_use_label', 'Hướng dẫn khai thác')
                     with st.container(border=True):
                         st.markdown(f"🔗 **[{r_title}]({r_url})** `[{r_type}]`")
-                        st.caption(f"💡 *Hướng dẫn khai thác:* {r_how}")
+                        st.caption(f"💡 *{how_label}:* {r_how}")
             else:
-                st.caption("*(Chưa có tài liệu. Chat với Architect Bot để tự động tìm kiếm bộ đề và giáo trình uy tín)*")
+                empty_cap = domain_terms.get('curated_empty_caption', '*(Chưa có tài liệu)*')
+                st.caption(empty_cap)
 
     with col_chat_arch:
-        arch_title = f"💬 Trò Chuyện Cùng Strategy Architect: {selected_goal_name}" if ('selected_goal_name' in locals() and selected_goal_name) else "💬 Trò Chuyện Cùng Strategy Architect"
+        chat_header = domain_terms.get('chat_title', '💬 Trò Chuyện Cùng Strategy Architect')
+        arch_title = f"{chat_header}: {selected_goal_name}" if ('selected_goal_name' in locals() and selected_goal_name) else chat_header
         st.markdown(f"#### {arch_title}")
-        st.caption("Thảo luận phương pháp • Tinh chỉnh chiến lược • Chốt lộ trình 4 tầng khép kín")
+        st.caption(domain_terms.get('chat_caption', 'Thảo luận phương pháp • Tinh chỉnh chiến lược • Chốt lộ trình 4 tầng khép kín'))
 
         # Hiển thị phương pháp chiến lược đang định hình (nếu có)
         current_strat = (selected_goal.get("strategy_summary", "") if ('selected_goal' in locals() and selected_goal) else "").strip()
         if current_strat:
+            strat_label = domain_terms.get('strategy_label', '💡 Phương pháp chiến lược (Kim chỉ nam):')
             with st.container(border=True):
-                st.markdown("💡 **Phương pháp chiến lược (Kim chỉ nam):**")
+                st.markdown(f"**{strat_label}**")
                 st.info(current_strat)
 
         chat_container_arch = st.container(height=450)
@@ -1591,11 +1629,12 @@ with tab_arch:
         # Nút Chốt phương pháp & Tự động phân rã 4 tầng (Quy trình 2 Nhịp)
         target_gid = selected_goal.get("id") if ('selected_goal' in locals() and selected_goal) else None
         btn_strat_key = f"btn_finalize_strat_{target_gid or current_username}"
-        if st.button("🚀 Chốt phương pháp & Tự động phân rã 4 tầng", key=btn_strat_key, type="primary", use_container_width=True):
-            with st.spinner("AI Strategy Architect đang phân rã lộ trình 4 tầng theo phương pháp đã chốt..."):
+        finalize_btn_text = domain_terms.get('finalize_btn', '🚀 Chốt phương pháp & Tự động phân rã 4 tầng')
+        if st.button(finalize_btn_text, key=btn_strat_key, type="primary", use_container_width=True):
+            with st.spinner(f"{domain_terms.get('role_title', 'AI Strategy Architect')} đang phân rã lộ trình 4 tầng theo phương pháp đã chốt..."):
                 if architect_chat is not None:
                     res = architect_chat(
-                        user_message="Hãy chốt phương pháp chiến lược trên và tự động phân rã đầy đủ lộ trình 4 tầng cho mục tiêu này!",
+                        user_message=f"Hãy chốt phương pháp chiến lược trên và tự động xuất bản lộ trình 4 tầng cho mục tiêu {selected_goal_name}!",
                         username=current_username,
                         goal_id=target_gid,
                         chat_history=st.session_state[chat_arch_key],
@@ -1604,14 +1643,14 @@ with tab_arch:
                     arch_rep = res.get("response", "Đã chốt phương pháp và phân rã lộ trình 4 tầng thành công!")
                 else:
                     arch_rep = "Hệ thống đang đồng bộ kết nối AI. Vui lòng thử lại sau giây lát."
-                st.session_state[chat_arch_key].append({"role": "user", "content": "🚀 Chốt phương pháp & Tự động phân rã 4 tầng"})
+                st.session_state[chat_arch_key].append({"role": "user", "content": finalize_btn_text})
                 st.session_state[chat_arch_key].append({"role": "assistant", "content": arch_rep})
                 st.session_state[goals_key] = load_user_goals(current_username)
                 st.toast("🎉 Đã xuất bản Lộ trình 4 Tầng thành công!")
                 st.rerun()
 
         if arch_input := st.chat_input(
-            "Thảo luận phương pháp, tinh chỉnh chiến lược hoặc gõ 'chốt phương pháp'...",
+            domain_terms.get('input_placeholder', "Thảo luận phương pháp, tinh chỉnh chiến lược hoặc gõ 'chốt phương pháp'..."),
             key=f"input_arch_{current_username}",
         ):
             st.session_state[chat_arch_key].append({"role": "user", "content": arch_input})
@@ -1619,7 +1658,7 @@ with tab_arch:
                 with st.chat_message("user"):
                     st.markdown(arch_input)
                 with st.chat_message("assistant"):
-                    with st.spinner("Strategy Architect đang phân tích chiến lược & tài liệu chuẩn..."):
+                    with st.spinner(f"{domain_terms.get('role_title', 'Strategy Architect')} đang phân tích chiến lược & tài nguyên..."):
                         if architect_chat is not None:
                             res = architect_chat(
                                 user_message=arch_input,

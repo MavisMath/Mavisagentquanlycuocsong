@@ -55,6 +55,8 @@ __all__ = [
     "append_insight",
     "get_historical_insights_summary_text",
     "init_user_tree",
+    "detect_goal_domain",
+    "DOMAIN_TERMINOLOGY",
 ]
 
 LEDGER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "goals_ledger.json")
@@ -97,6 +99,214 @@ CATEGORY_TO_ROOT = {
 DEFAULT_CATEGORIES = ROOT_NODES
 CATEGORY_LABELS = ROOT_LABELS
 DEFAULT_USER = "mavis"
+
+# ==============================================================================
+# HỆ THỐNG PHÂN LOẠI LĨNH VỰC & TỪ ĐIỂN THUẬT NGỮ CHUYÊN BIỆT (DOMAIN-AWARE PERSONA)
+# ==============================================================================
+
+DOMAIN_TERMINOLOGY = {
+    "health": {
+        "domain_name": "Sức khỏe & Thể chất",
+        "role_title": "Chuyên Gia Thể Lực & Dinh Dưỡng Cấp Cao (Senior Fitness & Nutrition Architect)",
+        "chat_title": "💬 Trò Chuyện Cùng Chuyên Gia Thể Lực & Dinh Dưỡng",
+        "chat_caption": "Tư vấn chế độ dinh dưỡng • Giáo án tập luyện khoa học • Chốt lộ trình thể chất 4 tầng",
+        "input_placeholder": "Thảo luận thực đơn, lịch tập luyện, thâm hụt calo hoặc gõ 'chốt phương pháp'...",
+        "finalize_btn": "🚀 Chốt phương pháp & Xuất bản lộ trình rèn luyện 4 tầng",
+        "strategy_label": "🥗 Nguyên tắc Dinh dưỡng & Tập luyện cốt lõi (Kim chỉ nam):",
+        "q_label": "🏆 Giai đoạn rèn luyện (Quý)",
+        "m_resources_label": "Chế độ dinh dưỡng & giáo án",
+        "curated_title": "🥗 Thực Đơn Dinh Dưỡng & Giáo Án Rèn Luyện Thẩm Định (Curated Resources):",
+        "curated_empty_caption": "*(Chưa có tài liệu. Hãy chat với Chuyên Gia Thể Lực & Dinh Dưỡng để lên thực đơn calo và giáo án bài tập chuẩn)*",
+        "how_to_use_label": "Chỉ dẫn áp dụng",
+        "energy_deep": "🔴 Bài tập trọng tâm / Kháng lực (High Intensity)",
+        "energy_shallow": "🟡 Vận động nhẹ / Cardio Zone 2 / Chuẩn bị bữa ăn (Low Impact / Meal Prep)",
+        "energy_recharge": "🟢 Giãn cơ / Phục hồi / Giấc ngủ (Recovery / Sleep)",
+        "opening_greeting": (
+            "Chào **{name}**! Tôi là **Chuyên Gia Thể Lực & Dinh Dưỡng Cấp Cao** phụ trách mục tiêu **{goal_title}**.\n\n"
+            "Tôi sẽ đồng hành cùng bạn thiết kế chế độ dinh dưỡng chuẩn khoa học (tính toán thâm hụt calo, macro cân bằng) "
+            "kết hợp giáo án tập luyện tối ưu (kháng lực duy trì cơ bắp & cardio Zone 2 đốt mỡ thừa).\n\n"
+            "👉 Hãy cho tôi biết cân nặng, thể trạng hiện tại hoặc gõ *'Bạn đề xuất phương pháp cho tôi'* để tôi lên chiến lược dinh dưỡng & tập luyện 3 giai đoạn chi tiết nhất!"
+        ),
+        "prohibited_terms": [
+            "giờ học", "giáo trình", "quá tải nhận thức", "deep work", "ôn thi",
+            "bài tập về nhà", "giải đề", "học viên", "sách giáo khoa", "ôn tập"
+        ],
+        "preferred_terms": [
+            "lịch tập luyện", "buổi tập", "chế độ dinh dưỡng", "thực đơn ăn uống",
+            "thâm hụt calo", "bài tập kháng lực", "cardio zone 2", "phục hồi cơ bắp",
+            "calo in / calo out", "intermittent fasting", "protein", "vóc dáng"
+        ],
+    },
+    "language": {
+        "domain_name": "Ngoại ngữ & Ngôn ngữ",
+        "role_title": "Kiến Trúc Sư Chiến Lược Ngoại Ngữ (Senior Language Roadmap Architect)",
+        "chat_title": "💬 Trò Chuyện Cùng Kiến Trúc Sư Ngoại Ngữ",
+        "chat_caption": "Tư vấn phương pháp học • Chọn lọc giáo trình & đề thi chuẩn • Chốt lộ trình 4 tầng",
+        "input_placeholder": "Thảo luận giáo trình, phương pháp học, luyện đề hoặc gõ 'chốt phương pháp'...",
+        "finalize_btn": "🚀 Chốt phương pháp & Tự động phân rã 4 tầng",
+        "strategy_label": "💡 Phương pháp & Chiến lược học tập (Kim chỉ nam):",
+        "q_label": "🏆 Phân kỳ chiến lược (Quý)",
+        "m_resources_label": "Giáo trình & bộ đề",
+        "curated_title": "📚 Kho Giáo Trình & Bộ Đề Thẩm Định (Curated Resources):",
+        "curated_empty_caption": "*(Chưa có giáo trình. Hãy chat với Architect Bot để tự động trích xuất bộ đề thi thử và tài liệu chính thống)*",
+        "how_to_use_label": "Hướng dẫn học & luyện tập",
+        "energy_deep": "🔴 Deep Work (Tập trung nhận thức cao độ / Luyện đề chuẩn)",
+        "energy_shallow": "🟡 Shallow Work (Ôn từ vựng / Flashcard / Shadowing nhẹ)",
+        "energy_recharge": "🟢 Recharge (Nghe Podcast thụ động / Thư giãn phục hồi)",
+        "opening_greeting": (
+            "Chào **{name}**! Tôi là **Kiến Trúc Sư Chiến Lược Ngoại Ngữ** phụ trách mục tiêu **{goal_title}**.\n\n"
+            "Tôi sẽ giúp bạn thiết kế lộ trình ôn luyện 4 tầng, chọn lọc giáo trình chuẩn quốc tế và phương pháp học ngắt quãng (Spaced Repetition & Active Recall) hiệu quả nhất.\n\n"
+            "👉 Hãy cho tôi biết trình độ xuất phát điểm của bạn hoặc gõ *'Bạn đề xuất phương pháp cho tôi'* để tôi lên kế hoạch chi tiết!"
+        ),
+        "prohibited_terms": [],
+        "preferred_terms": ["giờ học", "giáo trình", "lộ trình ôn luyện", "bài tập thực hành", "tài liệu chuẩn", "đề thi chuẩn"],
+    },
+    "tech_study": {
+        "domain_name": "Kỹ thuật & Công nghệ",
+        "role_title": "Kiến Trúc Sư Lộ Trình Kỹ Thuật (Senior Tech & Engineering Architect)",
+        "chat_title": "💬 Trò Chuyện Cùng Kiến Trúc Sư Kỹ Thuật",
+        "chat_caption": "Định hướng kiến trúc công nghệ • Dự án thực chiến • Chốt lộ trình 4 tầng",
+        "input_placeholder": "Thảo luận tech stack, đồ án thực chiến, giải thuật hoặc gõ 'chốt phương pháp'...",
+        "finalize_btn": "🚀 Chốt phương pháp & Tự động phân rã 4 tầng",
+        "strategy_label": "💡 Kiến trúc công nghệ & Phương pháp thực chiến (Kim chỉ nam):",
+        "q_label": "🏆 Cột mốc kiến trúc & Sản phẩm (Quý)",
+        "m_resources_label": "Tài liệu kỹ thuật & Kho mã nguồn",
+        "curated_title": "💻 Tài Liệu Kỹ Thuật, Repo Mẫu & Công Cụ (Curated Resources):",
+        "curated_empty_caption": "*(Chưa có tài nguyên. Chat với Architect Bot để tự động đề xuất tài liệu chuẩn và repo mẫu)*",
+        "how_to_use_label": "Hướng dẫn thực hành dự án",
+        "energy_deep": "🔴 Deep Work (Lập trình kiến trúc / Debug / Thuật toán chuyên sâu)",
+        "energy_shallow": "🟡 Shallow Work (Đọc doc / Xem demo / Refactor code nhỏ)",
+        "energy_recharge": "🟢 Recharge (Đi bộ thư giãn mắt / Giãn cơ / Nghe podcast tech)",
+        "opening_greeting": (
+            "Chào **{name}**! Tôi là **Kiến Trúc Sư Lộ Trình Kỹ Thuật** phụ trách mục tiêu **{goal_title}**.\n\n"
+            "Tôi sẽ giúp bạn cấu trúc lộ trình từ nền tảng đến dự án thực chiến (Project-based Learning), tối ưu tech stack và nhịp Deep Work hiệu quả.\n\n"
+            "👉 Bạn muốn tôi đề xuất lộ trình kỹ thuật hay bạn đã có sẵn đồ án thực hành?"
+        ),
+        "prohibited_terms": [],
+        "preferred_terms": ["khung giờ code tập trung", "dự án thực chiến", "kiến trúc hệ thống", "tài liệu kỹ thuật", "giải thuật & tối ưu"],
+    },
+    "career_finance": {
+        "domain_name": "Sự nghiệp & Tài chính",
+        "role_title": "Cố Vấn Chiến Lược Sự Nghiệp & Thực Thi (Executive Strategy Advisor)",
+        "chat_title": "💬 Trò Chuyện Cùng Cố Vấn Chiến Lược Sự Nghiệp",
+        "chat_caption": "Chiến lược hành động • Quản trị KPI & nguồn lực • Chốt lộ trình thực thi 4 tầng",
+        "input_placeholder": "Thảo luận KPI, nguồn lực, tối ưu doanh thu hoặc gõ 'chốt phương pháp'...",
+        "finalize_btn": "🚀 Chốt phương pháp & Xuất bản lộ trình thực thi 4 tầng",
+        "strategy_label": "💼 Chiến lược thực thi & Quản trị nguồn lực (Kim chỉ nam):",
+        "q_label": "🏆 Cột mốc KPI & Doanh số (Quý)",
+        "m_resources_label": "Công cụ & mẫu biểu điều hành",
+        "curated_title": "💼 Bộ Công Cụ, Mẫu Biểu & Tài Nguyên Thực Thi (Curated Resources):",
+        "curated_empty_caption": "*(Chưa có tài nguyên. Chat với Cố Vấn Chiến Lược để thiết lập bộ công cụ quản trị KPI)*",
+        "how_to_use_label": "Quy trình ứng dụng",
+        "energy_deep": "🔴 Deep Work (Chiến lược cấp cao / Đàm phán / Xây dựng hệ thống)",
+        "energy_shallow": "🟡 Shallow Work (Gửi email / Họp nhanh / Cập nhật báo cáo KPI)",
+        "energy_recharge": "🟢 Recharge (Đi bộ tái tạo năng lượng / Thiền / Giấc ngủ chất lượng)",
+        "opening_greeting": (
+            "Chào **{name}**! Tôi là **Cố Vấn Chiến Lược Sự Nghiệp & Thực Thi** phụ trách mục tiêu **{goal_title}**.\n\n"
+            "Tôi sẽ cùng bạn phân rã mục tiêu thành các cột mốc KPI bàn giao đo lường được, tối ưu hóa khung giờ làm việc và nguồn lực thực thi.\n\n"
+            "👉 Bạn muốn tôi đề xuất chiến lược thực thi hay bạn đã có sẵn kế hoạch cần tối ưu?"
+        ),
+        "prohibited_terms": [],
+        "preferred_terms": ["khung giờ làm việc", "hạng mục công việc", "tài nguyên/công cụ", "KPI/cột mốc"],
+    },
+    "general": {
+        "domain_name": "Phát triển cá nhân",
+        "role_title": "Trưởng Kiến Trúc Sư Chiến Lược (Senior Strategy Architect)",
+        "chat_title": "💬 Trò Chuyện Cùng Strategy Architect",
+        "chat_caption": "Thảo luận phương pháp • Tinh chỉnh chiến lược • Chốt lộ trình 4 tầng khép kín",
+        "input_placeholder": "Thảo luận phương pháp, tinh chỉnh chiến lược hoặc gõ 'chốt phương pháp'...",
+        "finalize_btn": "🚀 Chốt phương pháp & Tự động phân rã 4 tầng",
+        "strategy_label": "💡 Phương pháp chiến lược (Kim chỉ nam):",
+        "q_label": "🏆 Phân kỳ chiến lược (Quý)",
+        "m_resources_label": "Tài liệu & nguồn lực",
+        "curated_title": "📚 Kho Tài Liệu & Công Cụ Thẩm Định (Curated Resources):",
+        "curated_empty_caption": "*(Chưa có tài liệu. Chat với Architect Bot để tự động tìm kiếm công cụ và tài liệu uy tín)*",
+        "how_to_use_label": "Hướng dẫn khai thác",
+        "energy_deep": "🔴 Deep Work (Tập trung nhận thức cao độ)",
+        "energy_shallow": "🟡 Shallow Work (Nhiệm vụ bổ trợ nhẹ nhàng)",
+        "energy_recharge": "🟢 Recharge (Phục hồi nhận thức & thể chất)",
+        "opening_greeting": (
+            "Chào **{name}**! Tôi là **Strategy & Resource Architect** phụ trách mục tiêu **{goal_title}**.\n\n"
+            "Tôi chịu trách nhiệm phân rã mục tiêu thành lộ trình 4 tầng (**Năm ➔ Quý ➔ Tháng ➔ Tuần**) và thẩm định tài nguyên thực thi chuẩn mực.\n\n"
+            "👉 Bạn có muốn tôi đề xuất phương pháp tiếp cận tối ưu nhất cho mục tiêu này không?"
+        ),
+        "prohibited_terms": [],
+        "preferred_terms": ["khung giờ tập trung", "lộ trình thực thi", "tài nguyên chuẩn", "tiêu chí hoàn thành"],
+    },
+}
+
+
+def detect_goal_domain(
+    goal_data: Optional[Dict[str, Any]] = None,
+    goal_title: str = "",
+    category: str = "",
+) -> str:
+    """
+    Tự động nhận diện lĩnh vực chuyên biệt của mục tiêu dựa trên title, goal_name và category.
+    Trả về một trong các nhóm:
+    - 'health': Sức khỏe, Thể chất, Giảm cân, Thể hình, Dinh dưỡng, Chạy bộ.
+    - 'language': Ngoại ngữ, IELTS, TOEIC, HSK, Tiếng Trung, Tiếng Nhật, Tiếng Hàn.
+    - 'tech_study': Lập trình, Kỹ thuật, AI, Data Science, Thuật toán, Software.
+    - 'career_finance': Sự nghiệp, Tài chính, Kinh doanh, Dự án, Doanh số, Khởi nghiệp.
+    - 'general': Mục tiêu phát triển tổng quát khác.
+    """
+    g = goal_data or {}
+    t_str = str(goal_title or g.get("title") or g.get("goal_name", "")).strip().lower()
+    c_str = str(category or g.get("category", "")).strip().lower()
+    combined = f"{t_str} {c_str}"
+
+    # 1. Nhóm Sức khỏe / Thể chất / Giảm cân / Dinh dưỡng
+    health_keywords = [
+        "giảm cân", "giam can", "tăng cân", "tang can", "calo", "calorie", "calories",
+        "thể chất", "the chat", "sức khỏe", "suc khoe", "chạy bộ", "chay bo", "marathon",
+        "gym", "fitness", "dinh dưỡng", "dinh duong", "thực đơn", "thuc don", "eat clean",
+        "cân nặng", "can nang", "tập luyện", "tap luyen", "cardio", "kháng lực", "khang luc",
+        "giãn cơ", "gian co", "yoga", "body fat", "siết cơ", "siet co", "tăng cơ", "tang co",
+        "vận động", "van dong", "thể thao", "the thao", "bơi lội", "đạp xe", "nhịn ăn",
+        "fasting", "weight loss", "workout", "giảm mỡ", "giam mo", "bụng", "eo"
+    ]
+    if re.search(r"\b\d+\s*kg\b", combined) or any(k in combined for k in health_keywords):
+        return "health"
+    if c_str in ["health", "sức khỏe", "thể chất", "sức khỏe & thể chất", "beauty", "sắc vóc & làm đẹp", "thể hình"]:
+        return "health"
+
+    # 2. Nhóm Ngoại ngữ / Ngôn ngữ
+    language_keywords = [
+        "tiếng", "tieng", "ielts", "toeic", "toefl", "hsk", "jlpt", "topik", "ngoại ngữ",
+        "ngoai ngu", "ngôn ngữ", "ngon ngu", "ngữ pháp", "ngu phap", "từ vựng", "tu vung",
+        "phát âm", "phat am", "nghe nói", "giao tiếp tiếng", "speaking", "listening",
+        "reading", "writing", "english", "chinese", "japanese", "korean", "vocab"
+    ]
+    if any(k in combined for k in language_keywords):
+        return "language"
+    if c_str in ["ngoại ngữ", "ngôn ngữ", "language"]:
+        return "language"
+
+    # 3. Nhóm Kỹ thuật / Lập trình / Công nghệ
+    tech_keywords = [
+        "lập trình", "lap trinh", "developer", "coding", "code", "python", "java", "javascript",
+        "typescript", "react", "backend", "frontend", "fullstack", "data science", "ai",
+        "machine learning", "deep learning", "thuật toán", "thuat toan", "cấu trúc dữ liệu",
+        "leetcode", "devops", "cloud", "aws", "docker", "kubernetes", "khoa học máy tính",
+        "công nghệ thông tin", "software", "api", "database", "sql"
+    ]
+    if any(k in combined for k in tech_keywords):
+        return "tech_study"
+
+    # 4. Nhóm Sự nghiệp / Tài chính / Dự án
+    career_keywords = [
+        "tài chính", "tai chinh", "sự nghiệp", "su nghiep", "kinh doanh", "doanh thu", "doanh so",
+        "tiết kiệm", "tiet kiem", "đầu tư", "dau tu", "dự án", "du an", "startup", "khởi nghiệp",
+        "khoi nghiep", "kpi", "sales", "marketing", "khách hàng", "thăng tiến", "tăng lương",
+        "tài sản", "thu nhập", "lợi nhuận"
+    ]
+    if any(k in combined for k in career_keywords):
+        return "career_finance"
+    if c_str in ["career", "sự nghiệp", "tài chính", "finance", "business"]:
+        return "career_finance"
+
+    return "general"
+
 
 
 def get_blank_tree() -> Dict[str, Any]:

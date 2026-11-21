@@ -6,6 +6,8 @@ from memory.goals import (
     load_user_goals,
     save_user_goals,
     delete_user_goal,
+    detect_goal_domain,
+    DOMAIN_TERMINOLOGY,
 )
 from agents.brain import (
     ceo_coach_chat,
@@ -31,6 +33,100 @@ class TestArchitectAndImports(unittest.TestCase):
         self.assertIsInstance(sched, list)
         self.assertTrue(callable(ceo_coach_chat))
         self.assertTrue(callable(architect_chat))
+
+    def test_detect_goal_domain(self):
+        """Kiểm tra nhận diện lĩnh vực chuyên biệt (Domain-Aware Detection)."""
+        self.assertEqual(detect_goal_domain(goal_title="Giảm 15kg trong 90 ngày", category="Sức khỏe"), "health")
+        self.assertEqual(detect_goal_domain(goal_title="Tập gym tăng 3kg cơ bắp"), "health")
+        self.assertEqual(detect_goal_domain(goal_title="Chạy bộ Half Marathon 21km"), "health")
+        self.assertEqual(detect_goal_domain(goal_title="IELTS 7.5 trong 3 tháng", category="Ngoại ngữ"), "language")
+        self.assertEqual(detect_goal_domain(goal_title="Chinh phục HSK 5", category="Học tập"), "language")
+        self.assertEqual(detect_goal_domain(goal_title="Học lập trình Python & Backend FastAPI"), "tech_study")
+        self.assertEqual(detect_goal_domain(goal_title="Tăng doanh số bán hàng 200%", category="Kinh doanh"), "career_finance")
+        self.assertEqual(detect_goal_domain(goal_title="Đọc 20 cuốn sách"), "general")
+
+    def test_health_domain_consultation_no_prohibited_terms(self):
+        """Kiểm tra Architect Bot tư vấn sức khỏe: không dùng từ học thuật, không hỏi câu duyệt mục tiêu."""
+        test_goal = {
+            "id": f"goal_{uuid.uuid4().hex[:6]}",
+            "title": "Giảm 15kg trong 90 ngày",
+            "category": "Sức khỏe",
+            "priority": "P1 - Urgent",
+            "preferred_time": "06:00 - 07:30 Sáng",
+            "daily_hours": 1.5,
+            "duration_days": 90,
+            "status": "evaluating",
+            "strategy_summary": "",
+            "breakdown": {},
+        }
+        save_user_goals([test_goal], username=self.test_username)
+
+        # User hỏi: Bạn đề xuất phương pháp cho tôi
+        res = architect_chat(
+            user_message="Bạn đề xuất phương pháp cho tôi để giảm 15kg trong 90 ngày",
+            username=self.test_username,
+            goal_id=test_goal["id"],
+        )
+
+        resp_text = res.get("response", "").lower()
+        self.assertIn("response", res)
+        self.assertFalse(res.get("is_breakdown", True))
+
+        # 1. Tuyệt đối không hỏi lại câu thẩm định
+        self.assertNotIn("chính thức đưa mục tiêu này vào cuộc đời", resp_text)
+        self.assertNotIn("bạn có muốn tôi chính thức", resp_text)
+
+        # 2. Phải có từ vựng thể lực & dinh dưỡng
+        has_fitness_terms = any(t in resp_text for t in ["dinh dưỡng", "calo", "thâm hụt", "tập luyện", "kháng lực", "cardio"])
+        self.assertTrue(has_fitness_terms, f"Phản hồi không chứa thuật ngữ dinh dưỡng & tập luyện: {resp_text[:200]}")
+
+        # 3. Tuyệt đối cấm từ học thuật / thi cử
+        prohibited = ["giờ học", "giáo trình", "quá tải nhận thức", "deep work", "ôn thi", "học viên", "sách giáo khoa"]
+        found_prohibited = [p for p in prohibited if p in resp_text]
+        self.assertEqual(found_prohibited, [], f"Phản hồi chứa từ cấm cho lĩnh vực sức khỏe: {found_prohibited}")
+
+    def test_health_domain_breakdown_stages_and_energy(self):
+        """Kiểm tra phân rã 4 tầng cho sức khỏe: Quý thể hiện rõ 30-90 ngày, nhãn năng lượng bài tập."""
+        test_goal = {
+            "id": f"goal_{uuid.uuid4().hex[:6]}",
+            "title": "Giảm 15kg trong 90 ngày",
+            "category": "Sức khỏe",
+            "priority": "P1 - Urgent",
+            "preferred_time": "06:00 - 07:30 Sáng",
+            "daily_hours": 1.5,
+            "duration_days": 90,
+            "status": "evaluating",
+            "strategy_summary": "Dinh dưỡng thâm hụt 500 kcal kết hợp tập kháng lực và Cardio Zone 2.",
+            "breakdown": {},
+        }
+        save_user_goals([test_goal], username=self.test_username)
+
+        res = architect_chat(
+            user_message="Chốt phương pháp và tự động phân rã 4 tầng",
+            username=self.test_username,
+            goal_id=test_goal["id"],
+            force_breakdown=True,
+        )
+
+        self.assertTrue(res.get("is_breakdown"))
+        bd = res.get("breakdown", {})
+
+        # Tầng 2: Quý phải thể hiện rõ giai đoạn / cột mốc kết quả
+        quarterly = bd.get("quarterly", [])
+        self.assertTrue(len(quarterly) > 0)
+        q1 = quarterly[0]
+        self.assertTrue(len(q1.get("focus", "")) > 0)
+        self.assertTrue(len(q1.get("target_outcome", "")) > 0)
+
+        # Tầng 4: Tuần phải có task với nhãn bài tập / không chứa 'Deep Work'
+        weekly = bd.get("weekly", [])
+        self.assertTrue(len(weekly) > 0)
+        w1_tasks = weekly[0].get("tasks", [])
+        if w1_tasks:
+            t1 = w1_tasks[0]
+            self.assertIn("energy_level", t1)
+            # Nhãn năng lượng không nên là Deep Work trần trụi
+            self.assertNotEqual(t1.get("energy_level"), "🔴 Deep Work")
 
     def test_architect_chat_stage1_consultation(self):
         """Kiểm tra Nhịp 1: Thảo luận chiến lược & lưu strategy_summary vào MongoDB."""
