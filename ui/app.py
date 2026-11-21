@@ -11,7 +11,7 @@ except Exception:
 import json
 import uuid
 import urllib.parse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import List, Dict, Any, Optional
 
 # Đảm bảo đường dẫn import tương thích khi chạy streamlit từ mọi thư mục (Local, Docker, Streamlit Cloud)

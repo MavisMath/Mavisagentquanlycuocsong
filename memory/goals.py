@@ -3,7 +3,7 @@ import os
 import json
 import uuid
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import List, Dict, Any, Optional
 
 from memory.mongodb import (
