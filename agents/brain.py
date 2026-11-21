@@ -3477,10 +3477,27 @@ class UncompletedTaskReason(BaseModel):
     specific_bottleneck: str = Field(description="Điểm nghẽn cụ thể")
 
 
+class HistoricalPatternAnalysis(BaseModel):
+    frequent_missed_slots: List[str] = Field(
+        default=[],
+        description="Các khung giờ hoặc buổi thường xuyên bị trễ/bỏ lỡ nhất trong 7 ngày qua (VD: '19:30 - 21:30 Tối')"
+    )
+    overwhelming_resource_types: List[str] = Field(
+        default=[],
+        description="Các dạng tài liệu hoặc task gây ngợp/quá tải (VD: 'Tài liệu hàn lâm tiếng Anh > 50 trang', 'Video lý thuyết dài > 2h')"
+    )
+    key_observations: str = Field(
+        default="",
+        description="Nhận định quy luật sinh học và nhịp độ năng lượng của người dùng đúc kết từ lịch sử 7 ngày"
+    )
+
+
 class ProposedBreakdownAdjustment(BaseModel):
     target_goal_id: Optional[str] = Field(None, description="ID mục tiêu cần điều chỉnh lại trong goals.breakdown")
-    adjustment_type: str = Field(description="'reduce_daily_hours', 'extend_duration', 'simplify_weekly_actions', 'add_foundation_resource', hoặc 'keep_as_is'")
+    target_goal_title: Optional[str] = Field(None, description="Tên mục tiêu cần điều chỉnh")
+    adjustment_type: str = Field(description="'reduce_daily_hours', 'reschedule_time_slot', 'simplify_resources', 'extend_duration', hoặc 'keep_as_is'")
     recommended_daily_hours: Optional[float] = Field(None, description="Số giờ mới đề xuất nếu bị quá tải")
+    recommended_preferred_time: Optional[str] = Field(None, description="Khung giờ mới đề xuất nếu khung giờ cũ hay bị bỏ lỡ (VD: '08:00 - 10:00 Sáng')")
     recommended_resource_additions: List[Dict[str, str]] = Field(default=[], description="Tài liệu bổ trợ dễ hơn nếu task quá khó")
     adjustment_explanation: str = Field(description="Lý do điều chỉnh chiến lược")
 
@@ -3488,6 +3505,7 @@ class ProposedBreakdownAdjustment(BaseModel):
 class RetrospectiveChatOutput(BaseModel):
     detected_emotion: str = Field(description="'motivated', 'overwhelmed', 'tired', 'neutral', 'satisfied', hoặc 'discouraged'")
     completion_rate: float = Field(description="Tỷ lệ hoàn thành ước tính (0.0 đến 100.0%)")
+    pattern_analysis: HistoricalPatternAnalysis = Field(description="Phân tích nhận diện quy luật lịch sử 7 ngày gần nhất")
     uncompleted_tasks_analysis: List[UncompletedTaskReason] = Field(description="Phân tích chi tiết từng task chưa hoàn thành và lý do")
     coaching_reflection: str = Field(description="Lời trò chuyện khai vấn (Socratic reflection) thấu cảm, khích lệ tinh thần và định hướng phục hồi")
     proposed_adjustment: ProposedBreakdownAdjustment = Field(description="Đề xuất điều chỉnh ngược lại goals.breakdown")
@@ -3501,18 +3519,40 @@ def retrospective_chat(
 ) -> Dict[str, Any]:
     """
     Hàm Chatbot 4: Retrospective Chat (Chuyên trách Giai đoạn 3).
-    Sử dụng gemini-2.5-flash để khai vấn thấu cảm và phân tích nguyên nhân gốc rễ.
-    Phân tích các task chưa 'is_done' từ master_schedule, hỏi thăm cảm xúc / nguyên nhân,
-    lưu check-in log vào retrospective_logs và sinh đề xuất điều chỉnh ngược lại goals.breakdown (khép kín vòng lặp).
+    Sử dụng gemini-2.5-flash để khai vấn thấu cảm và phân tích quy luật lịch sử 7 ngày gần nhất.
+    Phân tích các task chưa 'is_done' từ master_schedule, tự động nhận diện quy luật (khung giờ hay bỏ lỡ,
+    tài liệu gây ngợp), lưu check-in log vào retrospective_logs và sinh đề xuất điều chỉnh ngược lại goals.breakdown.
     """
     username = (username or "mavis").strip().lower()
     master_schedule = load_master_schedule(username)
     goals = load_user_goals(username)
+    recent_logs = load_retrospective_logs(username)[-7:]
 
     done_tasks = [t for t in master_schedule if t.get("is_done") is True]
     uncompleted_tasks = [t for t in master_schedule if t.get("is_done") is False]
     total_count = len(master_schedule) if master_schedule else 1
     actual_rate = (len(done_tasks) / total_count) * 100.0
+
+    # 1. Thống kê quy luật khung giờ hay bị bỏ lỡ
+    slot_stats = {}
+    overwhelming_candidates = set()
+    for t in master_schedule:
+        slot = t.get("time_slot") or t.get("session") or "Khung giờ khác"
+        if slot not in slot_stats:
+            slot_stats[slot] = {"total": 0, "missed": 0}
+        slot_stats[slot]["total"] += 1
+        if t.get("is_done") is False:
+            slot_stats[slot]["missed"] += 1
+            r_title = t.get("resource_title") or ""
+            r_url = t.get("resource_url") or ""
+            if "youtube.com" in r_url or "sách" in r_title.lower() or "giáo trình" in r_title.lower() or "coursera" in r_url.lower():
+                overwhelming_candidates.add(r_title or "Tài liệu lý thuyết dài")
+
+    missed_slot_summaries = [
+        f"{s}: trượt {d['missed']}/{d['total']} task (tỷ lệ trễ {(d['missed']/d['total'])*100:.0f}%)"
+        for s, d in slot_stats.items()
+        if d["missed"] > 0
+    ]
 
     uncompleted_sample = [
         {"task_detail": t.get("task_detail"), "goal_title": t.get("goal_title"), "date": t.get("date"), "slot": t.get("time_slot")}
@@ -3520,7 +3560,7 @@ def retrospective_chat(
     ]
 
     retro_prompt = f"""Bạn là Chuyên Gia Khai Vấn Hồi Cứu & Bảo Vệ Năng Lượng (AI Retrospective Coach) của hệ thống Mavis.
-Nhiệm vụ: Chuyên trách GIAI ĐOẠN 3 — Đánh giá các task chưa hoàn thành, phân tích cảm xúc và nguyên nhân (quá khó, quá tải...), và sinh đề xuất điều chỉnh ngược lại goals.breakdown để khép kín vòng lặp điều phối.
+Nhiệm vụ: Chuyên trách GIAI ĐOẠN 3 — Đánh giá các task chưa hoàn thành, phân tích quy luật 7 ngày gần nhất (khung giờ hay bỏ lỡ, tài liệu gây ngợp), thấu cảm cảm xúc và sinh đề xuất điều chỉnh ngược lại goals.breakdown để khép kín vòng lặp điều phối.
 
 DỮ LIỆU HIỆN TẠI TỪ MASTER SCHEDULE CỦA USER:
 - Tổng số task trong lịch: {len(master_schedule)}
@@ -3528,22 +3568,36 @@ DỮ LIỆU HIỆN TẠI TỪ MASTER SCHEDULE CỦA USER:
 - Số task chưa hoàn thành (is_done=False): {len(uncompleted_tasks)}
 - Tỷ lệ hoàn thành thực tế: {actual_rate:.1f}%
 
-DANH SÁCH TASK CHƯA HOÀN THÀNH:
+THỐNG KÊ QUY LUẬT KHUNG GIỜ BỎ LỠ 7 NGÀY QUA:
+{json.dumps(missed_slot_summaries, ensure_ascii=False, indent=2) if missed_slot_summaries else "Chưa có quy luật trễ khung giờ rõ rệt."}
+
+DẤU HIỆU TÀI LIỆU CÓ THỂ GÂY NGỢP:
+{json.dumps(list(overwhelming_candidates), ensure_ascii=False, indent=2) if overwhelming_candidates else "Không phát hiện tài liệu gây ngợp rõ rệt."}
+
+DANH SÁCH TASK CHƯA HOÀN THÀNH GẦN ĐÂY:
 {json.dumps(uncompleted_sample, ensure_ascii=False, indent=2)}
 
+LỊCH SỬ CHECK-IN 7 NGÀY GẦN NHẤT:
+{json.dumps([{'date': l.get('date'), 'emotion': l.get('emotion'), 'rate': l.get('completion_rate'), 'adjustments': l.get('recommended_adjustments')} for l in recent_logs], ensure_ascii=False, indent=2)}
+
 DANH SÁCH MỤC TIÊU HIỆN CÓ:
-{json.dumps([{'id': g.get('id'), 'title': g.get('title') or g.get('goal_name'), 'daily_hours': g.get('daily_hours')} for g in goals], ensure_ascii=False, indent=2)}
+{json.dumps([{'id': g.get('id'), 'title': g.get('title') or g.get('goal_name'), 'preferred_time': g.get('preferred_time'), 'daily_hours': g.get('daily_hours')} for g in goals], ensure_ascii=False, indent=2)}
 
 CHIA SẺ / PHẢN HỒI CỦA NGƯỜI DÙNG:
 "{user_message}"
 
 CHỈ THỊ KHAI VẤN (RETROSPECTIVE PROTOCOL):
-1. Thấu cảm tuyệt đối: Không phán xét hay trách cứ. Phân tích xem nguyên nhân là do "quá tải" (quá nhiều task), "quá khó" (tài liệu vượt quá trình độ), "mệt mỏi / mất tập trung", hay "bận việc đột xuất".
-2. Sinh đề xuất điều chỉnh ngược lại goals.breakdown (Giai đoạn 1):
-   - Nếu "quá tải": Đề xuất giảm daily_hours (VD: từ 2h xuống 1.5h) và nới lỏng tuần học.
-   - Nếu "quá khó": Đề xuất bổ sung tài liệu nền tảng cơ bản hơn vào resources.
+1. Phân tích quy luật 7 ngày (pattern_analysis):
+   - Chỉ rõ các khung giờ người dùng thường xuyên bị bỏ lỡ nhất (frequent_missed_slots).
+   - Chỉ rõ loại tài liệu khiến người dùng bị ngợp hoặc bỏ cuộc (overwhelming_resource_types).
+   - Nhận định đúc kết (key_observations): Thấu hiểu nhịp sinh học và nguyên nhân gốc rễ.
+2. Thấu cảm tuyệt đối: Không phán xét. Đặt câu hỏi mở (Socratic) và công nhận nỗ lực.
+3. Sinh đề xuất điều chỉnh cụ thể (proposed_adjustment):
+   - Nếu khung giờ tối hay bị bỏ lỡ: đề xuất dời preferred_time sang khung giờ sáng hoặc chiều phù hợp hơn (VD: '08:00 - 10:00 Sáng').
+   - Nếu quá tải thời gian: đề xuất giảm daily_hours (VD: từ 2h xuống 1.5h).
+   - Nếu tài liệu quá khó/dài: đề xuất bổ sung tài liệu cơ bản, video ngắn hoặc bài viết tóm tắt vào recommended_resource_additions.
+   - Ghi rõ target_goal_id và target_goal_title.
    - Đặt should_apply_adjustment = True nếu xác định được mục tiêu cần điều chỉnh.
-3. Lời coaching_reflection: Hỏi câu hỏi mở (Socratic), công nhận những nỗ lực đã hoàn thành và khích lệ người dùng duy trì đà tiến bộ.
 """
 
     try:
@@ -3558,23 +3612,31 @@ CHỈ THỊ KHAI VẤN (RETROSPECTIVE PROTOCOL):
         )
     except Exception as e:
         print(f"Lỗi invoke trong retrospective_chat: {e}")
+        target_g = goals[0] if goals else {}
         output = RetrospectiveChatOutput(
             detected_emotion="tired",
             completion_rate=actual_rate,
+            pattern_analysis=HistoricalPatternAnalysis(
+                frequent_missed_slots=missed_slot_summaries[:2] or ["19:30 - 21:30 (Tối)"],
+                overwhelming_resource_types=["Tài liệu lý thuyết dài chuyên sâu"],
+                key_observations="Khung giờ tối muộn năng lượng suy giảm khiến các task nặng dễ bị trì hoãn.",
+            ),
             uncompleted_tasks_analysis=[
                 UncompletedTaskReason(
                     task_detail="Các task chưa kịp hoàn thành",
-                    goal_title=goals[0].get("title", "") if goals else "",
+                    goal_title=target_g.get("title", "") if target_g else "",
                     reason="quá tải hoặc bận đột xuất",
                     specific_bottleneck="Khối lượng công việc dồn ứ cuối ngày",
                 )
             ],
-            coaching_reflection="Tôi nhận thấy bạn đã rất nỗ lực nhưng lịch trình gần đây có dấu hiệu hơi quá tải. Hãy cho phép bản thân nghỉ ngơi tối nay, chúng ta sẽ điều chỉnh lại nhịp độ để bạn tiến bước bền bỉ hơn!",
+            coaching_reflection="Tôi nhận thấy bạn đã rất nỗ lực nhưng lịch trình gần đây có dấu hiệu hơi quá tải, đặc biệt vào buổi tối. Hãy cho phép bản thân nghỉ ngơi tối nay, chúng ta sẽ điều chỉnh lại nhịp độ để bạn tiến bước bền bỉ hơn!",
             proposed_adjustment=ProposedBreakdownAdjustment(
-                target_goal_id=goals[0].get("id") if goals else None,
-                adjustment_type="reduce_daily_hours",
+                target_goal_id=target_g.get("id") if target_g else None,
+                target_goal_title=target_g.get("title") or target_g.get("goal_name") if target_g else None,
+                adjustment_type="reschedule_time_slot",
                 recommended_daily_hours=1.5,
-                adjustment_explanation="Hạ tải 30 phút mỗi ngày để bảo vệ nhịp sinh học.",
+                recommended_preferred_time="08:00 - 09:30 (Sáng)",
+                adjustment_explanation="Chuyển khung giờ sang buổi sáng khi đầu óc tỉnh táo và hạ tải 30 phút mỗi ngày để bảo vệ nhịp sinh học.",
             ),
             should_apply_adjustment=True,
         )
@@ -3588,18 +3650,22 @@ CHỈ THỊ KHAI VẤN (RETROSPECTIVE PROTOCOL):
         "completion_rate": output.completion_rate,
         "completed_tasks": [t.get("task_detail") for t in done_tasks],
         "uncompleted_tasks": [u.model_dump() for u in output.uncompleted_tasks_analysis],
+        "pattern_analysis": output.pattern_analysis.model_dump(),
         "reflection_notes": output.coaching_reflection,
         "recommended_adjustments": output.proposed_adjustment.adjustment_explanation,
+        "proposed_adjustment": output.proposed_adjustment.model_dump(),
     }
     append_retrospective_log(log_entry, username=username)
 
-    # 2. Khép kín vòng lặp: Cập nhật ngược lại goals.breakdown nếu should_apply_adjustment == True
+    # 2. Khép kín vòng lặp: Cập nhật ngược lại goals nếu should_apply_adjustment == True
     if output.should_apply_adjustment and output.proposed_adjustment.target_goal_id:
         tid = output.proposed_adjustment.target_goal_id
         for g in goals:
             if g.get("id") == tid or g.get("goal_id") == tid:
-                if output.proposed_adjustment.adjustment_type == "reduce_daily_hours" and output.proposed_adjustment.recommended_daily_hours:
+                if output.proposed_adjustment.recommended_daily_hours:
                     g["daily_hours"] = float(output.proposed_adjustment.recommended_daily_hours)
+                if output.proposed_adjustment.recommended_preferred_time:
+                    g["preferred_time"] = output.proposed_adjustment.recommended_preferred_time
                 if output.proposed_adjustment.recommended_resource_additions:
                     bd = g.setdefault("breakdown", {})
                     res_list = bd.setdefault("resources", [])
@@ -3610,6 +3676,7 @@ CHỈ THỊ KHAI VẤN (RETROSPECTIVE PROTOCOL):
     return {
         "response": output.coaching_reflection,
         "completion_rate": output.completion_rate,
+        "pattern_analysis": output.pattern_analysis.model_dump(),
         "retrospective_log": log_entry,
         "proposed_adjustments": output.proposed_adjustment.model_dump(),
         "updated_goals": load_user_goals(username),

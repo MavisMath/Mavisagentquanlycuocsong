@@ -40,49 +40,28 @@ try:
 except Exception:
     pass
 
-# Dọn dẹp cache module cũ trong sys.modules khi Streamlit Cloud reload mã nguồn
 import importlib
-for _mod in ["memory.goals", "memory.auth", "memory.mongodb", "agents.brain", "agents.graph", "memory", "agents"]:
-    if _mod in sys.modules:
-        try:
-            del sys.modules[_mod]
-        except Exception:
-            pass
-importlib.invalidate_caches()
 
-from langchain_core.messages import HumanMessage, AIMessage
-
-# Khởi tạo an toàn Agent Graph với cơ chế báo lỗi trực quan trên Cloud
+# 1. Nạp an toàn module memory.mongodb
 try:
-    import agents.graph as ag
-    importlib.reload(ag)
-    build_graph = getattr(ag, "build_graph")
-    mavis_agent = getattr(ag, "mavis_agent", None) or build_graph()
-except Exception as _graph_import_err:
+    import memory.mongodb as mm
+    is_mongodb_available = getattr(mm, "is_mongodb_available", lambda: False)
+    db_update_user_state = getattr(mm, "db_update_user_state", lambda *args, **kwargs: False)
+    get_mongo_connection_error = getattr(mm, "get_mongo_connection_error", lambda: None)
+    get_mongo_uri = getattr(mm, "get_mongo_uri", lambda: None)
+except Exception as _mongo_import_err:
     import traceback
-    st.error(f"⚠️ Phát hiện cảnh báo khi khởi tạo Multi-Agent Graph: {_graph_import_err}")
-    with st.expander("Chi tiết kỹ thuật lỗi khởi tạo (Technical Traceback)"):
+    st.error(f"⚠️ Cảnh báo nạp module `memory.mongodb`: {_mongo_import_err}")
+    with st.expander("Chi tiết kỹ thuật lỗi nạp memory.mongodb"):
         st.code(traceback.format_exc())
+    def is_mongodb_available(): return False
+    def db_update_user_state(*args, **kwargs): return False
+    def get_mongo_connection_error(): return str(_mongo_import_err)
+    def get_mongo_uri(): return None
 
-    class FallbackAgent:
-        def invoke(self, state, config=None):
-            return {
-                "messages": [
-                    AIMessage(
-                        content="⚠️ Hệ thống đang đồng bộ cấu hình trên Cloud. Vui lòng kiểm tra lại API Key hoặc liên hệ Quản trị viên."
-                    )
-                ]
-            }
-
-    def build_graph(checkpointer=None):
-        return FallbackAgent()
-
-    mavis_agent = FallbackAgent()
-
-# Nạp an toàn module memory.goals với importlib.reload dọn sạch cache
+# 2. Nạp an toàn module memory.goals
 try:
     import memory.goals as mg
-    importlib.reload(mg)
 
     load_goals = getattr(mg, "load_goals")
     save_goals = getattr(mg, "save_goals")
@@ -113,6 +92,7 @@ try:
     update_user_goal_status = getattr(mg, "update_user_goal_status")
     update_user_goal_details = getattr(mg, "update_user_goal_details")
     delete_user_goal = getattr(mg, "delete_user_goal")
+    calculate_user_streak = getattr(mg, "calculate_user_streak", lambda u="mavis": 1)
 except Exception as _goals_import_err:
     import traceback
     st.error(f"⚠️ Cảnh báo nạp module `memory.goals`: {_goals_import_err}")
@@ -148,11 +128,11 @@ except Exception as _goals_import_err:
     def update_user_goal_status(*args, **kwargs): return True
     def update_user_goal_details(*args, **kwargs): return True
     def delete_user_goal(*args, **kwargs): return True
+    def calculate_user_streak(*args, **kwargs): return 1
 
-# Nạp an toàn module memory.auth với importlib.reload
+# 3. Nạp an toàn module memory.auth
 try:
     import memory.auth as ma
-    importlib.reload(ma)
     get_authenticator = getattr(ma, "get_authenticator", None)
     register_user = getattr(ma, "register_user", None)
 except Exception as _auth_import_err:
@@ -163,33 +143,14 @@ except Exception as _auth_import_err:
     get_authenticator = None
     register_user = None
 
-# Nạp an toàn module memory.mongodb với importlib.reload
-try:
-    import memory.mongodb as mm
-    importlib.reload(mm)
-    is_mongodb_available = getattr(mm, "is_mongodb_available", lambda: False)
-    db_update_user_state = getattr(mm, "db_update_user_state", lambda *args, **kwargs: False)
-    get_mongo_connection_error = getattr(mm, "get_mongo_connection_error", lambda: None)
-    get_mongo_uri = getattr(mm, "get_mongo_uri", lambda: None)
-except Exception as _mongo_import_err:
-    import traceback
-    st.error(f"⚠️ Cảnh báo nạp module `memory.mongodb`: {_mongo_import_err}")
-    with st.expander("Chi tiết kỹ thuật lỗi nạp memory.mongodb"):
-        st.code(traceback.format_exc())
-    def is_mongodb_available(): return False
-    def db_update_user_state(*args, **kwargs): return False
-    def get_mongo_connection_error(): return str(_mongo_import_err)
-    def get_mongo_uri(): return None
-
-# Nạp an toàn 4 Chatbot functions từ agents.brain với importlib.reload
+# 4. Nạp an toàn các Chatbot functions từ agents.brain
 try:
     import agents.brain as ab
-    importlib.reload(ab)
     chat_node = getattr(ab, "chat_node", None)
-    ceo_coach_chat = getattr(ab, "ceo_coach_chat")
-    architect_chat = getattr(ab, "architect_chat")
-    scheduler_chat = getattr(ab, "scheduler_chat")
-    retrospective_chat = getattr(ab, "retrospective_chat")
+    ceo_coach_chat = getattr(ab, "ceo_coach_chat", None)
+    architect_chat = getattr(ab, "architect_chat", None)
+    scheduler_chat = getattr(ab, "scheduler_chat", None)
+    retrospective_chat = getattr(ab, "retrospective_chat", None)
 except Exception as _brain_err:
     import traceback
     st.error(f"⚠️ Cảnh báo nạp các Chatbot từ `agents.brain`: {_brain_err}")
@@ -200,6 +161,34 @@ except Exception as _brain_err:
     architect_chat = None
     scheduler_chat = None
     retrospective_chat = None
+
+from langchain_core.messages import HumanMessage, AIMessage
+
+# 5. Khởi tạo an toàn Agent Graph
+try:
+    import agents.graph as ag
+    build_graph = getattr(ag, "build_graph")
+    mavis_agent = getattr(ag, "mavis_agent", None) or build_graph()
+except Exception as _graph_import_err:
+    import traceback
+    st.error(f"⚠️ Phát hiện cảnh báo khi khởi tạo Multi-Agent Graph: {_graph_import_err}")
+    with st.expander("Chi tiết kỹ thuật lỗi khởi tạo (Technical Traceback)"):
+        st.code(traceback.format_exc())
+
+    class FallbackAgent:
+        def invoke(self, state, config=None):
+            return {
+                "messages": [
+                    AIMessage(
+                        content="⚠️ Hệ thống đang đồng bộ cấu hình trên Cloud. Vui lòng kiểm tra lại API Key hoặc liên hệ Quản trị viên."
+                    )
+                ]
+            }
+
+    def build_graph(checkpointer=None):
+        return FallbackAgent()
+
+    mavis_agent = FallbackAgent()
 
 
 def safe_dict(val: Any) -> Dict[str, Any]:
@@ -1890,7 +1879,7 @@ with tab_sched:
 # ------------------------------------------------------------------------------
 with tab_retro:
     st.markdown("### 📊 Giai đoạn 3: Tổng Kết, Khai Vấn & Cải Thiện Khép Kín")
-    st.caption("Phân tích điểm nghẽn • Khai vấn thấu cảm • Bảo vệ năng lượng • Tự động thích ứng lộ trình")
+    st.caption("Phân tích quy luật 7 ngày • Khai vấn thấu cảm • Bảo vệ năng lượng • Tự động thích ứng lộ trình khép kín")
 
     col_dash_retro, col_chat_retro = st.columns([1.15, 0.85], gap="large")
 
@@ -1904,6 +1893,9 @@ with tab_retro:
         uncompleted_tasks = total_tasks - done_tasks
         rate = (done_tasks / total_tasks * 100.0) if total_tasks > 0 else 0.0
 
+        # Tính chuỗi ngày kỷ luật (Streak) thực tế từ MongoDB
+        streak = calculate_user_streak(current_username)
+
         latest_log = r_logs[-1] if r_logs else {}
         last_emotion = latest_log.get("emotion", "neutral")
         emotion_emojis = {
@@ -1916,50 +1908,124 @@ with tab_retro:
         }
         disp_emotion = emotion_emojis.get(last_emotion, f"⚡ {last_emotion}")
 
+        # Row 1: Thẻ chỉ số tổng quan (Metrics Card)
         m1, m2, m3, m4 = st.columns(4)
         with m1:
             st.metric("Tỷ Lệ Hoàn Thành", f"{rate:.1f}%")
         with m2:
-            st.metric("Task Đã Xong", f"{done_tasks}/{total_tasks}")
+            st.metric("Chuỗi Kỷ Luật", f"🔥 {streak} ngày")
         with m3:
-            st.metric("Task Chưa Xong", f"{uncompleted_tasks}")
+            st.metric("Task Đã Xong", f"{done_tasks}/{total_tasks}")
         with m4:
             st.metric("Trạng Thái Năng Lượng", disp_emotion)
 
-        st.progress(rate / 100.0)
+        st.progress(min(1.0, rate / 100.0))
 
         st.markdown("---")
-        st.markdown("#### 🔄 Cơ Chế Khép Kín Vòng Lặp (Closed-Loop Adaptation):")
-        st.caption("Khi gặp tình trạng quá tải hoặc task quá khó, hãy bấm nút dưới đây để AI tự động điều chỉnh số giờ hoặc bổ sung tài liệu cho Giai đoạn 1:")
 
-        if st.button("🔄 Cập nhật lại Thiết lập (Giai đoạn 1)", type="primary", use_container_width=True, key=f"btn_apply_loop_{current_username}"):
-            if latest_log and latest_log.get("recommended_adjustments"):
-                adj_desc = latest_log.get("recommended_adjustments")
-                for g in user_goals:
-                    if "Hạ tải" in adj_desc or "quá tải" in adj_desc or "giảm" in adj_desc.lower():
-                        old_h = float(g.get("daily_hours", 1.5))
-                        new_h = max(1.0, old_h - 0.5)
-                        g["daily_hours"] = new_h
-                save_user_goals(user_goals, username=current_username)
-                st.session_state[goals_key] = load_user_goals(current_username)
-                st.success(f"🎉 Đã cập nhật thành công thiết lập Giai đoạn 1: {adj_desc}")
-                st.rerun()
-            else:
-                st.info("💡 Bạn hãy chia sẻ phản hồi với Retrospective Coach ở cột bên phải để Coach tạo đề xuất điều chỉnh cá nhân hóa trước!")
+        # Row 2: Biểu đồ phân bổ thời gian theo nhóm mục tiêu (Giờ/Ngày)
+        st.markdown("#### 📊 Phân Bổ Thời Gian Theo Nhóm Mục Tiêu (Giờ/Ngày):")
+        cat_hours = {}
+        for g in user_goals:
+            cat_name = g.get("category") or "Khác"
+            cat_lbl = CATEGORY_LABELS.get(cat_name, cat_name)
+            dh = float(g.get("daily_hours", 1.0))
+            cat_hours[cat_lbl] = round(cat_hours.get(cat_lbl, 0.0) + dh, 1)
+
+        if cat_hours:
+            st.bar_chart(cat_hours)
+        else:
+            st.caption("Chưa có dữ liệu phân bổ mục tiêu.")
 
         st.markdown("---")
-        st.markdown("#### 🎯 Tiến Độ Từng Mục Tiêu:")
+
+        # Row 3: Tỷ Lệ % Hoàn Thành Từng Mục Tiêu
+        st.markdown("#### 🎯 Tỷ Lệ % Hoàn Thành Từng Mục Tiêu:")
         if user_goals:
             for g in user_goals:
                 g_title = g.get("title") or g.get("goal_name", "Mục tiêu")
-                g_tasks = [t for t in ms if t.get("goal_title") == g_title or t.get("goal_id") == g.get("id")]
+                g_id = g.get("id") or g.get("goal_id")
+                g_tasks = [t for t in ms if (g_id and t.get("goal_id") == g_id) or t.get("goal_title") == g_title]
                 g_done = sum(1 for t in g_tasks if t.get("is_done") is True)
                 g_total = len(g_tasks)
-                g_rate = (g_done / g_total) if g_total > 0 else 0.0
-                st.markdown(f"**{g_title}** ({g_done}/{g_total} task • {g_rate*100:.0f}%)")
-                st.progress(g_rate)
+                g_pct = (g_done / g_total * 100.0) if g_total > 0 else 0.0
+
+                col_gt, col_gp = st.columns([0.7, 0.3])
+                with col_gt:
+                    st.markdown(f"**{g_title}** ({g_done}/{g_total} task • `{g.get('preferred_time', 'Linh hoạt')}`)")
+                with col_gp:
+                    st.caption(f"Tiến độ: **{g_pct:.0f}%**")
+                st.progress(min(1.0, g_pct / 100.0))
         else:
-            st.caption("Chưa có mục tiêu nào.")
+            st.caption("Chưa có mục tiêu nào trong hệ thống.")
+
+        st.markdown("---")
+
+        # Row 4: Phân Tích Quy Luật 7 Ngày (7-Day Pattern Recognition)
+        st.markdown("#### 🔍 Nhận Diện Quy Luật 7 Ngày Gần Nhất (Pattern Analysis):")
+        pattern_data = latest_log.get("pattern_analysis") if isinstance(latest_log.get("pattern_analysis"), dict) else {}
+        missed_slots = pattern_data.get("frequent_missed_slots", [])
+        overwhelm_res = pattern_data.get("overwhelming_resource_types", [])
+        observations = pattern_data.get("key_observations", "")
+
+        if missed_slots or overwhelm_res or observations:
+            with st.container(border=True):
+                if missed_slots:
+                    st.markdown(f"⏰ **Khung giờ hay bị bỏ lỡ nhất:** `{' • '.join(missed_slots)}`")
+                if overwhelm_res:
+                    st.markdown(f"📚 **Tài liệu/Nhiệm vụ có dấu hiệu gây ngợp:** `{' • '.join(overwhelm_res)}`")
+                if observations:
+                    st.info(f"💡 **Đúc kết từ Coach:** {observations}")
+        else:
+            st.caption("Chưa đủ dữ liệu 7 ngày để đúc kết quy luật. Hãy tiếp tục check-in hàng ngày cùng Retrospective Coach!")
+
+        st.markdown("---")
+
+        # Row 5: Nút Khép Kín Vòng Lặp Gọi Architect Bot Cập Nhật Lại Giai Đoạn 1
+        st.markdown("#### 🔄 Cơ Chế Khép Kín Vòng Lặp (Closed-Loop Adaptation):")
+        st.caption("Khi gặp tình trạng quá tải hoặc task quá khó, hãy bấm nút dưới đây để hệ thống tự động gọi **Architect Bot** điều chỉnh lại khung giờ hoặc giảm tải tài liệu trực tiếp trên MongoDB:")
+
+        if st.button("🔄 Áp dụng điều chỉnh ngược lại Thiết lập (Giai đoạn 1)", type="primary", use_container_width=True, key=f"btn_apply_loop_{current_username}"):
+            if latest_log and (latest_log.get("recommended_adjustments") or latest_log.get("proposed_adjustment")):
+                adj_desc = latest_log.get("recommended_adjustments", "")
+                prop_adj = latest_log.get("proposed_adjustment") or {}
+                target_gid = prop_adj.get("target_goal_id")
+                target_title = prop_adj.get("target_goal_title") or ""
+                rec_hours = prop_adj.get("recommended_daily_hours")
+                rec_time = prop_adj.get("recommended_preferred_time")
+
+                if not target_gid and user_goals:
+                    target_gid = user_goals[0].get("id") or user_goals[0].get("goal_id")
+                    target_title = user_goals[0].get("title") or user_goals[0].get("goal_name", "")
+
+                with st.spinner("Đang kích hoạt Architect Bot để đồng bộ điều chỉnh ngược lại Giai đoạn 1 lên MongoDB..."):
+                    if architect_chat is not None:
+                        adjust_cmd = (
+                            f"Áp dụng điều chỉnh chiến lược từ Giai đoạn 3 cho mục tiêu '{target_title}': "
+                            f"{adj_desc}. Khung giờ đề xuất: {rec_time or '08:00 - 10:00 Sáng'}. "
+                            f"Thời lượng đề xuất: {rec_hours or 1.5} giờ/ngày. Hãy tái cấu trúc lại lộ trình cho phù hợp!"
+                        )
+                        arch_res = architect_chat(
+                            user_message=adjust_cmd,
+                            goal_id=target_gid,
+                            username=current_username,
+                        )
+                    else:
+                        # Fallback nếu Architect Bot chưa sẵn sàng
+                        for g in user_goals:
+                            if g.get("id") == target_gid or g.get("goal_id") == target_gid:
+                                if rec_hours:
+                                    g["daily_hours"] = float(rec_hours)
+                                if rec_time:
+                                    g["preferred_time"] = rec_time
+                        save_user_goals(user_goals, username=current_username)
+
+                st.session_state[goals_key] = load_user_goals(current_username)
+                st.session_state[master_schedule_key] = load_master_schedule(current_username)
+                st.success(f"🎉 Đã kích hoạt Architect Bot điều chỉnh thành công mục tiêu '{target_title}' trên MongoDB: {adj_desc}")
+                st.rerun()
+            else:
+                st.info("💡 Bạn hãy chia sẻ phản hồi với Retrospective Coach ở cột bên phải để Coach tạo đề xuất điều chỉnh cá nhân hóa trước!")
 
         st.markdown("---")
         st.markdown("#### 📜 Lịch Sử Nhật Ký Khai Vấn Hồi Cứu (Retrospective Logs):")
@@ -1979,7 +2045,7 @@ with tab_retro:
 
     with col_chat_retro:
         st.markdown("#### 💬 Trò Chuyện Cùng Retrospective Coach")
-        st.caption("Check-in cuối ngày • Lắng nghe cảm xúc • Phân tích nguyên nhân (quá khó, quá tải...)")
+        st.caption("Check-in cuối ngày • Lắng nghe cảm xúc • Nhận diện quy luật 7 ngày • Đề xuất điều chỉnh")
 
         chat_container_retro = st.container(height=520)
         with chat_container_retro:
@@ -1996,7 +2062,7 @@ with tab_retro:
                 with st.chat_message("user"):
                     st.markdown(retro_input)
                 with st.chat_message("assistant"):
-                    with st.spinner("Retrospective Coach đang lắng nghe và phân tích nguyên nhân..."):
+                    with st.spinner("Retrospective Coach đang phân tích dữ liệu 7 ngày và nhận diện quy luật..."):
                         if retrospective_chat is not None:
                             res = retrospective_chat(
                                 user_message=retro_input,

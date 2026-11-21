@@ -3,7 +3,7 @@ import os
 import json
 import uuid
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 
 from memory.mongodb import (
@@ -42,6 +42,7 @@ __all__ = [
     "update_user_goal_status",
     "update_user_goal_details",
     "delete_user_goal",
+    "calculate_user_streak",
 ]
 
 LEDGER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "goals_ledger.json")
@@ -901,6 +902,54 @@ def get_user_state_full(username: str = "mavis") -> Dict[str, Any]:
         "roadmap": {},
         "user_profile": {},
     }
+
+
+def calculate_user_streak(username: str = "mavis") -> int:
+    """Tính chuỗi ngày duy trì kỷ luật (Streak) liên tiếp từ MongoDB master_schedule và retrospective_logs."""
+    username = (username or DEFAULT_USER).strip().lower()
+    master_schedule = load_master_schedule(username)
+    retrospective_logs = load_retrospective_logs(username)
+
+    active_dates = set()
+    for t in master_schedule:
+        if isinstance(t, dict) and t.get("is_done") is True:
+            d_str = str(t.get("date", "")).strip()
+            if d_str:
+                active_dates.add(d_str)
+
+    for l in retrospective_logs:
+        if isinstance(l, dict):
+            d_str = str(l.get("date", "")).strip()
+            if d_str:
+                active_dates.add(d_str)
+
+    if not active_dates:
+        return 1
+
+    parsed_dates = []
+    for d in active_dates:
+        try:
+            parsed_dates.append(datetime.strptime(d[:10], "%Y-%m-%d").date())
+        except Exception:
+            pass
+
+    if not parsed_dates:
+        return max(1, len(active_dates))
+
+    parsed_dates = sorted(list(set(parsed_dates)), reverse=True)
+    today = datetime.now().date()
+    yesterday = today - timedelta(days=1)
+
+    if parsed_dates[0] not in [today, yesterday]:
+        return 1
+
+    streak = 1
+    for i in range(len(parsed_dates) - 1):
+        if (parsed_dates[i] - parsed_dates[i + 1]).days == 1:
+            streak += 1
+        else:
+            break
+    return streak
 
 
 def load_categorized_goals(username: str = "mavis") -> Dict[str, Any]:
