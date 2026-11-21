@@ -72,9 +72,15 @@ class TestRealDateAxisAndDetailedSchedule(unittest.TestCase):
         self.assertTrue(any(k in workout_tk["task_detail"].lower() for k in ["chạy bộ", "kháng lực", "push-up", "zone 2"]))
 
     def test_ensure_schedule_covers_date(self):
-        """Kiểm tra tự động sinh dữ liệu khi user chọn ngày chưa có trong lịch."""
+        """Kiểm tra: không tự sinh lịch khi không có active goal, và tự động sinh dữ liệu khi có active goal."""
         target_d = date(2026, 12, 15)
-        sched = ensure_schedule_covers_date(target_d, active_goals=[], username=self.test_username)
+        # 1. Khi active_goals rỗng: không sinh lịch mẫu
+        empty_sched = ensure_schedule_covers_date(target_d, active_goals=[], username=self.test_username)
+        self.assertFalse(any(t.get("date") == "2026-12-15" for t in empty_sched))
+
+        # 2. Khi có active goal: tự động sinh dữ liệu phủ kín tuần chứa target_d
+        mock_active_goals = [{"id": "g_test", "title": "Giảm 15kg trong 90 ngày", "status": "active"}]
+        sched = ensure_schedule_covers_date(target_d, active_goals=mock_active_goals, username=self.test_username)
         self.assertTrue(any(t.get("date") == "2026-12-15" for t in sched))
 
     def test_convert_task_to_datetime_range_iso(self):
@@ -107,6 +113,14 @@ class TestRealDateAxisAndDetailedSchedule(unittest.TestCase):
         self.assertEqual(len(updated_sched), 1)
         self.assertEqual(updated_sched[0]["date"], "2026-11-22")
         self.assertEqual(updated_sched[0]["day_name"], "Chủ Nhật")
+
+    def test_empty_goals_behavior(self):
+        """Kiểm tra: Khi không có goal active, generate_detailed_master_schedule và ensure_schedule_covers_date trả về rỗng."""
+        res = generate_detailed_master_schedule(active_goals=[], num_days=7)
+        self.assertEqual(res, [])
+
+        sched = ensure_schedule_covers_date(date(2026, 11, 25), active_goals=[], username="user_without_goals")
+        self.assertEqual(sched, [])
 
 
 if __name__ == "__main__":

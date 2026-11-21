@@ -3898,6 +3898,14 @@ def scheduler_chat(
 
     existing_schedule = load_master_schedule(username)
 
+    if not active_goals:
+        return {
+            "response": "Bạn chưa có mục tiêu nào đang kích hoạt (Active). Hãy thiết lập và chốt phương pháp mục tiêu ở Giai đoạn 1 trước nhé!",
+            "schedule": existing_schedule or [],
+            "rescheduled_tasks": [],
+            "is_rescheduled": False,
+        }
+
     active_summary = []
     for g in active_goals:
         bd = g.get("breakdown", {})

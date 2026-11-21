@@ -870,6 +870,8 @@ def generate_detailed_master_schedule(
         start_dt = get_vietnam_today()
 
     clean_goals = [g for g in active_goals if isinstance(g, dict)]
+    if not clean_goals:
+        return []
 
     # Thực đơn Bữa 1 theo thứ (12:00 - 12:30)
     meal1_plans = {
@@ -1092,6 +1094,9 @@ def ensure_schedule_covers_date(
         active_goals = [g for g in all_goals if g.get("status") == "active"]
         if not active_goals:
             active_goals = [g for g in all_goals if g.get("status") not in ("paused", "completed")]
+
+    if not active_goals:
+        return current_schedule or []
 
     # Bắt đầu sinh từ thứ Hai của tuần chứa target_date
     monday_of_week = target_date - timedelta(days=target_date.weekday())
