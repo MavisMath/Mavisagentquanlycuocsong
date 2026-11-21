@@ -1,6 +1,7 @@
 # Mavis Executive Multi-Agent Brain - Build 2026.11.21-v2
 import os
 import json
+import uuid
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
