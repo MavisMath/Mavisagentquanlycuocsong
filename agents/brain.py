@@ -2886,6 +2886,7 @@ def ceo_coach_chat(
     user_message: str,
     username: str = "mavis",
     chat_history: Optional[List[Dict[str, str]]] = None,
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     """
     Hàm Chatbot 1: CEO Coach Chat (Trò chuyện tổng & Thẩm định tính khả thi).
@@ -3127,15 +3128,24 @@ def architect_chat(
     goal_id: Optional[str] = None,
     chat_history: Optional[List[Dict[str, str]]] = None,
     force_breakdown: bool = False,
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     """
     Hàm Chatbot 2: Strategy Architect (Chuyên trách Giai đoạn 1).
     Quy trình 2 Nhịp:
     - Nhịp 1 (Tư vấn chiến lược & phương pháp tổng): Phân tích bối cảnh theo lĩnh vực, đề xuất 2-3 phương pháp tiếp cận tối ưu,
       thảo luận tinh chỉnh và lưu strategy_summary vào MongoDB.
-    - Nhịp 2 (Xuất bản Lộ trình 4 Tầng từ phương pháp đã chốt): Khi user bấm nút hoặc nhắn 'chốt phương pháp',
+    - Nhịp 2 (Xuất bản Lộ trình 4 Tầng từ phương pháp đã chốt): Khi force_breakdown=True hoặc khi user bấm nút / nhắn 'chốt phương pháp',
       AI phân rã 4 tầng (Yearly -> Quarterly -> Monthly -> Weekly) kèm nhãn năng lượng (🔴/🟡/🟢), 1-Click tài liệu và DoD.
     """
+    if "force_breakdown" in kwargs and kwargs["force_breakdown"] is not None:
+        force_breakdown = bool(kwargs["force_breakdown"])
+    if not goal_id and kwargs.get("goal_id"):
+        goal_id = kwargs.get("goal_id")
+    if not username and kwargs.get("username"):
+        username = kwargs.get("username")
+    if not chat_history and kwargs.get("chat_history"):
+        chat_history = kwargs.get("chat_history")
     username = (username or "mavis").strip().lower()
     goals = load_user_goals(username)
 
@@ -3755,6 +3765,7 @@ def scheduler_chat(
     user_message: str,
     username: str = "mavis",
     chat_history: Optional[List[Dict[str, str]]] = None,
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     """
     Hàm Chatbot 3: Scheduler Chat (Chuyên trách Giai đoạn 2).
@@ -3928,6 +3939,7 @@ def retrospective_chat(
     user_message: str,
     username: str = "mavis",
     chat_history: Optional[List[Dict[str, str]]] = None,
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     """
     Hàm Chatbot 4: Retrospective Chat (Chuyên trách Giai đoạn 3).

@@ -12,6 +12,8 @@ from memory.goals import (
 from agents.brain import (
     ceo_coach_chat,
     architect_chat,
+    scheduler_chat,
+    retrospective_chat,
 )
 
 
@@ -203,6 +205,40 @@ class TestArchitectAndImports(unittest.TestCase):
             t1 = w1["tasks"][0]
             self.assertIn("energy_level", t1)
             self.assertIn("definition_of_done", t1)
+
+    def test_kwargs_resilience_and_force_breakdown(self):
+        """Bảo đảm architect_chat nhận force_breakdown=True và **kwargs mà không dính TypeError."""
+        test_goal = {
+            "id": f"goal_{uuid.uuid4().hex[:6]}",
+            "title": "Học Lập trình React & Next.js",
+            "category": "Kỹ thuật",
+            "priority": "P2 - High",
+            "preferred_time": "20:00 - 21:30 Tối",
+            "daily_hours": 1.5,
+            "duration_days": 60,
+            "status": "evaluating",
+            "strategy_summary": "Project-based Learning xây dựng dự án Full-Stack thực tế.",
+            "breakdown": {},
+        }
+        save_user_goals([test_goal], username=self.test_username)
+
+        # 1. Gọi architect_chat với force_breakdown=True kèm extra kwargs
+        res = architect_chat(
+            user_message="Bắt đầu phân rã lộ trình",
+            username=self.test_username,
+            goal_id=test_goal["id"],
+            chat_history=[],
+            force_breakdown=True,
+            extra_dummy_arg="test_val",
+        )
+        self.assertIn("response", res)
+        self.assertTrue(res.get("is_breakdown"))
+        self.assertIn("breakdown", res)
+
+        # 2. Bảo đảm callable signatures của các chat bots khác cũng chấp nhận **kwargs
+        self.assertTrue(callable(ceo_coach_chat))
+        self.assertTrue(callable(scheduler_chat))
+        self.assertTrue(callable(retrospective_chat))
 
 
 if __name__ == "__main__":

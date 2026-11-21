@@ -2116,6 +2116,7 @@ with tab_retro:
                             user_message=adjust_cmd,
                             goal_id=target_gid,
                             username=current_username,
+                            force_breakdown=True,
                         )
                     else:
                         # Fallback nếu Architect Bot chưa sẵn sàng
