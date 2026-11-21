@@ -1592,6 +1592,42 @@ with tab_sched:
         ms = safe_list(st.session_state.get(master_schedule_key) or load_master_schedule(current_username))
         user_goals_sched = safe_list(st.session_state.get(goals_key) or load_user_goals(current_username))
 
+        # ----------------------------------------------------------------------
+        # 1. THANH CHỌN CHẾ ĐỘ VẬN HÀNH HÔM NAY (TÁI CẤU TRÚC ĐỘNG THEO NĂNG LƯỢNG)
+        # ----------------------------------------------------------------------
+        energy_mode_key = f"energy_mode_{current_username}"
+        if energy_mode_key not in st.session_state:
+            st.session_state[energy_mode_key] = "🚀 Chiến Thần (100%)"
+
+        st.markdown("#### 🔋 Chế Độ Vận Hành Hôm Nay:")
+        col_em1, col_em2, col_em3 = st.columns(3)
+        with col_em1:
+            is_active_100 = (st.session_state[energy_mode_key] == "🚀 Chiến Thần (100%)")
+            if st.button("🚀 Chiến Thần (100%)", key=f"btn_em_100_{current_username}", type="primary" if is_active_100 else "secondary", use_container_width=True):
+                st.session_state[energy_mode_key] = "🚀 Chiến Thần (100%)"
+                st.rerun()
+        with col_em2:
+            is_active_30 = (st.session_state[energy_mode_key] == "🛡️ Duy Trì Tối Thiểu (30% - Khi mệt/bận)")
+            if st.button("🛡️ Duy Trì Tối Thiểu (30%)", key=f"btn_em_30_{current_username}", type="primary" if is_active_30 else "secondary", use_container_width=True):
+                st.session_state[energy_mode_key] = "🛡️ Duy Trì Tối Thiểu (30% - Khi mệt/bận)"
+                st.rerun()
+        with col_em3:
+            is_active_rec = (st.session_state[energy_mode_key] == "🔄 Xả Hơi (Recovery)")
+            if st.button("🔄 Xả Hơi (Recovery)", key=f"btn_em_rec_{current_username}", type="primary" if is_active_rec else "secondary", use_container_width=True):
+                st.session_state[energy_mode_key] = "🔄 Xả Hơi (Recovery)"
+                st.rerun()
+
+        cur_energy_mode = st.session_state[energy_mode_key]
+
+        if cur_energy_mode == "🚀 Chiến Thần (100%)":
+            st.success("⚡ **Chế độ Chiến Thần (100%):** Vận hành toàn bộ công suất theo đúng lịch trình chuẩn của nhịp sinh học.")
+        elif cur_energy_mode == "🛡️ Duy Trì Tối Thiểu (30% - Khi mệt/bận)":
+            st.warning("🛡️ **Chế độ Duy Trì Tối Thiểu (30%):** Đã tự động lọc chỉ giữ lại tối đa 3 task nhẹ nhàng nhất trong ngày để giữ streak kỷ luật. Các task 🔴 Deep Work đã tự động trượt sang ngày mai mà không ghi nhận trễ hạn.")
+        else:
+            st.info("🛌 **Chế độ Xả Hơi (Recovery):** Tạm gác toàn bộ task học tập & deep work để hệ thần kinh nghỉ ngơi, chỉ hiển thị checklist hồi phục năng lượng.")
+
+        st.markdown("---")
+
         paused_goal_ids = set(str(g.get("id")) for g in user_goals_sched if str(g.get("status", "")).lower() == "paused")
         paused_goal_titles = set(str(g.get("title") or g.get("goal_name")) for g in user_goals_sched if str(g.get("status", "")).lower() == "paused")
 
@@ -1607,94 +1643,212 @@ with tab_sched:
         if paused_goal_titles:
             st.info(f"⏸️ **{len(paused_goal_titles)} mục tiêu đang tạm dừng:** {', '.join(paused_goal_titles)}. Các khung giờ tương ứng tạm thời không chiếm lịch.")
 
-        mode = st.radio(
-            "Chế độ hiển thị lịch:",
-            options=["🌐 Lịch Tổng Hợp Tất Cả Mục Tiêu (Master Schedule)", "🎯 Xem Lịch Riêng Theo Từng Mục Tiêu"],
-            horizontal=True,
-            key=f"sched_mode_{current_username}",
-        )
+        # Xử lý theo từng chế độ
+        if cur_energy_mode == "🔄 Xả Hơi (Recovery)":
+            st.markdown("#### 🌿 Checklist Phục Hồi & Tái Tạo Năng Lượng (Active Recovery Protocol):")
+            recovery_items = [
+                {
+                    "slot": "07:30 - 08:30",
+                    "title": "Uống 500ml nước ấm & đón ánh sáng mặt trời tự nhiên 15 phút",
+                    "energy": "🟢 Recharge",
+                    "dod": "Kích hoạt nhịp cortisol tự nhiên, bù nước sau đêm dài và đánh thức đồng hồ sinh học.",
+                    "link": "https://hubermanlab.com",
+                    "res_title": "Huberman Protocol: Tối ưu ánh sáng & nhịp sinh học",
+                },
+                {
+                    "slot": "12:30 - 13:00",
+                    "title": "Nghỉ trưa ngắn (Power Nap) 20 phút & thư giãn hoàn toàn không điện thoại",
+                    "energy": "🟢 Recharge",
+                    "dod": "Thả lỏng cơ thể, hạ nhịp tim, giải phóng adenosine tích tụ trong não bộ.",
+                    "link": "",
+                    "res_title": "",
+                },
+                {
+                    "slot": "17:30 - 18:15",
+                    "title": "Đi bộ ngoài trời 30 - 40 phút trong không gian xanh (Zone 2 Cardio nhẹ)",
+                    "energy": "🟢 Recharge",
+                    "dod": "Đạt 4.000 - 5.000 bước chân nhịp nhàng, hít thở sâu, không nghe nội dung áp lực.",
+                    "link": "",
+                    "res_title": "",
+                },
+                {
+                    "slot": "21:30 - 22:30",
+                    "title": "Tắt toàn bộ màn hình xanh, ngâm chân nước ấm và đi ngủ trước 22:30",
+                    "energy": "🟢 Recharge",
+                    "dod": "Ngủ đủ 7.5 - 8 tiếng trong phòng thoáng mát, tối hoàn toàn để não bộ dọn dẹp độc tố.",
+                    "link": "https://sleepfoundation.org",
+                    "res_title": "Sleep Foundation: Khoa học giấc ngủ sâu phục hồi nhận thức",
+                },
+            ]
 
-        filtered_schedule = active_schedule
-        if mode == "🎯 Xem Lịch Riêng Theo Từng Mục Tiêu":
-            unique_goals = list(set(t.get("goal_title", "Mục tiêu") for t in active_schedule if t.get("goal_title")))
-            if unique_goals:
-                chosen_g = st.selectbox("Chọn mục tiêu cụ thể:", options=unique_goals, key=f"sel_ms_goal_{current_username}")
-                filtered_schedule = [t for t in active_schedule if t.get("goal_title") == chosen_g]
-            else:
-                st.info("Chưa có mục tiêu nào trong lịch.")
+            for r_idx, r_item in enumerate(recovery_items):
+                r_key = f"chk_rec_{current_username}_{r_idx}"
+                r_done = bool(st.session_state.get(r_key, False))
+                with st.container(border=True):
+                    col_r_chk, col_r_info = st.columns([0.08, 0.92])
+                    with col_r_chk:
+                        new_r_done = st.checkbox("", value=r_done, key=r_key, label_visibility="collapsed")
+                        if new_r_done != r_done:
+                            st.session_state[r_key] = new_r_done
+                            st.toast(f"✅ Hoàn thành: {r_item['title'][:35]}...")
+                            st.rerun()
+                    with col_r_info:
+                        st.markdown(f"**{r_item['energy']}** &nbsp;|&nbsp; ⏰ **{r_item['slot']}** — **{r_item['title']}**")
+                        if new_r_done:
+                            st.caption("✅ :green[**Đã hoàn thành xuất sắc!**]")
+                        st.caption(f"🏁 **Tiêu chí hoàn thành (DoD):** {r_item['dod']}")
+                        if r_item.get("link"):
+                            st.link_button(f"📦 Mở Tài Liệu: {r_item['res_title']}", url=r_item["link"])
 
-        st.markdown("---")
-        # Nút xuất lịch
-        c_ics, c_gcal = st.columns(2)
-        with c_ics:
-            ics_text = generate_ics_from_master_schedule(filtered_schedule, current_username)
-            st.download_button(
-                label="📥 Tải File Lịch (.ics) Cho Google / Apple / Outlook",
-                data=ics_text,
-                file_name=f"mavis_master_schedule_{current_username}.ics",
-                mime="text/calendar",
-                use_container_width=True,
-            )
-        with c_gcal:
-            first_task = filtered_schedule[0] if filtered_schedule else {}
-            gcal_link = generate_gcal_link(
-                first_task.get("task_detail", "Học tập cùng Mavis"),
-                first_task.get("time_slot", "08:00 - 10:00"),
-                duration_minutes=90,
-                resource_info=first_task.get("resource_link", ""),
-            )
-            st.link_button("🌐 Mở Google Calendar (Thêm Sự Kiện 1 Chạm)", url=gcal_link, use_container_width=True)
-
-        st.markdown("---")
-        st.markdown("#### 📋 Checklist Thực Thi Tương Tác Hàng Ngày:")
-
-        if not filtered_schedule:
-            st.info(
-                "💡 Chưa có lịch trình. Bạn hãy chat với **AI Master Scheduler** ở cột bên phải "
-                "(ví dụ: *'Hãy gom tất cả active goals để xếp lịch tuần này cho tôi'*) để tạo lịch ngay lập tức!"
-            )
         else:
-            days_order = []
-            for t in filtered_schedule:
-                d = t.get("date", "Hôm nay")
-                if d not in days_order:
-                    days_order.append(d)
+            mode = st.radio(
+                "Chế độ hiển thị lịch:",
+                options=["🌐 Lịch Tổng Hợp Tất Cả Mục Tiêu (Master Schedule)", "🎯 Xem Lịch Riêng Theo Từng Mục Tiêu"],
+                horizontal=True,
+                key=f"sched_mode_{current_username}",
+            )
 
-            for d in days_order:
-                day_tasks = [t for t in filtered_schedule if t.get("date") == d]
-                done_day = sum(1 for t in day_tasks if t.get("is_done") is True)
-                total_day = len(day_tasks)
+            filtered_schedule = active_schedule
+            if mode == "🎯 Xem Lịch Riêng Theo Từng Mục Tiêu":
+                unique_goals = list(set(t.get("goal_title", "Mục tiêu") for t in active_schedule if t.get("goal_title")))
+                if unique_goals:
+                    chosen_g = st.selectbox("Chọn mục tiêu cụ thể:", options=unique_goals, key=f"sel_ms_goal_{current_username}")
+                    filtered_schedule = [t for t in active_schedule if t.get("goal_title") == chosen_g]
+                else:
+                    st.info("Chưa có mục tiêu nào trong lịch.")
 
-                with st.expander(f"📅 **{d}** — Tiến độ: {done_day}/{total_day} hoàn thành", expanded=(done_day < total_day)):
-                    for sess in ["Sáng", "Chiều", "Tối"]:
-                        sess_tasks = [t for t in day_tasks if t.get("session") == sess]
-                        if sess_tasks:
-                            st.markdown(f"##### ⏰ Buổi {sess}:")
-                            for idx, task in enumerate(sess_tasks):
-                                t_detail = task.get("task_detail", "Nhiệm vụ")
-                                t_slot = task.get("time_slot", "08:00 - 10:00")
-                                t_goal = task.get("goal_title", "")
-                                t_link = task.get("resource_link", "")
-                                is_done_val = bool(task.get("is_done", False))
+            st.markdown("---")
+            # Nút xuất lịch
+            c_ics, c_gcal = st.columns(2)
+            with c_ics:
+                ics_text = generate_ics_from_master_schedule(filtered_schedule, current_username)
+                st.download_button(
+                    label="📥 Tải File Lịch (.ics) Cho Google / Apple / Outlook",
+                    data=ics_text,
+                    file_name=f"mavis_master_schedule_{current_username}.ics",
+                    mime="text/calendar",
+                    use_container_width=True,
+                )
+            with c_gcal:
+                first_task = filtered_schedule[0] if filtered_schedule else {}
+                gcal_link = generate_gcal_link(
+                    first_task.get("task_detail", "Học tập cùng Mavis"),
+                    first_task.get("time_slot", "08:00 - 10:00"),
+                    duration_minutes=90,
+                    resource_info=first_task.get("resource_url") or first_task.get("resource_link", ""),
+                )
+                st.link_button("🌐 Mở Google Calendar (Thêm Sự Kiện 1 Chạm)", url=gcal_link, use_container_width=True)
 
-                                chk_key = f"chk_{current_username}_{d}_{sess}_{idx}_{abs(hash(t_detail)) % 100000}"
-                                label = f"**{t_slot}** — {t_detail} `[🎯 {t_goal}]`" if t_goal else f"**{t_slot}** — {t_detail}"
-                                checked = st.checkbox(label, value=is_done_val, key=chk_key)
+            st.markdown("---")
+            st.markdown("#### 📋 Checklist Thực Thi Tương Tác Hàng Ngày:")
 
-                                if checked != is_done_val:
-                                    update_master_schedule_task_status(
-                                        task_detail=t_detail,
-                                        is_done=checked,
-                                        date=d,
-                                        username=current_username,
-                                    )
-                                    task["is_done"] = checked
-                                    st.session_state[master_schedule_key] = load_master_schedule(current_username)
-                                    st.toast(f"✅ Đã cập nhật: {t_detail[:35]}...")
-                                    st.rerun()
+            if not filtered_schedule:
+                st.info(
+                    "💡 Chưa có lịch trình. Bạn hãy chat với **AI Master Scheduler** ở cột bên phải "
+                    "(ví dụ: *'Hãy gom tất cả active goals để xếp lịch tuần này cho tôi'*) để tạo lịch ngay lập tức!"
+                )
+            else:
+                days_order = []
+                for t in filtered_schedule:
+                    d = t.get("date", "Hôm nay")
+                    if d not in days_order:
+                        days_order.append(d)
 
-                                if t_link:
-                                    st.caption(f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;📖 *Tài liệu:* [{t_link}]({t_link})")
+                for d in days_order:
+                    day_tasks = [t for t in filtered_schedule if t.get("date") == d]
+                    deferred_tasks = []
+                    displayed_tasks = day_tasks
+
+                    # Nếu ở Chế độ Duy trì tối thiểu (30%), lọc giữ lại tối đa 3 task nhẹ nhất
+                    if cur_energy_mode == "🛡️ Duy Trì Tối Thiểu (30% - Khi mệt/bận)":
+                        light_tasks = []
+                        heavy_tasks = []
+                        for t in day_tasks:
+                            e_str = str(t.get("energy_level", "")).lower()
+                            if "shallow" in e_str or "recharge" in e_str or "🟡" in e_str or "🟢" in e_str:
+                                light_tasks.append(t)
+                            else:
+                                heavy_tasks.append(t)
+
+                        if len(light_tasks) >= 3:
+                            displayed_tasks = light_tasks[:3]
+                            deferred_tasks = heavy_tasks + light_tasks[3:]
+                        else:
+                            needed = 3 - len(light_tasks)
+                            displayed_tasks = light_tasks + heavy_tasks[:needed]
+                            deferred_tasks = heavy_tasks[needed:]
+
+                    done_day = sum(1 for t in displayed_tasks if t.get("is_done") is True)
+                    total_day = len(displayed_tasks)
+
+                    with st.expander(f"📅 **{d}** — Tiến độ: {done_day}/{total_day} hoàn thành", expanded=(done_day < total_day)):
+                        for sess in ["Sáng", "Chiều", "Tối"]:
+                            sess_tasks = [t for t in displayed_tasks if t.get("session") == sess]
+                            if sess_tasks:
+                                st.markdown(f"##### ⏰ Buổi {sess}:")
+                                for idx, task in enumerate(sess_tasks):
+                                    t_detail = task.get("task_detail", "Nhiệm vụ")
+                                    t_slot = task.get("time_slot", "08:00 - 10:00")
+                                    t_goal = task.get("goal_title", "")
+                                    t_link = task.get("resource_url") or task.get("resource_link", "")
+                                    t_res_title = task.get("resource_title", "")
+                                    is_done_val = bool(task.get("is_done", False))
+
+                                    # Nhãn năng lượng
+                                    t_energy = task.get("energy_level")
+                                    if not t_energy:
+                                        if sess == "Sáng":
+                                            t_energy = "🔴 Deep Work"
+                                        elif sess == "Chiều":
+                                            t_energy = "🟡 Shallow Work"
+                                        else:
+                                            t_energy = "🟢 Recharge"
+
+                                    # Tiêu chí hoàn thành (DoD)
+                                    t_dod = task.get("definition_of_done")
+                                    if not t_dod:
+                                        t_dod = f"Hoàn thành trọn vẹn nội dung '{t_detail}' và ghi chú tiến độ."
+
+                                    chk_key = f"chk_{current_username}_{d}_{sess}_{idx}_{abs(hash(t_detail)) % 100000}"
+
+                                    with st.container(border=True):
+                                        col_chk, col_card = st.columns([0.08, 0.92])
+                                        with col_chk:
+                                            checked = st.checkbox("", value=is_done_val, key=chk_key, label_visibility="collapsed")
+                                            if checked != is_done_val:
+                                                update_master_schedule_task_status(
+                                                    task_identifier=t_detail,
+                                                    is_done=checked,
+                                                    date=d,
+                                                    username=current_username,
+                                                )
+                                                task["is_done"] = checked
+                                                st.session_state[master_schedule_key] = load_master_schedule(current_username)
+                                                st.toast(f"✅ Đã cập nhật: {t_detail[:35]}...")
+                                                st.rerun()
+                                        with col_card:
+                                            if t_goal:
+                                                st.markdown(f"**{t_energy}** &nbsp;|&nbsp; ⏰ **{t_slot}** — **{t_detail}** `[🎯 {t_goal}]`")
+                                            else:
+                                                st.markdown(f"**{t_energy}** &nbsp;|&nbsp; ⏰ **{t_slot}** — **{t_detail}**")
+
+                                            if is_done_val:
+                                                st.caption("✅ :green[**Đã hoàn thành!**]")
+
+                                            st.caption(f"🏁 **Tiêu chí hoàn thành (DoD):** {t_dod}")
+
+                                            if t_link:
+                                                btn_lbl = f"📦 Mở Tài Liệu: {t_res_title}" if (t_res_title and len(t_res_title) < 35) else "📦 Mở Tài Liệu Thực Tế (1-Click)"
+                                                st.link_button(label=btn_lbl, url=t_link, use_container_width=False)
+
+                        if deferred_tasks:
+                            st.markdown("---")
+                            with st.expander(f"💤 {len(deferred_tasks)} task Deep Work đã tự động trượt sang ngày mai (Bảo toàn Streak, không tính trễ):", expanded=False):
+                                for dt in deferred_tasks:
+                                    dt_title = dt.get("task_detail", "Nhiệm vụ")
+                                    dt_slot = dt.get("time_slot", "")
+                                    dt_goal = dt.get("goal_title", "")
+                                    st.markdown(f"- ▫️ ⏰ **{dt_slot}**: {dt_title} `[🎯 {dt_goal}]` &nbsp; `:orange[Đã trượt sang ngày mai]`")
 
     with col_chat_sched:
         st.markdown("#### 💬 Trò Chuyện Cùng Master Scheduler")

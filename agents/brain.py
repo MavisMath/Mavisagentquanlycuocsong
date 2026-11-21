@@ -3324,7 +3324,11 @@ class MasterScheduleTaskItem(BaseModel):
     goal_id: str = Field(description="ID mục tiêu tương ứng")
     goal_title: str = Field(description="Tên mục tiêu tương ứng")
     task_detail: str = Field(description="Nhiệm vụ cụ thể chi tiết kèm bài tập/nội dung")
+    energy_level: str = Field(default="🔴 Deep Work", description="Nhãn độ nặng não: '🔴 Deep Work' (nhận thức nặng/tập trung cao), '🟡 Shallow Work' (nhẹ nhàng/ôn tập/flashcard), hoặc '🟢 Recharge' (vận động/phục hồi/nghỉ ngơi)")
+    definition_of_done: str = Field(default="", description="Tiêu chí hoàn thành (DoD) cụ thể của buổi đó")
     resource_link: str = Field(default="", description="Link tài liệu hoặc tài nguyên đi kèm")
+    resource_url: str = Field(default="", description="Link tài liệu chính thức 1-Click")
+    resource_title: str = Field(default="", description="Tên gói tài liệu")
     is_done: bool = Field(default=False, description="Trạng thái hoàn thành (True/False)")
 
 
@@ -3386,7 +3390,24 @@ QUY TẮC NHỊP SINH HỌC & XẾP LỊCH ĐIỀU HÀNH BẮT BUỘC:
    - Đặt is_reschedule_request = True.
    - Nhận diện các task bị ảnh hưởng, tự động dời sang ngày tiếp theo hoặc buổi sáng cuối tuần.
    - Thêm tên các task đã dời vào rescheduled_task_names.
-6. Mỗi phần tử trong master_schedule bắt buộc gồm: date, session (Sáng/Chiều/Tối), time_slot, goal_id, goal_title, task_detail, resource_link, is_done (mặc định False).
+6. Mỗi phần tử trong master_schedule bắt buộc gồm:
+   - date: Ngày trong tuần (VD: 'Thứ Hai').
+   - session: 'Sáng', 'Chiều', hoặc 'Tối'.
+   - time_slot: Khung giờ cụ thể không trùng lặp (VD: '08:00 - 10:00').
+   - goal_id, goal_title: ID và Tên mục tiêu tương ứng.
+   - task_detail: Nhiệm vụ chi tiết.
+   - energy_level: Nhãn màu ('🔴 Deep Work', '🟡 Shallow Work', hoặc '🟢 Recharge').
+   - definition_of_done: Tiêu chí hoàn thành (DoD) cụ thể, đo lường được.
+   - resource_url, resource_link: Link tài liệu thực tế chuẩn xác.
+   - resource_title: Tên gói tài liệu đi kèm.
+   - is_done: Mặc định False.
+7. TÁI CẤU TRÚC ĐỘNG THEO NĂNG LƯỢNG NGÀY (DYNAMIC ENERGY RESCHEDULING):
+   - Nếu người dùng báo mệt mỏi, bận rộn, xin hạ tải hoặc yêu cầu 'Duy trì tối thiểu 30%':
+     * Đặt is_reschedule_request = True.
+     * Tự động trượt các task '🔴 Deep Work' sang ngày tiếp theo (không báo trễ hạn).
+     * Chỉ giữ lại tối đa 3 task nhẹ nhàng ('🟡 Shallow Work' hoặc '🟢 Recharge') để bảo toàn chuỗi streak kỷ luật.
+   - Nếu người dùng yêu cầu 'Xả hơi / Recovery':
+     * Chuyển đổi lịch trình sang các hoạt động hồi phục thể chất & tinh thần (uống nước, nghỉ ngơi, đi bộ, ngủ sớm).
 
 YÊU CẦU CỦA NGƯỜI DÙNG:
 "{user_message}"
@@ -3408,7 +3429,7 @@ YÊU CẦU CỦA NGƯỜI DÙNG:
         is_rescheduled = output.is_reschedule_request
     except Exception as e:
         print(f"Lỗi invoke trong scheduler_chat: {e}")
-        # Fallback tạo lịch mẫu phân chia sáng / chiều / tối
+        # Fallback tạo lịch mẫu phân chia sáng / chiều / tối kèm nhãn năng lượng và DoD
         days = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu"]
         schedule_dicts = []
         for d in days:
@@ -3416,6 +3437,7 @@ YÊU CẦU CỦA NGƯỜI DÙNG:
                 g_title = g.get("title") or g.get("goal_name", "Mục tiêu")
                 slot = "08:00 - 10:00" if idx == 0 else ("14:30 - 16:00" if idx == 1 else "19:30 - 21:00")
                 sess = "Sáng" if idx == 0 else ("Chiều" if idx == 1 else "Tối")
+                energy = "🔴 Deep Work" if idx == 0 else ("🟡 Shallow Work" if idx == 1 else "🟢 Recharge")
                 schedule_dicts.append({
                     "date": d,
                     "session": sess,
@@ -3423,12 +3445,16 @@ YÊU CẦU CỦA NGƯỜI DÙNG:
                     "goal_id": g.get("id", f"g{idx}"),
                     "goal_title": g_title,
                     "task_detail": f"Nghiên cứu và thực hành bài tập cho {g_title}",
+                    "energy_level": energy,
+                    "definition_of_done": f"Hoàn thành trọn vẹn bài tập trọng tâm cho {g_title} và ghi chú tiến độ.",
                     "resource_link": "https://cambridgeenglish.org",
+                    "resource_url": "https://cambridgeenglish.org",
+                    "resource_title": f"Tài liệu chuẩn mực cho {g_title}",
                     "is_done": False,
                 })
         rescheduled_tasks = []
         is_rescheduled = False
-        response_text = "Tôi đã phân rã toàn bộ các mục tiêu Active vào Master Schedule theo đúng nguyên tắc nhịp sinh học (Sáng học nặng, Chiều thực hành, Tối ôn tập) mà không trùng lặp giờ giấc!"
+        response_text = "Tôi đã phân rã toàn bộ các mục tiêu Active vào Master Schedule theo đúng nguyên tắc nhịp sinh học (Sáng học nặng, Chiều thực hành, Tối ôn tập) kèm nhãn năng lượng (🔴/🟡/🟢) và Tiêu chí hoàn thành (DoD) mà không trùng lặp giờ giấc!"
 
     save_master_schedule(schedule_dicts, username=username)
 
