@@ -554,6 +554,7 @@ def update_user_goal_details(goal_id: str, updates: Dict[str, Any], username: st
 def delete_user_goal(goal_id: str, username: str = "mavis") -> bool:
     """
     Xóa vĩnh viễn mục tiêu khỏi danh sách goals và dọn sạch các task liên quan trong master_schedule.
+    Nếu sau khi xóa không còn mục tiêu nào, dọn sạch triệt để các trường profile, goal_profile, roadmap, resources trong MongoDB và ledger.
     """
     username = (username or DEFAULT_USER).strip().lower()
     goals = load_user_goals(username)
@@ -586,6 +587,46 @@ def delete_user_goal(goal_id: str, username: str = "mavis") -> bool:
             if isinstance(t, dict) and str(t.get("goal_id", "")) != str(deleted_id) and str(t.get("goal_id", "")) != gid_clean and t.get("goal_title") != deleted_title
         ]
         save_master_schedule(clean_ms, username=username)
+
+    # 3. Dọn sạch triệt để schema profile cũ khi danh sách mục tiêu trống hoàn toàn
+    if not remaining_goals:
+        if is_mongodb_available():
+            db_update_user_state(
+                username=username,
+                state_update={
+                    "goals": [],
+                    "profile": {},
+                    "goal_profile": {},
+                    "resources": [],
+                    "curated_resources": [],
+                    "roadmap": {},
+                    "backcasting_roadmap": {},
+                    "master_schedule": [],
+                    "user_profile": {
+                        "is_onboarded": False,
+                        "coaching_stage": "interviewing",
+                        "current_situation": "Chưa có mục tiêu",
+                        "time_constraints": "0h/ngày",
+                    },
+                },
+            )
+        all_data = load_all_users_data()
+        if username in all_data and isinstance(all_data[username], dict):
+            all_data[username]["goals"] = []
+            all_data[username]["profile"] = {}
+            all_data[username]["goal_profile"] = {}
+            all_data[username]["resources"] = []
+            all_data[username]["curated_resources"] = []
+            all_data[username]["roadmap"] = {}
+            all_data[username]["backcasting_roadmap"] = {}
+            all_data[username]["master_schedule"] = []
+            all_data[username]["user_profile"] = {
+                "is_onboarded": False,
+                "coaching_stage": "interviewing",
+                "current_situation": "Chưa có mục tiêu",
+                "time_constraints": "0h/ngày",
+            }
+            save_all_users_data(all_data)
 
     return True
 

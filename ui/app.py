@@ -703,9 +703,21 @@ goals_key = f"goals_{current_username}"
 if goals_key not in st.session_state:
     st.session_state[goals_key] = load_user_goals(current_username)
 
+# Đồng bộ chặt chẽ với danh sách goals hiện tại trong MongoDB:
+user_goals_loaded = st.session_state[goals_key]
 goal_profile_key = f"goal_profile_{current_username}"
-if goal_profile_key not in st.session_state:
-    st.session_state[goal_profile_key] = load_user_goal_profile(current_username)
+if not user_goals_loaded:
+    st.session_state[goal_profile_key] = {}
+    st.session_state[profile_key] = {
+        "current_situation": "Chưa có mục tiêu",
+        "financial_status": "",
+        "time_constraints": "0h/ngày",
+        "is_onboarded": False,
+        "coaching_stage": "interviewing",
+        "obstacles": [],
+    }
+elif goal_profile_key not in st.session_state or not st.session_state.get(goal_profile_key):
+    st.session_state[goal_profile_key] = user_goals_loaded[0]
 
 resources_key = f"resources_{current_username}"
 if resources_key not in st.session_state:
@@ -811,54 +823,68 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # Hồ sơ mục tiêu có cấu trúc (Goal Profile - Phase 11 Multi-Agent)
-    current_gp = safe_dict(st.session_state.get(goal_profile_key))
+    # Hồ sơ mục tiêu có cấu trúc - Đọc trực tiếp từ danh sách goals mới trong MongoDB
+    user_goals_sidebar = safe_list(st.session_state.get(goals_key) or load_user_goals(current_username))
+    active_goals_sidebar = [g for g in user_goals_sidebar if g.get("status") in ["active", "in_progress"]]
+
     with st.expander("🎯 Hồ Sơ Mục Tiêu (Real-time)", expanded=True):
-        if current_gp.get("goal_name"):
-            st.markdown(f"**Mục tiêu:** `{current_gp.get('goal_name')}`")
-            st.markdown(f"**Vạch xuất phát:** {current_gp.get('current_level') or 'Chưa rõ'}")
-            st.markdown(f"**Thời hạn:** {current_gp.get('duration_days') or 'N/A'} ngày")
-            st.markdown(f"**Quỹ thời gian:** {current_gp.get('daily_hours') or 'N/A'}h/ngày")
-            st.markdown(f"**Khung giờ:** {current_gp.get('preferred_slots') or 'Linh hoạt'}")
+        if user_goals_sidebar:
+            st.caption(f"Tổng số: **{len(user_goals_sidebar)} mục tiêu** ({len(active_goals_sidebar)} đang kích hoạt)")
+            for g in user_goals_sidebar:
+                g_title = g.get("title") or g.get("goal_name", "Mục tiêu")
+                g_cat = g.get("category", "Học tập")
+                g_hours = g.get("daily_hours", 1.5)
+                g_time = g.get("preferred_time") or g.get("preferred_slots") or "Linh hoạt"
+                g_status = g.get("status", "active")
+                g_prio = g.get("priority", "Trung bình")
 
-            if current_gp.get("is_complete"):
-                st.success("✅ **ĐÃ CHỐT HOÀN THIỆN**")
-            else:
-                missing = []
-                if not current_gp.get("goal_name"): missing.append("Mục tiêu")
-                if not current_gp.get("current_level"): missing.append("Trình độ hiện tại")
-                if not current_gp.get("duration_days"): missing.append("Thời gian thực hiện")
-                if not current_gp.get("daily_hours"): missing.append("Số giờ rảnh mỗi ngày")
-                if not current_gp.get("preferred_slots"): missing.append("Khung giờ học")
-                st.warning(f"⚠️ **Đang thiếu:** {', '.join(missing)}")
+                status_label = "🟢 Đang chạy" if g_status in ["active", "in_progress"] else ("⏸️ Tạm dừng" if g_status == "paused" else "📋 Đang thẩm định")
+                with st.container(border=True):
+                    st.markdown(f"**{g_title}**")
+                    st.caption(f"Trạng thái: `{status_label}` | Nhóm: `{g_cat}`")
+                    st.markdown(f"⏱️ **Quỹ giờ:** `{g_hours}h/ngày` • `{g_time}`")
+                    st.markdown(f"🎯 **Ưu tiên:** `{g_prio}`")
         else:
-            st.caption("Chưa có hồ sơ mục tiêu. Nhập vào ô chat để bắt đầu!")
+            st.caption("Chưa có mục tiêu nào đang kích hoạt. Hãy trò chuyện với CEO Coach ở Tab 1 để thiết lập mục tiêu cuộc đời!")
 
-    # Kho tài liệu (resources) trên Sidebar
-    current_res = safe_list(st.session_state.get(resources_key))
-    if current_res:
+    # Kho tài liệu (resources) trên Sidebar - Gom từ user_goals và resources_key
+    goal_resources = []
+    for g in user_goals_sidebar:
+        bd = g.get("breakdown", {})
+        if isinstance(bd, dict):
+            for r in bd.get("resources", []):
+                if isinstance(r, dict) and (r.get("title") or r.get("resource_title")):
+                    goal_resources.append({
+                        "title": r.get("title") or r.get("resource_title"),
+                        "url": r.get("url") or r.get("resource_url") or "#",
+                        "type": r.get("type", "Giáo trình"),
+                    })
+    extra_res = safe_list(st.session_state.get(resources_key))
+    for r in extra_res:
+        if isinstance(r, dict) and r.get("title"):
+            goal_resources.append(r)
+
+    if goal_resources:
         with st.expander("📚 Kho Tài Liệu (Link nhanh)", expanded=False):
-            for r in current_res:
-                r_dict = safe_dict(r)
+            seen_urls = set()
+            for r_dict in goal_resources[:8]:
                 title = r_dict.get("title", "Tài liệu")
                 url = r_dict.get("url", "#")
                 rtype = r_dict.get("type", "Tài liệu")
-                st.markdown(f"- 🔗 [{title}]({url}) *({rtype})*")
+                if url not in seen_urls:
+                    seen_urls.add(url)
+                    st.markdown(f"- 🔗 [{title}]({url}) *({rtype})*")
 
-    # Hồ sơ cá nhân đa khía cạnh (User Profile)
-    user_prof = st.session_state[profile_key]
-    if user_prof.get("is_onboarded"):
-        with st.expander("👤 Hồ Sơ Chiến Lược Cá Nhân", expanded=False):
-            st.markdown(f"**Tình trạng:** {user_prof.get('current_situation', 'N/A')}")
-            st.markdown(f"**Thời gian:** {user_prof.get('time_constraints', 'N/A')}")
-            st.markdown(f"**Tài chính:** {user_prof.get('financial_status', 'N/A')}")
-            if user_prof.get("obstacles"):
-                obs_list = user_prof.get("obstacles")
-                obs_disp = ", ".join(obs_list) if isinstance(obs_list, list) else str(obs_list)
-                st.markdown(f"**Rào cản:** {obs_disp}")
-            st.markdown(f"**Giai đoạn:** `{user_prof.get('coaching_stage', 'action').upper()}`")
+    # Hồ sơ cá nhân đa khía cạnh (User Profile & Trạng thái Vận hành Lộ trình)
+    if user_goals_sidebar:
+        with st.expander("👤 Trạng Thái Vận Hành Lộ Trình", expanded=False):
+            total_load = sum(float(g.get("daily_hours") or 1.5) for g in user_goals_sidebar)
+            st.success(f"🚀 **Đang vận hành {len(user_goals_sidebar)} mục tiêu**")
+            st.markdown(f"**Tổng tải thời gian:** `{total_load:.1f}h/ngày`")
+            st.markdown(f"**Mục tiêu đang chạy:** `{len(active_goals_sidebar)}/{len(user_goals_sidebar)}`")
+            st.markdown("**Giai đoạn:** `THỰC THI & LỊCH TRÌNH`")
     else:
-        st.warning("⚠️ Chưa hoàn thành Onboarding! Hãy chat để hoàn thiện hồ sơ.")
+        st.info("💡 **Khởi đầu mới:** Hãy trò chuyện cùng CEO Coach ở Tab 1 để thẩm định và kích hoạt mục tiêu đầu tiên!")
 
     # Bảng điều khiển năng lượng
     st.subheader("🔋 Bảng điều khiển Năng lượng")
@@ -1431,8 +1457,20 @@ with tab_arch:
                                 st.session_state[master_schedule_key] = load_master_schedule(current_username)
                                 if updated_goals:
                                     st.session_state[selected_goal_id_key] = updated_goals[0].get("id")
+                                    st.session_state[goal_profile_key] = updated_goals[0]
                                 else:
                                     st.session_state[selected_goal_id_key] = None
+                                    st.session_state[goal_profile_key] = {}
+                                    st.session_state[resources_key] = []
+                                    st.session_state[roadmap_key] = {}
+                                    st.session_state[profile_key] = {
+                                        "current_situation": "Chưa có mục tiêu",
+                                        "financial_status": "",
+                                        "time_constraints": "0h/ngày",
+                                        "is_onboarded": False,
+                                        "coaching_stage": "interviewing",
+                                        "obstacles": [],
+                                    }
                                 st.toast(f"Đã xóa vĩnh viễn mục tiêu '{g_title}'!")
                                 st.rerun()
 
