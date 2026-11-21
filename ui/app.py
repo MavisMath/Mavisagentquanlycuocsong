@@ -212,7 +212,7 @@ try:
     fetch_busy_events = getattr(tgc, "fetch_busy_events", lambda username, days=7: [])
     sync_schedule_to_google_calendar = getattr(tgc, "sync_schedule_to_google_calendar", lambda username, ms: {"success": False, "message": "Chưa sẵn sàng", "synced_count": 0})
     get_google_client_config = getattr(tgc, "get_google_client_config", lambda: None)
-    get_default_redirect_uri = getattr(tgc, "get_default_redirect_uri", lambda: "http://localhost:8501")
+    get_default_redirect_uri = getattr(tgc, "get_default_redirect_uri", lambda: "https://mavisagentquanlycuocsong-252.streamlit.app")
     update_rescheduled_calendar_event = getattr(tgc, "update_rescheduled_calendar_event", lambda *args, **kwargs: False)
 except Exception as _gcal_err:
     def is_calendar_connected(username): return False
@@ -222,7 +222,7 @@ except Exception as _gcal_err:
     def fetch_busy_events(username, days=7): return []
     def sync_schedule_to_google_calendar(username, ms): return {"success": False, "message": "Module Google Calendar chưa sẵn sàng", "synced_count": 0}
     def get_google_client_config(): return None
-    def get_default_redirect_uri(): return "http://localhost:8501"
+    def get_default_redirect_uri(): return "https://mavisagentquanlycuocsong-252.streamlit.app"
     def update_rescheduled_calendar_event(*args, **kwargs): return False
 
 
@@ -666,11 +666,20 @@ current_name = st.session_state.get("name") or current_username.capitalize()
 # ------------------------------------------------------------------------------
 if "code" in st.query_params:
     auth_code = st.query_params.get("code")
-    if auth_code:
-        default_redir = get_default_redirect_uri()
-        redir_session_key = f"active_gcal_redir_{current_username}"
-        current_redir = st.session_state.get(redir_session_key, default_redir)
-        ok = exchange_code_and_save_token(auth_code, redirect_uri=current_redir, username=current_username)
+    try:
+        if auth_code:
+            default_redir = get_default_redirect_uri()
+            redir_session_key = f"active_gcal_redir_{current_username}"
+            current_redir = st.session_state.get(redir_session_key, default_redir)
+            res = exchange_code_and_save_token(auth_code, redirect_uri=current_redir, username=current_username)
+            if bool(res):
+                st.session_state[f"gcal_just_connected_{current_username}"] = True
+            else:
+                err_detail = getattr(res, "error", None) or "Không thể đổi mã xác thực Google Calendar."
+                st.session_state[f"gcal_connect_error_{current_username}"] = err_detail
+    except Exception as e:
+        st.session_state[f"gcal_connect_error_{current_username}"] = f"Chi tiết lỗi Google OAuth: {e}"
+    finally:
         try:
             st.query_params.clear()
         except Exception:
@@ -678,15 +687,11 @@ if "code" in st.query_params:
                 del st.query_params["code"]
             except Exception:
                 pass
-        if ok:
-            st.session_state[f"gcal_just_connected_{current_username}"] = True
-            st.rerun()
-        else:
-            st.session_state[f"gcal_connect_error_{current_username}"] = "Không thể đổi mã xác thực Google Calendar. Vui lòng kiểm tra lại cấu hình Redirect URI."
-            st.rerun()
+        st.rerun()
 
 if st.session_state.pop(f"gcal_just_connected_{current_username}", False):
     st.toast("🎉 Đã kết nối Google Calendar thành công vĩnh viễn!")
+    st.success("✅ Đã kết nối Google Calendar thành công vĩnh viễn!")
 if f"gcal_connect_error_{current_username}" in st.session_state:
     err_c = st.session_state.pop(f"gcal_connect_error_{current_username}")
     st.error(f"❌ {err_c}")
@@ -1219,14 +1224,6 @@ with st.sidebar:
 
 
 # ==========================================
-# 5. MAIN PANEL: BẢNG CHỈ HUY & GIAO DIỆN HỘI THOẠI
-# ==========================================
-st.title("🤖 Mavis AI Executive & Life Coach")
-st.markdown(
-    f"**Không gian làm việc:** `{current_name}` (`@{current_username}`) | Tối ưu hóa nhịp sinh học • Phản biện chi phí cơ hội • Đa người dùng SaaS"
-)
-
-# ==========================================
 # 5. MAIN PANEL: BẢNG CHỈ HUY 4 GIAI ĐOẠN KHÉP KÍN & 4 CHATBOT CHUYÊN BIỆT
 # ==========================================
 st.title("🤖 Mavis AI Executive & Life Coach")
@@ -1431,25 +1428,22 @@ with tab_arch:
                     "3. Tại mục **Authorized redirect URIs (URI chuyển hướng được phép)**, nhấn **+ ADD URI** và thêm các dòng sau:\n"
                 )
                 st.code(
+                    "https://mavisagentquanlycuocsong-252.streamlit.app\n"
                     "http://localhost:8501\n"
-                    "http://localhost:8501/\n"
-                    "http://127.0.0.1:8501\n"
-                    "http://127.0.0.1:8501/",
+                    "http://127.0.0.1:8501",
                     language="text",
                 )
-                st.markdown("*(Nếu bạn đang deploy ứng dụng lên Streamlit Cloud, hãy thêm cả `https://ten-app-cua-ban.streamlit.app` và `https://ten-app-cua-ban.streamlit.app/`)*")
                 st.markdown("4. Nhấn nút **LƯU (SAVE)** ở cuối trang của Google và đợi 1-2 phút để Google cập nhật.")
                 st.markdown("---")
                 st.markdown("**Hoặc chuyển đổi Redirect URI ứng dụng đang gửi đi tại đây:**")
                 preset_options = [
+                    "https://mavisagentquanlycuocsong-252.streamlit.app",
                     "http://localhost:8501",
-                    "http://localhost:8501/",
                     "http://127.0.0.1:8501",
-                    "http://127.0.0.1:8501/",
                     "Tùy chỉnh URI khác...",
                 ]
                 cur_val = st.session_state.get(redir_session_key, default_redir)
-                cur_idx = preset_options.index(cur_val) if cur_val in preset_options else 4
+                cur_idx = preset_options.index(cur_val) if cur_val in preset_options else 3
                 chosen_opt = st.selectbox(
                     "Chọn Redirect URI gửi sang Google:",
                     options=preset_options,
@@ -1459,11 +1453,11 @@ with tab_arch:
                 if chosen_opt == "Tùy chỉnh URI khác...":
                     custom_uri = st.text_input("Nhập Redirect URI đã đăng ký trên Google Console:", value=cur_val, key=f"txt_custom_uri_{current_username}")
                     if custom_uri and custom_uri.strip() != st.session_state.get(redir_session_key):
-                        st.session_state[redir_session_key] = custom_uri.strip()
+                        st.session_state[redir_session_key] = custom_uri.strip().rstrip("/")
                         st.rerun()
                 else:
                     if chosen_opt != st.session_state.get(redir_session_key):
-                        st.session_state[redir_session_key] = chosen_opt
+                        st.session_state[redir_session_key] = chosen_opt.strip().rstrip("/")
                         st.rerun()
 
             with st.expander("🔑 Nhập Mã Xác Thực Thủ Công (Không sợ lỗi Redirect)", expanded=False):
@@ -1475,12 +1469,13 @@ with tab_arch:
                 if st.button("Xác Nhận Kết Nối", key=f"btn_submit_gcode_{current_username}"):
                     if manual_code and manual_code.strip():
                         current_redir = st.session_state.get(redir_session_key, default_redir)
-                        ok = exchange_code_and_save_token(manual_code.strip(), redirect_uri=current_redir, username=current_username)
-                        if ok:
+                        res = exchange_code_and_save_token(manual_code.strip(), redirect_uri=current_redir, username=current_username)
+                        if bool(res):
                             st.success("✅ Kết nối Google Calendar thành công!")
                             st.rerun()
                         else:
-                            st.error("❌ Mã không hợp lệ hoặc không khớp với Redirect URI đang chọn.")
+                            err_msg = getattr(res, "error", None) or "Mã không hợp lệ hoặc không khớp với Redirect URI đang chọn."
+                            st.error(f"❌ {err_msg}")
 
         if cal_connected:
             c_sync1, c_sync2 = st.columns([0.55, 0.45])

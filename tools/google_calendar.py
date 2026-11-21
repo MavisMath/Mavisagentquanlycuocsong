@@ -107,64 +107,63 @@ def get_google_client_config() -> Optional[Dict[str, Any]]:
     return None
 
 
+DEFAULT_STATIC_REDIRECT_URI = "https://mavisagentquanlycuocsong-252.streamlit.app"
+
+
+class OAuthExchangeResult:
+    """Đối tượng kết quả đổi mã OAuth, hỗ trợ vừa làm bool (if ok:) vừa làm tuple (ok, err)."""
+    def __init__(self, success: bool, error: Optional[str] = None):
+        self.success = success
+        self.error = error
+
+    def __bool__(self):
+        return self.success
+
+    def __iter__(self):
+        return iter((self.success, self.error))
+
+    def __getitem__(self, idx):
+        return (self.success, self.error)[idx]
+
+    def __repr__(self):
+        return f"OAuthExchangeResult(success={self.success}, error={self.error!r})"
+
+
 def get_default_redirect_uri() -> str:
     """
-    Lấy URI chuyển hướng mặc định từ st.secrets, .env, credentials.json hoặc request context.
+    Chuẩn hóa biến REDIRECT_URI: Đọc từ st.secrets.get('GOOGLE_REDIRECT_URI') hoặc
+    mặc định cứng là 'https://mavisagentquanlycuocsong-252.streamlit.app'.
+    Tuyệt đối không dùng localhost hay tự nối thêm dấu '/' ở cuối, bảo đảm khớp 100%.
     """
-    # 1. Thử lấy từ streamlit secrets
     try:
         import streamlit as st
         if hasattr(st, "secrets"):
-            if "GOOGLE_REDIRECT_URI" in st.secrets:
-                return str(st.secrets["GOOGLE_REDIRECT_URI"]).strip()
+            if "GOOGLE_REDIRECT_URI" in st.secrets and str(st.secrets["GOOGLE_REDIRECT_URI"]).strip():
+                return str(st.secrets["GOOGLE_REDIRECT_URI"]).strip().rstrip("/")
             if "google_calendar" in st.secrets and isinstance(st.secrets["google_calendar"], dict):
                 g_uri = st.secrets["google_calendar"].get("redirect_uri") or st.secrets["google_calendar"].get("GOOGLE_REDIRECT_URI")
-                if g_uri:
-                    return str(g_uri).strip()
+                if g_uri and str(g_uri).strip():
+                    return str(g_uri).strip().rstrip("/")
     except Exception:
         pass
 
-    # 2. Thử lấy từ biến môi trường (.env)
     env_uri = os.getenv("GOOGLE_REDIRECT_URI")
     if env_uri and env_uri.strip():
-        return env_uri.strip()
+        return env_uri.strip().rstrip("/")
 
-    # 3. Thử đọc từ credentials.json nếu có
-    if os.path.exists("credentials.json"):
-        try:
-            with open("credentials.json", "r", encoding="utf-8") as f:
-                cdata = json.load(f)
-                web_or_installed = cdata.get("web") or cdata.get("installed") or {}
-                r_uris = web_or_installed.get("redirect_uris")
-                if r_uris and isinstance(r_uris, list) and len(r_uris) > 0:
-                    return str(r_uris[0]).strip()
-        except Exception:
-            pass
-
-    # 4. Thử lấy từ Streamlit context headers (nếu đang chạy trên server/cloud)
-    try:
-        import streamlit as st
-        if hasattr(st, "context") and hasattr(st.context, "headers"):
-            headers = st.context.headers
-            host = headers.get("host")
-            if host:
-                proto = headers.get("x-forwarded-proto", "http")
-                if "streamlit.app" in host or "herokuapp.com" in host or "render.com" in host or "ngrok" in host:
-                    proto = "https"
-                return f"{proto}://{host}"
-    except Exception:
-        pass
-
-    return "http://localhost:8501"
+    return DEFAULT_STATIC_REDIRECT_URI
 
 
 def get_oauth_authorization_url(redirect_uri: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
     """
     Tạo đường dẫn đăng nhập Google OAuth 2.0.
+    Khởi tạo Flow với autogenerate_code_verifier=False để tránh lệch PKCE khi reload trang.
     Trả về (authorization_url, state).
     """
     if not redirect_uri:
         redirect_uri = get_default_redirect_uri()
+    else:
+        redirect_uri = str(redirect_uri).strip().rstrip("/")
 
     client_config = get_google_client_config()
     if not client_config or not GOOGLE_CALENDAR_SDK_AVAILABLE:
@@ -175,6 +174,7 @@ def get_oauth_authorization_url(redirect_uri: Optional[str] = None) -> Tuple[Opt
             client_config,
             scopes=SCOPES,
             redirect_uri=redirect_uri,
+            autogenerate_code_verifier=False,
         )
         auth_url, state = flow.authorization_url(
             access_type="offline",
@@ -187,43 +187,45 @@ def get_oauth_authorization_url(redirect_uri: Optional[str] = None) -> Tuple[Opt
         return None, None
 
 
-def exchange_code_and_save_token(code: str, redirect_uri: Optional[str] = None, username: str = "mavis") -> bool:
+def exchange_code_and_save_token(
+    code: str,
+    redirect_uri: Optional[str] = None,
+    username: str = "mavis",
+) -> OAuthExchangeResult:
     """
     Đổi authorization code lấy Access Token / Refresh Token và lưu bền vững vào MongoDB Atlas.
-    Tự động thử các candidate redirect URIs hợp lệ để tránh lỗi redirect_uri_mismatch.
+    Khởi tạo Flow với autogenerate_code_verifier=False để tránh lỗi lệch PKCE khi Streamlit reload trang.
+    Đảm bảo redirect_uri giống hệt 100% với bước authorization_url (mặc định 'https://mavisagentquanlycuocsong-252.streamlit.app').
     """
+    if not redirect_uri:
+        redirect_uri = get_default_redirect_uri()
+    else:
+        redirect_uri = str(redirect_uri).strip().rstrip("/")
+
     client_config = get_google_client_config()
     if not client_config or not GOOGLE_CALENDAR_SDK_AVAILABLE:
-        return False
+        err_msg = "Chưa cấu hình Google OAuth Client ID / Secret hoặc SDK google-api-python-client chưa khả dụng."
+        return OAuthExchangeResult(False, err_msg)
 
-    candidates = []
-    if redirect_uri and redirect_uri.strip():
-        candidates.append(redirect_uri.strip())
-    def_uri = get_default_redirect_uri()
-    if def_uri and def_uri not in candidates:
-        candidates.append(def_uri)
-    for c in ["http://localhost:8501", "http://localhost:8501/", "http://127.0.0.1:8501", "http://127.0.0.1:8501/"]:
-        if c not in candidates:
-            candidates.append(c)
-
-    last_error = None
-    for cand_uri in candidates:
-        try:
-            flow = Flow.from_client_config(
-                client_config,
-                scopes=SCOPES,
-                redirect_uri=cand_uri,
-            )
-            flow.fetch_token(code=code)
-            creds = flow.credentials
-            token_data = json.loads(creds.to_json())
-            return save_user_calendar_token(username, token_data)
-        except Exception as e:
-            last_error = e
-            continue
-
-    print(f"Lỗi khi đổi authorization code Google với các candidates {candidates}: {last_error}")
-    return False
+    try:
+        flow = Flow.from_client_config(
+            client_config,
+            scopes=SCOPES,
+            redirect_uri=redirect_uri,
+            autogenerate_code_verifier=False,
+        )
+        flow.fetch_token(code=code)
+        creds = flow.credentials
+        token_data = json.loads(creds.to_json())
+        saved = save_user_calendar_token(username, token_data)
+        if saved:
+            return OAuthExchangeResult(True, None)
+        else:
+            return OAuthExchangeResult(False, "Lỗi khi lưu token vào MongoDB Atlas.")
+    except Exception as e:
+        err_msg = f"Chi tiết lỗi Google OAuth: {e}"
+        print(f"Lỗi khi đổi authorization code Google ({redirect_uri}): {e}")
+        return OAuthExchangeResult(False, err_msg)
 
 
 def save_user_calendar_token(username: str, token_data: Dict[str, Any]) -> bool:
