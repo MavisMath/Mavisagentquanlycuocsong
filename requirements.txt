@@ -16,6 +16,7 @@ langchain-google-genai>=2.0.0
 google-genai>=1.0.0
 google-api-python-client>=2.100.0
 google-auth>=2.20.0
+google-auth-oauthlib>=1.2.0
 google-auth-httplib2>=0.2.0
 tavily-python>=0.5.0
 twilio>=9.0.0

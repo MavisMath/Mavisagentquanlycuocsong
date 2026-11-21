@@ -298,6 +298,56 @@ class TestArchitectAndImports(unittest.TestCase):
         self.assertTrue(len(first_t["definition_of_done"]) > 0)
         self.assertTrue(bool(first_t.get("resource_url") or first_t.get("resource_link")))
 
+        # Kiểm tra sự hiện diện của các hạng mục đời sống: Ăn gì, Uống gì, Tập gì/Học gì, Ngủ mấy giờ
+        all_details = " ".join(t.get("task_detail", "") for t in sched).lower()
+        has_eating = "ăn" in all_details or "bữa" in all_details
+        has_drinking = "uống" in all_details or "nước" in all_details
+        has_training = "tập" in all_details or "học" in all_details
+        has_sleeping = "ngủ" in all_details or "22:30" in all_details
+        self.assertTrue(has_eating and has_drinking and has_training and has_sleeping, f"Lịch trình thiếu các hạng mục đời sống: {all_details[:200]}")
+
+    def test_google_calendar_token_persistence_and_range_conversion(self):
+        """Bảo đảm lưu trữ token Google Calendar và hàm chuyển đổi khung giờ hoạt động chuẩn xác."""
+        from tools.google_calendar import (
+            save_user_calendar_token,
+            load_user_calendar_token,
+            is_calendar_connected,
+            disconnect_calendar,
+            _convert_task_to_datetime_range,
+        )
+
+        mock_token = {
+            "token": "ya29.mock_token_for_test",
+            "refresh_token": "1//mock_refresh_token",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "client_id": "mock_client_id.apps.googleusercontent.com",
+            "client_secret": "mock_secret",
+            "scopes": ["https://www.googleapis.com/auth/calendar.events"],
+        }
+
+        # 1. Lưu token
+        saved = save_user_calendar_token(self.test_username, mock_token)
+        self.assertTrue(saved)
+        self.assertTrue(is_calendar_connected(self.test_username))
+
+        # 2. Đọc token
+        loaded = load_user_calendar_token(self.test_username)
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.get("token"), mock_token["token"])
+
+        # 3. Ngắt kết nối
+        disconnected = disconnect_calendar(self.test_username)
+        self.assertTrue(disconnected)
+        self.assertFalse(is_calendar_connected(self.test_username))
+
+        # 4. Kiểm tra chuyển đổi ngày & giờ sang datetime
+        start_dt, end_dt = _convert_task_to_datetime_range("Thứ Hai", "08:30 - 10:00")
+        self.assertLess(start_dt, end_dt)
+        self.assertEqual(start_dt.hour, 8)
+        self.assertEqual(start_dt.minute, 30)
+        self.assertEqual(end_dt.hour, 10)
+        self.assertEqual(end_dt.minute, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

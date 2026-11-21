@@ -196,6 +196,27 @@ except Exception as _graph_import_err:
 
     mavis_agent = FallbackAgent()
 
+# 6. Nạp an toàn module tools.google_calendar (Tích hợp Google Calendar API 2 chiều)
+try:
+    import tools.google_calendar as tgc
+    is_calendar_connected = getattr(tgc, "is_calendar_connected", lambda username: False)
+    disconnect_calendar = getattr(tgc, "disconnect_calendar", lambda username: False)
+    get_oauth_authorization_url = getattr(tgc, "get_oauth_authorization_url", lambda **kwargs: (None, None))
+    exchange_code_and_save_token = getattr(tgc, "exchange_code_and_save_token", lambda *args, **kwargs: False)
+    fetch_busy_events = getattr(tgc, "fetch_busy_events", lambda username, days=7: [])
+    sync_schedule_to_google_calendar = getattr(tgc, "sync_schedule_to_google_calendar", lambda username, ms: {"success": False, "message": "Chưa sẵn sàng", "synced_count": 0})
+    get_google_client_config = getattr(tgc, "get_google_client_config", lambda: None)
+    update_rescheduled_calendar_event = getattr(tgc, "update_rescheduled_calendar_event", lambda *args, **kwargs: False)
+except Exception as _gcal_err:
+    def is_calendar_connected(username): return False
+    def disconnect_calendar(username): return False
+    def get_oauth_authorization_url(**kwargs): return None, None
+    def exchange_code_and_save_token(*args, **kwargs): return False
+    def fetch_busy_events(username, days=7): return []
+    def sync_schedule_to_google_calendar(username, ms): return {"success": False, "message": "Module Google Calendar chưa sẵn sàng", "synced_count": 0}
+    def get_google_client_config(): return None
+    def update_rescheduled_calendar_event(*args, **kwargs): return False
+
 
 def safe_dict(val: Any) -> Dict[str, Any]:
     """Chuyển đổi an toàn mọi giá trị sang dict, tránh lỗi AttributeError khi parse JSON từ LLM."""
@@ -1323,11 +1344,85 @@ with tab_ceo:
 
 
 # ------------------------------------------------------------------------------
-# TAB 2: 📐 GIAI ĐOẠN 1: THIẾT LẬP MỤC TIÊU (ARCHITECT)
+# TAB 2: 📐 GIAI ĐOẠN 1: BẢN THIẾT KẾ TỔNG THỂ (ARCHITECT & GOOGLE CALENDAR)
 # ------------------------------------------------------------------------------
 with tab_arch:
-    st.markdown("### 📐 Giai đoạn 1: Thiết Lập Mục Tiêu & Phân Rã Lộ Trình")
-    st.caption("Kiến trúc sư chiến lược phân cấp 4 tầng (Năm ➔ Quý ➔ Tháng ➔ Tuần) & Thẩm định tài liệu thực tế")
+    st.markdown("### 📐 Giai đoạn 1: Bản Thiết Kế Tổng Thể (Năm ➔ Quý ➔ Tháng ➔ Tuần)")
+    st.caption("Chiến lược vĩ mô • Thảo luận phương pháp • Phân cấp 4 tầng khép kín • Kết nối Google Calendar 2 chiều")
+
+    # --------------------------------------------------------------------------
+    # TÍCH HỢP GOOGLE CALENDAR OAUTH 2.0 (2 CHIỀU THỜI GIAN THỰC)
+    # --------------------------------------------------------------------------
+    # Bắt mã authorization code nếu Google OAuth redirect về với query param 'code'
+    if "code" in st.query_params:
+        auth_code = st.query_params.get("code")
+        if auth_code:
+            ok = exchange_code_and_save_token(auth_code, username=current_username)
+            if ok:
+                st.toast("🎉 Kết nối Google Calendar thành công!")
+                try:
+                    del st.query_params["code"]
+                except Exception:
+                    pass
+                st.rerun()
+
+    cal_connected = is_calendar_connected(current_username)
+    with st.container(border=True):
+        col_gc_status, col_gc_action = st.columns([0.65, 0.35])
+        with col_gc_status:
+            if cal_connected:
+                st.markdown("##### 🟢 Google Calendar: Đã Kết Nối (2 Chiều Thời Gian Thực)")
+                st.caption("Đã đồng bộ hóa với Google Calendar cá nhân. AI tự động đọc các khung giờ bận trong 7 ngày tới để né trùng lịch khi phân bổ.")
+            else:
+                st.markdown("##### ⚪ Google Calendar: Chưa Kết Nối")
+                st.caption("Kết nối Google Calendar để AI nhận diện giờ bận trong 7 ngày tới và đồng bộ lịch trình 2 chiều.")
+        with col_gc_action:
+            if cal_connected:
+                if st.button("🔌 Ngắt Kết Nối Lịch", key=f"btn_disc_gcal_{current_username}", use_container_width=True):
+                    disconnect_calendar(current_username)
+                    st.toast("Đã ngắt kết nối Google Calendar.")
+                    st.rerun()
+            else:
+                client_cfg = get_google_client_config()
+                auth_url, _ = get_oauth_authorization_url()
+                if auth_url:
+                    st.link_button("🔗 Kết Nối Google Calendar", url=auth_url, use_container_width=True)
+                else:
+                    st.caption("*(Chưa cấu hình GOOGLE_CLIENT_ID trong st.secrets)*")
+
+        if cal_connected:
+            c_sync1, c_sync2 = st.columns([0.55, 0.45])
+            with c_sync1:
+                if st.button("🔄 Đồng Bộ Toàn Bộ Lịch Trình Lên Google Calendar", key=f"btn_sync_gcal_tab1_{current_username}", type="primary", use_container_width=True):
+                    cur_ms = load_master_schedule(current_username)
+                    with st.spinner("Đang đẩy các sự kiện sang Google Calendar..."):
+                        sync_res = sync_schedule_to_google_calendar(current_username, cur_ms)
+                        if sync_res.get("success"):
+                            st.success(f"✅ {sync_res.get('message')}")
+                            st.toast("🎉 Đã đồng bộ lịch lên Google Calendar thành công!")
+                        else:
+                            st.error(f"❌ {sync_res.get('message')}")
+            with c_sync2:
+                with st.expander("📅 Xem Các Khung Giờ Bận (7 Ngày Tới)"):
+                    busy_evs = fetch_busy_events(current_username, days=7)
+                    if busy_evs:
+                        for bev in busy_evs[:10]:
+                            st.markdown(f"- ⏰ **{bev.get('start', '')}**: {bev.get('summary', 'Bận')}")
+                    else:
+                        st.info("Không có lịch bận nào trong 7 ngày tới trên Google Calendar.")
+        else:
+            with st.expander("🔑 Nhập Mã Xác Thực Thủ Công (Nhanh)", expanded=False):
+                manual_code = st.text_input("Dán Authorization Code từ Google vào đây:", key=f"txt_manual_gcode_{current_username}")
+                if st.button("Xác Nhận Kết Nối", key=f"btn_submit_gcode_{current_username}"):
+                    if manual_code and manual_code.strip():
+                        ok = exchange_code_and_save_token(manual_code.strip(), username=current_username)
+                        if ok:
+                            st.success("✅ Kết nối Google Calendar thành công!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Mã không hợp lệ hoặc đã hết hạn.")
+
+    st.markdown("---")
 
     col_dash_arch, col_chat_arch = st.columns([1.15, 0.85], gap="large")
 
@@ -1676,17 +1771,102 @@ with tab_arch:
 
 
 # ------------------------------------------------------------------------------
-# TAB 3: 📅 GIAI ĐOẠN 2: THỰC THI & LỊCH TRÌNH (SCHEDULER)
+# TAB 3: 📅 GIAI ĐOẠN 2: TRỢ LÝ ĐỒNG HÀNH THỜI GIAN THỰC (SCHEDULER & LIVE HERO)
 # ------------------------------------------------------------------------------
 with tab_sched:
-    st.markdown("### 📅 Giai đoạn 2: Thực Thi & Lịch Trình Điều Hành")
-    st.caption("Phân bổ nhịp sinh học không trùng lặp • Checklist tương tác real-time • Dời lịch linh hoạt khi bận")
+    st.markdown("### 📅 Giai đoạn 2: Trợ Lý Đồng Hành Thời Gian Thực (Hôm Nay ➔ Từng Giờ Cụ Thể)")
+    st.caption("Đồng bộ thời gian thực Asia/Ho_Chi_Minh • Từng giờ cụ thể • Ăn gì / Uống gì / Tập gì / Ngủ mấy giờ • Đồng bộ Google Calendar 2 chiều")
 
     col_dash_sched, col_chat_sched = st.columns([1.15, 0.85], gap="large")
 
     with col_dash_sched:
         ms = safe_list(st.session_state.get(master_schedule_key) or load_master_schedule(current_username))
         user_goals_sched = safe_list(st.session_state.get(goals_key) or load_user_goals(current_username))
+
+        # ----------------------------------------------------------------------
+        # ĐỒNG HỒ THỜI GIAN THỰC & BANNER "⚡ HÀNH ĐỘNG NGAY BÂY GIỜ" (ASIA/HO_CHI_MINH)
+        # ----------------------------------------------------------------------
+        from datetime import time as dtime, timezone as d_timezone
+        vn_tz = d_timezone(timedelta(hours=7))
+        now_vn = datetime.now(vn_tz)
+        day_names_vi = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
+        today_vi_day = day_names_vi[now_vn.weekday()]
+        now_time = now_vn.time()
+        now_str = now_vn.strftime(f"{today_vi_day}, ngày %d/%m/%Y — %H:%M (Giờ VN)")
+
+        today_tasks = [t for t in ms if t.get("date") == today_vi_day]
+        active_hero_task = None
+        upcoming_hero_task = None
+
+        for tk in today_tasks:
+            t_slot = tk.get("time_slot", "")
+            if "-" in t_slot:
+                try:
+                    parts = t_slot.split("-")
+                    s_h, s_m = map(int, parts[0].strip().split(":"))
+                    e_h, e_m = map(int, parts[1].strip().split(":"))
+                    s_t = dtime(s_h, s_m)
+                    e_t = dtime(e_h, e_m)
+
+                    if s_t <= now_time <= e_t:
+                        active_hero_task = tk
+                        break
+                    elif s_t > now_time and upcoming_hero_task is None:
+                        upcoming_hero_task = tk
+                except Exception:
+                    pass
+
+        target_hero_task = active_hero_task or upcoming_hero_task
+        is_live = (active_hero_task is not None)
+
+        with st.container(border=True):
+            col_hero_status, col_hero_clock = st.columns([0.65, 0.35])
+            with col_hero_status:
+                if is_live:
+                    st.markdown("#### ⚡ HÀNH ĐỘNG NGAY BÂY GIỜ `[🟢 Đang diễn ra]`")
+                elif target_hero_task:
+                    st.markdown("#### ⚡ HÀNH ĐỘNG TIẾP THEO `[⏰ Sắp bắt đầu]`")
+                else:
+                    st.markdown("#### ⚡ TRẠNG THÁI HIỆN TẠI `[🌙 Phục hồi & Giấc ngủ]`")
+            with col_hero_clock:
+                st.markdown(f"🕒 **{now_str}**")
+
+            if target_hero_task:
+                h_detail = target_hero_task.get("task_detail", "Nhiệm vụ")
+                h_slot = target_hero_task.get("time_slot", "")
+                h_goal = target_hero_task.get("goal_title", "")
+                h_energy = target_hero_task.get("energy_level", "🔴 Deep Work")
+                h_dod = target_hero_task.get("definition_of_done", "")
+                h_link = target_hero_task.get("resource_url") or target_hero_task.get("resource_link", "")
+                h_is_done = bool(target_hero_task.get("is_done", False))
+
+                col_h_chk, col_h_info = st.columns([0.08, 0.92])
+                with col_h_chk:
+                    hero_key = f"chk_hero_{current_username}_{today_vi_day}_{abs(hash(h_detail)) % 100000}"
+                    new_h_done = st.checkbox("", value=h_is_done, key=hero_key, label_visibility="collapsed")
+                    if new_h_done != h_is_done:
+                        update_master_schedule_task_status(
+                            task_identifier=h_detail,
+                            is_done=new_h_done,
+                            date=today_vi_day,
+                            username=current_username,
+                        )
+                        target_hero_task["is_done"] = new_h_done
+                        st.session_state[master_schedule_key] = load_master_schedule(current_username)
+                        st.toast(f"✅ Đã cập nhật: {h_detail[:35]}...")
+                        st.rerun()
+                with col_h_info:
+                    st.markdown(f"**{h_energy}** &nbsp;|&nbsp; ⏰ **{h_slot}** — **{h_detail}** `[🎯 {h_goal}]`")
+                    if h_is_done:
+                        st.caption("✅ :green[**Đã hoàn thành xuất sắc!**]")
+                    if h_dod:
+                        st.caption(f"🏁 **Tiêu chí hoàn thành (DoD):** {h_dod}")
+                    if h_link:
+                        st.link_button("📦 Mở Tài Liệu Thực Tế (1-Click)", url=h_link)
+            else:
+                st.info("🌙 Hiện tại bạn đang ngoài khung giờ Deep Work. Hãy thư giãn, uống nước ấm hoặc chuẩn bị ngủ sớm 22:30 để tái tạo năng lượng cho ngày mai!")
+
+        st.markdown("---")
 
         # ----------------------------------------------------------------------
         # 1. THANH CHỌN CHẾ ĐỘ VẬN HÀNH HÔM NAY (TÁI CẤU TRÚC ĐỘNG THEO NĂNG LƯỢNG)
@@ -1873,11 +2053,11 @@ with tab_sched:
                     st.caption("💡 Lịch hiện có ít hơn 7 ngày. Bấm để AI tự động phân bổ đủ 7 ngày Thứ Hai - Chủ Nhật.")
 
             # Nút xuất lịch ICS & Google Calendar
-            c_ics, c_gcal = st.columns(2)
+            c_ics, c_gcal, c_gsync = st.columns(3)
             with c_ics:
                 ics_text = generate_ics_from_master_schedule(filtered_schedule, current_username)
                 st.download_button(
-                    label="📥 Tải File Lịch (.ics) Cho Google / Apple / Outlook",
+                    label="📥 Tải File Lịch (.ics)",
                     data=ics_text,
                     file_name=f"mavis_master_schedule_{current_username}.ics",
                     mime="text/calendar",
@@ -1891,7 +2071,19 @@ with tab_sched:
                     duration_minutes=90,
                     resource_info=first_task.get("resource_url") or first_task.get("resource_link", ""),
                 )
-                st.link_button("🌐 Mở Google Calendar (Thêm Sự Kiện 1 Chạm)", url=gcal_link, use_container_width=True)
+                st.link_button("🌐 Mở Google Calendar (1-Chạm)", url=gcal_link, use_container_width=True)
+            with c_gsync:
+                if is_calendar_connected(current_username):
+                    if st.button("🔄 Đồng Bộ Lên Google Calendar", key=f"btn_sync_gcal_tab2_{current_username}", type="primary", use_container_width=True):
+                        with st.spinner("Đang đẩy các sự kiện sang Google Calendar..."):
+                            sync_res = sync_schedule_to_google_calendar(current_username, filtered_schedule)
+                            if sync_res.get("success"):
+                                st.success(f"✅ {sync_res.get('message')}")
+                                st.toast("🎉 Đã đồng bộ lịch lên Google Calendar thành công!")
+                            else:
+                                st.error(f"❌ {sync_res.get('message')}")
+                else:
+                    st.caption("*(Chưa kết nối Google Calendar)*")
 
             st.markdown("---")
 
@@ -1909,9 +2101,12 @@ with tab_sched:
                     if not available_days:
                         available_days = list(dict.fromkeys(t.get("date", "Hôm nay") for t in filtered_schedule)) or STANDARD_DAYS
 
+                    default_day_idx = available_days.index(today_vi_day) if today_vi_day in available_days else 0
+
                     sel_day = st.selectbox(
                         "📅 Chọn ngày xem chi tiết:",
                         options=available_days,
+                        index=default_day_idx,
                         key=f"sel_daily_day_{current_username}",
                     )
 
@@ -2326,6 +2521,10 @@ with tab_sched:
                                 chat_history=st.session_state[chat_sched_key],
                             )
                             sched_rep = res.get("response", "Tôi đã điều chỉnh lịch trình phù hợp cho bạn.")
+                            if res.get("is_rescheduled") and is_calendar_connected(current_username):
+                                updated_ms = load_master_schedule(current_username)
+                                sync_schedule_to_google_calendar(current_username, updated_ms)
+                                sched_rep += "\n\n*(Đã tự động cập nhật dời lịch trên Google Calendar cá nhân của bạn)*"
                         else:
                             sched_rep = "Hệ thống đang đồng bộ kết nối AI. Vui lòng thử lại sau giây lát."
                         st.markdown(sched_rep)

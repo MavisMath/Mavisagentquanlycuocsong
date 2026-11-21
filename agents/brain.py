@@ -3287,6 +3287,14 @@ VAI TRÒ CỦA BẠN: Trực tiếp tư vấn chiến lược chuyên sâu, đ�
         search_query = f"{goal_title} giáo án bài tập kháng lực cardio thực đơn thâm hụt calo khoa học"
     raw_search = execute_resource_search(search_query, max_results=5)
 
+    busy_calendar_info = ""
+    try:
+        from tools.google_calendar import is_calendar_connected, get_busy_events_text_summary
+        if is_calendar_connected(username):
+            busy_calendar_info = get_busy_events_text_summary(username, days=7)
+    except Exception:
+        pass
+
     # --------------------------------------------------------------------------
     # NHỊP 1: THẢO LUẬN & TƯ VẤN CHIẾN LƯỢC TỔNG (KHI CHƯA CHỐT HOẶC ĐANG BÀN)
     # --------------------------------------------------------------------------
@@ -3301,6 +3309,9 @@ Nhiệm vụ: NHỊP 1 — TƯ VẤN CHIẾN LƯỢC & PHƯƠNG PHÁP TỔNG TH�
 - Thời hạn: {target_goal.get('duration_days', 90)} ngày
 - Phương pháp chiến lược hiện tại: {existing_strategy or 'Chưa có, cần đề xuất mới'}
 
+LỊCH BẬN THỰC TẾ TRÊN GOOGLE CALENDAR (NẾU ĐÃ KẾT NỐI):
+{busy_calendar_info if busy_calendar_info else "Hiện chưa có sự kiện bận nào trên Google Calendar (toàn bộ khung giờ đều rảnh)."}
+
 TÀI NGUYÊN / GIÁO ÁN THỰC TẾ THAM KHẢO TÌM KIẾM ĐƯỢC:
 {json.dumps(raw_search, ensure_ascii=False, indent=2)}
 
@@ -3310,9 +3321,10 @@ TIN NHẮN CỦA NGƯỜI DÙNG:
 CHỈ THỊ TƯ VẤN CHIẾN LƯỢC (NHỊP 1):
 1. Phân tích bối cảnh và thách thức cốt lõi theo đúng lĩnh vực của mục tiêu ({domain_terms.get('domain_name')}).
 2. Đề xuất 2-3 phương pháp/chiến lược tiếp cận tối ưu nhất. Nêu rõ nguyên lý, cách phân bổ thời gian và lý do phù hợp.
-3. Tóm tắt súc tích phương pháp chiến lược đang định hình vào `strategy_summary` (1-2 câu cô đọng để làm kim chỉ nam sau này).
-4. Phản hồi bằng giọng văn cố vấn cấp cao ({domain_terms.get('role_title')}): sắc bén, truyền cảm hứng, giải thích rõ ràng và hỏi ý kiến người dùng về phương pháp họ muốn chọn.
-5. Nhắc người dùng: "Khi bạn hài lòng với phương pháp này, hãy nhắn 'chốt phương pháp' hoặc bấm nút '{domain_terms.get('finalize_btn')}' ngay bên dưới để AI tự động xuất bản toàn bộ lộ trình 4 tầng!"
+3. Nhận diện các khung giờ bận thực tế trên Google Calendar để tư vấn thời gian thực thi tối ưu nhất mà không gây quá tải hay trùng lịch.
+4. Tóm tắt súc tích phương pháp chiến lược đang định hình vào `strategy_summary` (1-2 câu cô đọng để làm kim chỉ nam sau này).
+5. Phản hồi bằng giọng văn cố vấn cấp cao ({domain_terms.get('role_title')}): sắc bén, truyền cảm hứng, giải thích rõ ràng và hỏi ý kiến người dùng về phương pháp họ muốn chọn.
+6. Nhắc người dùng: "Khi bạn hài lòng với phương pháp này, hãy nhắn 'chốt phương pháp' hoặc bấm nút '{domain_terms.get('finalize_btn')}' ngay bên dưới để AI tự động xuất bản toàn bộ lộ trình 4 tầng!"
 """
         try:
             cons_output: ArchitectConsultationOutput = invoke_llm_resilient(
@@ -3795,6 +3807,14 @@ def scheduler_chat(
             "immediate_tasks": w1_tasks,
         })
 
+    busy_calendar_info = ""
+    try:
+        from tools.google_calendar import is_calendar_connected, get_busy_events_text_summary
+        if is_calendar_connected(username):
+            busy_calendar_info = get_busy_events_text_summary(username, days=7)
+    except Exception:
+        pass
+
     scheduler_prompt = f"""Bạn là Bậc Thầy Phân Bổ Lịch Trình Điều Hành (AI Master Scheduler) của hệ thống Mavis.
 Nhiệm vụ: Chuyên trách GIAI ĐOẠN 2 — Gom toàn bộ mục tiêu đang Active để xếp lịch không trùng lặp vào master_schedule, hoặc dời lịch linh hoạt khi người dùng báo bận.
 
@@ -3804,30 +3824,39 @@ DANH SÁCH MỤC TIÊU ACTIVE CẦN XẾP LỊCH TỪ MONGODB:
 LỊCH HIỆN CÓ TRONG MASTER SCHEDULE (NẾU ĐÃ CÓ):
 {json.dumps(existing_schedule[:10], ensure_ascii=False, indent=2) if existing_schedule else "Chưa có lịch, cần sinh mới."}
 
+THÔNG TIN LỊCH BẬN THỰC TẾ TRÊN GOOGLE CALENDAR CỦA NGƯỜI DÙNG:
+{busy_calendar_info if busy_calendar_info else "Hiện tại không có sự kiện bận nào trên Google Calendar (toàn bộ khung giờ đều rảnh)."}
+
 QUY TẮC NHỊP SINH HỌC & XẾP LỊCH ĐIỀU HÀNH BẮT BUỘC:
-1. KHÔNG TRÙNG LẶP: Mỗi khung giờ trong ngày chỉ xếp DUY NHẤT 1 mục tiêu.
-2. Buổi Sáng (08:00 - 10:00 hoặc 06:00 - 07:30): Ưu tiên tuyệt đối cho mục tiêu có độ ưu tiên cao nhất (P1) hoặc tác vụ nhận thức nặng (giải đề, tư duy logic) hoặc tập luyện thể chất sáng.
-3. Buổi Chiều (14:00 - 16:00 hoặc 16:00 - 18:00): Các tác vụ thực hành, thể chất, kỹ năng, review.
-4. Buổi Tối (19:30 - 21:00): Habit stacking, ôn tập nhẹ, tổng kết hoặc Recovery Buffer.
-5. KHI NGƯỜI DÙNG BÁO BẬN (VD: 'hôm nay bận đi tiệc', 'chiều nay bận họp', 'dời task sang mai'):
+1. KHÔNG TRÙNG LẶP: Mỗi khung giờ trong ngày chỉ xếp DUY NHẤT 1 mục tiêu. Tuyệt đối không xếp đè lên các khung giờ bận thực tế trên Google Calendar của người dùng.
+2. Buổi Sáng (08:00 - 11:30 hoặc 06:00 - 07:30): Ưu tiên tuyệt đối cho mục tiêu có độ ưu tiên cao nhất (P1) hoặc tác vụ nhận thức nặng (giải đề, tư duy logic) hoặc tập luyện thể chất sáng.
+3. Buổi Chiều (14:00 - 16:30 hoặc 17:00 - 18:30): Các tác vụ thực hành, kỹ năng, thể chất, review.
+4. Buổi Tối (19:30 - 21:30): Habit stacking, ôn tập nhẹ, tổng kết hoặc Recovery Buffer.
+5. CHI TIẾT HÓA 4 HẠNG MỤC ĐỜI SỐNG THỰC TẾ TRONG 7 NGÀY (Thứ Hai đến Chủ Nhật):
+   Lịch trình mỗi ngày bắt buộc phân bổ rõ ràng và thực tế:
+   - ĂN GÌ: Bữa sáng, bữa trưa, bữa tối với thực đơn cụ thể phù hợp với mục tiêu (VD: sáng yến mạch trứng luộc, trưa ức gà cơm gạo lứt, tối cá hồi hấp rau củ, kiểm soát thâm hụt calo/eat clean).
+   - UỐNG GÌ: Nước ấm chanh sáng sớm, 2.5 lít nước lọc trong ngày, bù điện giải khi tập, trà hoa cúc thảo mộc trước khi ngủ.
+   - HỌC GÌ / TẬP GÌ: Phân bổ các tác vụ chuyên sâu (Deep Work học tập/làm việc P1 buổi sáng), kỹ năng thực hành buổi chiều, và bài tập thể chất cụ thể (kháng lực/cardio).
+   - NGỦ MẤY GIỜ: Giờ đi ngủ phục hồi cố định (22:30 tắt thiết bị, ngủ sâu 7.5 - 8 tiếng).
+6. KHI NGƯỜI DÙNG BÁO BẬN (VD: 'hôm nay bận đi tiệc', 'chiều nay bận họp', 'dời task sang mai'):
    - Đặt is_reschedule_request = True.
    - Nhận diện các task bị ảnh hưởng, tự động dời sang ngày tiếp theo hoặc buổi sáng cuối tuần.
    - Thêm tên các task đã dời vào rescheduled_task_names.
-6. ĐẢM BẢO ĐỦ 7 NGÀY TRONG TUẦN (Thứ Hai, Thứ Ba, Thứ Tư, Thứ Năm, Thứ Sáu, Thứ Bảy, Chủ Nhật):
+7. ĐẢM BẢO ĐỦ 7 NGÀY TRONG TUẦN (Thứ Hai, Thứ Ba, Thứ Tư, Thứ Năm, Thứ Sáu, Thứ Bảy, Chủ Nhật):
    - BẮT BUỘC xếp lịch đầy đủ cho cả 7 ngày trong tuần từ 'Thứ Hai' đến 'Chủ Nhật' theo đúng tần suất của các active goals (tuyệt đối không chỉ sinh mỗi Thứ Hai hoặc bỏ sót ngày cuối tuần).
    - Thứ Bảy và Chủ Nhật bố trí các buổi thực hành dự án, tổng kết tuần, rèn luyện thể chất hoặc bù task.
-7. Mỗi phần tử trong master_schedule bắt buộc gồm:
+8. Mỗi phần tử trong master_schedule bắt buộc gồm:
    - date: Ngày trong tuần ('Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy', hoặc 'Chủ Nhật').
    - session: 'Sáng', 'Chiều', hoặc 'Tối'.
    - time_slot: Khung giờ cụ thể không trùng lặp (VD: '08:00 - 10:00').
    - goal_id, goal_title: ID và Tên mục tiêu tương ứng.
-   - task_detail: Nhiệm vụ chi tiết.
+   - task_detail: Nhiệm vụ chi tiết (nêu rõ Ăn gì / Uống gì / Học gì / Tập gì / Ngủ mấy giờ).
    - energy_level: Nhãn màu ('🔴 Deep Work', '🟡 Shallow Work', hoặc '🟢 Recharge').
    - definition_of_done: Tiêu chí hoàn thành (DoD) cụ thể, đo lường được.
    - resource_url, resource_link: Link tài liệu thực tế chuẩn xác.
    - resource_title: Tên gói tài liệu đi kèm.
    - is_done: Mặc định False.
-8. TÁI CẤU TRÚC ĐỘNG THEO NĂNG LƯỢNG NGÀY (DYNAMIC ENERGY RESCHEDULING):
+9. TÁI CẤU TRÚC ĐỘNG THEO NĂNG LƯỢNG NGÀY (DYNAMIC ENERGY RESCHEDULING):
    - Nếu người dùng báo mệt mỏi, bận rộn, xin hạ tải hoặc yêu cầu 'Duy trì tối thiểu 30%':
      * Đặt is_reschedule_request = True.
      * Tự động trượt các task '🔴 Deep Work' sang ngày tiếp theo (không báo trễ hạn).
@@ -3894,17 +3923,17 @@ YÊU CẦU CỦA NGƯỜI DÙNG:
                             t_energy = "🔴 Deep Work" if idx == 0 else "🟡 Shallow Work"
                             t_dod = f"Hoàn thành trọn vẹn bài tập trọng tâm cho {g_title} và ghi chú tiến độ."
 
-                    slot = "08:00 - 10:00" if idx == 0 else ("14:30 - 16:00" if idx == 1 else "19:30 - 21:00")
+                    slot = "08:30 - 11:30" if idx == 0 else ("14:00 - 16:30" if idx == 1 else "20:00 - 21:15")
                     sess = "Sáng" if idx == 0 else ("Chiều" if idx == 1 else "Tối")
                     if day_idx in (5, 6):  # Cuối tuần
                         if idx == 0:
-                            slot = "08:30 - 10:30"
+                            slot = "09:00 - 11:30"
                             sess = "Sáng"
                         elif idx == 1:
-                            slot = "15:00 - 16:30"
+                            slot = "14:30 - 17:00"
                             sess = "Chiều"
                         else:
-                            slot = "20:00 - 21:00"
+                            slot = "20:00 - 21:15"
                             sess = "Tối"
 
                     res_url = "https://cambridgeenglish.org" if g_domain == "language" else ("https://hubermanlab.com" if g_domain == "health" else "https://developer.mozilla.org")
@@ -3924,11 +3953,86 @@ YÊU CẦU CỦA NGƯỜI DÙNG:
                         "resource_title": res_title,
                         "is_done": False,
                     })
+
+                # Bổ sung các slot sinh hoạt đời sống chuẩn (Ăn gì, Uống gì, Tập gì, Ngủ mấy giờ)
+                schedule_dicts.append({
+                    "date": d,
+                    "session": "Sáng",
+                    "time_slot": "06:30 - 07:30",
+                    "goal_id": "life_morning",
+                    "goal_title": "Nhịp Sinh Học & Năng Lượng",
+                    "task_detail": "Uống 500ml nước ấm chanh & Bữa sáng giàu protein (2 trứng luộc, yến mạch, bơ) (Ăn gì & Uống gì)",
+                    "energy_level": "🟢 Recharge",
+                    "definition_of_done": "Bù nước cho não bộ, nạp 25g protein, đón ánh sáng mặt trời 15 phút.",
+                    "resource_link": "https://hubermanlab.com",
+                    "resource_url": "https://hubermanlab.com",
+                    "resource_title": "Huberman Protocol: Đánh thức đồng hồ sinh học",
+                    "is_done": False,
+                })
+                schedule_dicts.append({
+                    "date": d,
+                    "session": "Chiều",
+                    "time_slot": "11:45 - 13:00",
+                    "goal_id": "life_lunch",
+                    "goal_title": "Dinh Dưỡng Phục Hồi",
+                    "task_detail": "Bữa trưa sạch (Ức gà/Cá hấp, khoai lang/cơm gạo lứt, rau xanh) & Power Nap 20 phút (Ăn gì & Uống gì)",
+                    "energy_level": "🟢 Recharge",
+                    "definition_of_done": "Ăn chậm nhai kỹ, không uống nước ngọt, chợp mắt 20 phút thả lỏng não bộ.",
+                    "resource_link": "https://sleepfoundation.org",
+                    "resource_url": "https://sleepfoundation.org",
+                    "resource_title": "Khoa học giấc ngủ ngắn & Năng lượng buổi chiều",
+                    "is_done": False,
+                })
+                schedule_dicts.append({
+                    "date": d,
+                    "session": "Chiều",
+                    "time_slot": "17:15 - 18:15",
+                    "goal_id": "life_fitness",
+                    "goal_title": "Thể Lực & Sức Bền",
+                    "task_detail": "Vận động thể chất (Kháng lực Push/Pull hoặc Cardio dốc Zone 2) & Uống nước bù điện giải (Tập gì & Uống gì)",
+                    "energy_level": "🔴 Deep Work",
+                    "definition_of_done": "Đạt 40 phút vận động nhịp tim Zone 2 hoặc hoàn thành 4 bài kháng lực chuẩn form.",
+                    "resource_link": "https://muscleandstrength.com",
+                    "resource_url": "https://muscleandstrength.com",
+                    "resource_title": "Giáo án vận động thể chất hàng ngày",
+                    "is_done": False,
+                })
+                schedule_dicts.append({
+                    "date": d,
+                    "session": "Tối",
+                    "time_slot": "21:45 - 22:30",
+                    "goal_id": "life_sleep",
+                    "goal_title": "Giấc Ngủ Tái Tạo",
+                    "task_detail": "Uống 1 ly trà hoa cúc ấm, tắt màn hình xanh & Ngủ đúng 22:30 để ngủ sâu 8 tiếng (Uống gì & Ngủ mấy giờ)",
+                    "energy_level": "🟢 Recharge",
+                    "definition_of_done": "Tắt toàn bộ thiết bị trước 22:15, phòng tối hoàn toàn, lên giường ngủ lúc 22:30.",
+                    "resource_link": "https://sleepfoundation.org",
+                    "resource_url": "https://sleepfoundation.org",
+                    "resource_title": "Tối ưu chu kỳ giấc ngủ sâu REM & NREM",
+                    "is_done": False,
+                })
         rescheduled_tasks = []
         is_rescheduled = False
-        response_text = "Tôi đã phân rã toàn bộ các mục tiêu Active vào Master Schedule đầy đủ 7 ngày (Thứ Hai đến Chủ Nhật) theo đúng nguyên tắc nhịp sinh học (Sáng học nặng, Chiều thực hành, Tối ôn tập) kèm nhãn năng lượng (🔴/🟡/🟢) và Tiêu chí hoàn thành (DoD) mà không trùng lặp giờ giấc!"
+        response_text = "Tôi đã phân rã toàn bộ các mục tiêu Active vào Master Schedule đầy đủ 7 ngày (Thứ Hai đến Chủ Nhật) theo đúng nguyên tắc nhịp sinh học kèm đầy đủ 4 hạng mục đời sống: Ăn gì (thực đơn cụ thể), Uống gì, Tập gì/Học gì, và Ngủ mấy giờ mà không trùng lặp giờ giấc!"
 
     save_master_schedule(schedule_dicts, username=username)
+
+    # Nếu người dùng báo dời lịch và có kết nối Google Calendar, tự động đồng bộ dời sự kiện trên Google Calendar
+    if is_rescheduled and rescheduled_tasks:
+        try:
+            from tools.google_calendar import is_calendar_connected, update_rescheduled_calendar_event
+            if is_calendar_connected(username):
+                for r_name in rescheduled_tasks:
+                    matching_tk = next((tk for tk in schedule_dicts if r_name.lower() in tk.get("task_detail", "").lower()), None)
+                    if matching_tk:
+                        update_rescheduled_calendar_event(
+                            username=username,
+                            task_identifier=r_name,
+                            new_date=matching_tk.get("date", "Thứ Hai"),
+                            new_time_slot=matching_tk.get("time_slot", "08:00 - 10:00"),
+                        )
+        except Exception as e:
+            print(f"Lỗi đồng bộ Google Calendar khi dời lịch: {e}")
 
     return {
         "response": response_text,
