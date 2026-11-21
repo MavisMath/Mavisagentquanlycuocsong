@@ -4073,8 +4073,10 @@ class ProposedBreakdownAdjustment(BaseModel):
     target_goal_title: Optional[str] = Field(None, description="Tên mục tiêu cần điều chỉnh")
     adjustment_type: str = Field(description="'reduce_daily_hours', 'reschedule_time_slot', 'simplify_resources', 'extend_duration', hoặc 'keep_as_is'")
     recommended_daily_hours: Optional[float] = Field(None, description="Số giờ mới đề xuất nếu bị quá tải")
-    recommended_preferred_time: Optional[str] = Field(None, description="Khung giờ mới đề xuất nếu khung giờ cũ hay bị bỏ lỡ (VD: '08:00 - 10:00 Sáng')")
+    recommended_preferred_time: Optional[str] = Field(None, description="Khung giờ mới đề xuất nếu khung giờ cũ hay bị bỏ lỡ (VD: '08:00 - 10:00 Sáng' hoặc '17:30 - 18:30 Chiều')")
+    recommended_sleep_time: Optional[str] = Field(None, description="Giờ đi ngủ mới đề xuất nếu thức khuya/mệt mỏi (VD: '22:15')")
     recommended_resource_additions: List[Dict[str, str]] = Field(default=[], description="Tài liệu bổ trợ dễ hơn nếu task quá khó")
+    updated_strategy_summary: Optional[str] = Field(None, description="Phương pháp chiến lược mới đề xuất cập nhật vào Giai đoạn 1")
     adjustment_explanation: str = Field(description="Lý do điều chỉnh chiến lược")
 
 
@@ -4170,10 +4172,12 @@ CHỈ THỊ KHAI VẤN (RETROSPECTIVE PROTOCOL):
    - Nhận định đúc kết (key_observations): Thấu hiểu nhịp sinh học và nguyên nhân gốc rễ.
 2. Thấu cảm tuyệt đối: Không phán xét. Đặt câu hỏi mở (Socratic) và công nhận nỗ lực.
 3. Sinh đề xuất điều chỉnh cụ thể (proposed_adjustment):
-   - Nếu khung giờ tối hay bị bỏ lỡ: đề xuất dời preferred_time sang khung giờ sáng hoặc chiều phù hợp hơn (VD: '08:00 - 10:00 Sáng').
-   - Nếu quá tải thời gian: đề xuất giảm daily_hours (VD: từ 2h xuống 1.5h).
-   - Nếu tài liệu quá khó/dài: đề xuất bổ sung tài liệu cơ bản, video ngắn hoặc bài viết tóm tắt vào recommended_resource_additions.
-   - Ghi rõ target_goal_id và target_goal_title.
+   - Nếu khung giờ sáng sớm hay bị bỏ lỡ (do thức khuya/dậy muộn): đề xuất đổi giờ đi ngủ sang sớm hơn (VD: '22:15') hoặc dời preferred_time sang khung giờ chiều muộn (VD: '17:30 - 18:30 Chiều').
+   - Nếu khung giờ tối hay bị bỏ lỡ (do cạn kiệt năng lượng sau cả ngày): đề xuất dời preferred_time sang sáng 08:30 - 10:00 hoặc chiều 14:00.
+   - Nếu quá tải thời gian: đề xuất giảm daily_hours (VD: từ 2h xuống 1.5h hoặc 1h).
+   - Nếu bài tập/tài liệu quá khó/dài gây nản lòng: đề xuất tài liệu bổ trợ ngắn gọn, video thực hành dễ tiếp thu hơn.
+   - BẮT BUỘC cung cấp updated_strategy_summary: 1-2 câu phương pháp chiến lược mới đã điều chỉnh để cập nhật thẳng vào Giai đoạn 1.
+   - Ghi rõ target_goal_id, target_goal_title, recommended_preferred_time, recommended_daily_hours, recommended_sleep_time.
    - Đặt should_apply_adjustment = True nếu xác định được mục tiêu cần điều chỉnh.
 """
 
@@ -4190,30 +4194,33 @@ CHỈ THỊ KHAI VẤN (RETROSPECTIVE PROTOCOL):
     except Exception as e:
         print(f"Lỗi invoke trong retrospective_chat: {e}")
         target_g = goals[0] if goals else {}
+        g_title = target_g.get("title") or target_g.get("goal_name", "Mục tiêu")
         output = RetrospectiveChatOutput(
             detected_emotion="tired",
             completion_rate=actual_rate,
             pattern_analysis=HistoricalPatternAnalysis(
-                frequent_missed_slots=missed_slot_summaries[:2] or ["19:30 - 21:30 (Tối)"],
-                overwhelming_resource_types=["Tài liệu lý thuyết dài chuyên sâu"],
-                key_observations="Khung giờ tối muộn năng lượng suy giảm khiến các task nặng dễ bị trì hoãn.",
+                frequent_missed_slots=missed_slot_summaries[:2] or ["06:30 - 07:30 (Sáng)", "20:00 - 21:15 (Tối)"],
+                overwhelming_resource_types=["Khối lượng bài tập lý thuyết dồn ứ cuối ngày"],
+                key_observations="Khung giờ sáng sớm và tối muộn hay bị trượt do năng lượng suy giảm và thói quen thức khuya.",
             ),
             uncompleted_tasks_analysis=[
                 UncompletedTaskReason(
-                    task_detail="Các task chưa kịp hoàn thành",
-                    goal_title=target_g.get("title", "") if target_g else "",
-                    reason="quá tải hoặc bận đột xuất",
-                    specific_bottleneck="Khối lượng công việc dồn ứ cuối ngày",
+                    task_detail="Bài tập sáng sớm / Tối muộn",
+                    goal_title=g_title,
+                    reason="mệt mỏi do thức khuya hoặc quá tải năng lượng",
+                    specific_bottleneck="Thiếu ngủ khiến sáng dậy muộn và tối cạn kiệt năng lượng",
                 )
             ],
-            coaching_reflection="Tôi nhận thấy bạn đã rất nỗ lực nhưng lịch trình gần đây có dấu hiệu hơi quá tải, đặc biệt vào buổi tối. Hãy cho phép bản thân nghỉ ngơi tối nay, chúng ta sẽ điều chỉnh lại nhịp độ để bạn tiến bước bền bỉ hơn!",
+            coaching_reflection="Chào bạn! Tôi nhận thấy bạn rất nỗ lực trong tuần qua, nhưng khung giờ sáng sớm hoặc tối muộn đang hay bị trượt lịch. Bạn có đang cảm thấy áp lực hoặc thức khuya làm ảnh hưởng đến nhịp sinh học không? Coach đề xuất chúng ta dời giờ tập/học sang khung giờ vàng buổi chiều (17:30) hoặc sáng 08:30 và ngủ sớm lúc 22:15 để bạn luôn tràn đầy năng lượng!",
             proposed_adjustment=ProposedBreakdownAdjustment(
                 target_goal_id=target_g.get("id") if target_g else None,
-                target_goal_title=target_g.get("title") or target_g.get("goal_name") if target_g else None,
+                target_goal_title=g_title,
                 adjustment_type="reschedule_time_slot",
                 recommended_daily_hours=1.5,
-                recommended_preferred_time="08:00 - 09:30 (Sáng)",
-                adjustment_explanation="Chuyển khung giờ sang buổi sáng khi đầu óc tỉnh táo và hạ tải 30 phút mỗi ngày để bảo vệ nhịp sinh học.",
+                recommended_preferred_time="17:30 - 18:30 (Chiều)",
+                recommended_sleep_time="22:15",
+                updated_strategy_summary=f"Tái cấu trúc nhịp sinh học: chuyển giờ rèn luyện sang 17:30 Chiều, ngủ sớm lúc 22:15 và tối ưu 1.5h Deep Work.",
+                adjustment_explanation="Chuyển khung giờ sang 17:30 chiều khi cơ thể có độ dẻo dai cao nhất, điều chỉnh giờ ngủ 22:15 để bảo vệ nhịp sinh học và giảm áp lực nhận thức.",
             ),
             should_apply_adjustment=True,
         )
@@ -4235,14 +4242,19 @@ CHỈ THỊ KHAI VẤN (RETROSPECTIVE PROTOCOL):
     append_retrospective_log(log_entry, username=username)
 
     # 2. Khép kín vòng lặp: Cập nhật ngược lại goals nếu should_apply_adjustment == True
-    if output.should_apply_adjustment and output.proposed_adjustment.target_goal_id:
+    if output.should_apply_adjustment and (output.proposed_adjustment.target_goal_id or output.proposed_adjustment.target_goal_title):
         tid = output.proposed_adjustment.target_goal_id
+        t_title = (output.proposed_adjustment.target_goal_title or "").lower().strip()
         for g in goals:
-            if g.get("id") == tid or g.get("goal_id") == tid:
+            gid = g.get("id") or g.get("goal_id")
+            g_title = (g.get("title") or g.get("goal_name") or "").lower().strip()
+            if (tid and gid == tid) or (t_title and (t_title in g_title or g_title in t_title)):
                 if output.proposed_adjustment.recommended_daily_hours:
                     g["daily_hours"] = float(output.proposed_adjustment.recommended_daily_hours)
                 if output.proposed_adjustment.recommended_preferred_time:
                     g["preferred_time"] = output.proposed_adjustment.recommended_preferred_time
+                if output.proposed_adjustment.updated_strategy_summary:
+                    g["strategy_summary"] = output.proposed_adjustment.updated_strategy_summary
                 if output.proposed_adjustment.recommended_resource_additions:
                     bd = g.setdefault("breakdown", {})
                     res_list = bd.setdefault("resources", [])

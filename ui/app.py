@@ -2534,11 +2534,12 @@ with tab_sched:
 
 
 # ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # TAB 4: 📊 GIAI ĐOẠN 3: TỔNG KẾT & CẢI THIỆN (RETROSPECTIVE)
 # ------------------------------------------------------------------------------
 with tab_retro:
-    st.markdown("### 📊 Giai đoạn 3: Tổng Kết, Khai Vấn & Cải Thiện Khép Kín")
-    st.caption("Phân tích quy luật 7 ngày • Khai vấn thấu cảm • Bảo vệ năng lượng • Tự động thích ứng lộ trình khép kín")
+    st.markdown("### 📊 Giai đoạn 3: Tổng Kết, Soi Điểm Mù & Tái Cấu Trúc Khép Kín")
+    st.caption("Tự động soi điểm mù hành vi • Hội thoại thấu cảm & bảo vệ nhịp sinh học • 1-Click tự động tối ưu Giai đoạn 1 & 2")
 
     col_dash_retro, col_chat_retro = st.columns([1.15, 0.85], gap="large")
 
@@ -2549,7 +2550,8 @@ with tab_retro:
 
         total_tasks = len(ms)
         done_tasks = sum(1 for t in ms if t.get("is_done") is True)
-        uncompleted_tasks = total_tasks - done_tasks
+        uncompleted_tasks_list = [t for t in ms if t.get("is_done") is False]
+        uncompleted_tasks = len(uncompleted_tasks_list)
         rate = (done_tasks / total_tasks * 100.0) if total_tasks > 0 else 0.0
 
         # Tính chuỗi ngày kỷ luật (Streak) thực tế từ MongoDB
@@ -2582,24 +2584,23 @@ with tab_retro:
 
         st.markdown("---")
 
-        # Row 2: Biểu đồ phân bổ thời gian theo nhóm mục tiêu (Giờ/Ngày)
-        st.markdown("#### 📊 Phân Bổ Thời Gian Theo Nhóm Mục Tiêu (Giờ/Ngày):")
-        cat_hours = {}
+        # Row 2: Biểu đồ % Kỷ luật theo từng mục tiêu
+        st.markdown("#### 🎯 Biểu Đồ % Kỷ Luật Theo Từng Mục Tiêu:")
+        goal_discipline = {}
         for g in user_goals:
-            cat_name = g.get("category") or "Khác"
-            cat_lbl = CATEGORY_LABELS.get(cat_name, cat_name)
-            dh = float(g.get("daily_hours", 1.0))
-            cat_hours[cat_lbl] = round(cat_hours.get(cat_lbl, 0.0) + dh, 1)
+            g_title = g.get("title") or g.get("goal_name", "Mục tiêu")
+            g_id = g.get("id") or g.get("goal_id")
+            g_tasks = [t for t in ms if (g_id and t.get("goal_id") == g_id) or t.get("goal_title") == g_title]
+            g_done = sum(1 for t in g_tasks if t.get("is_done") is True)
+            g_total = len(g_tasks)
+            g_pct = (g_done / g_total * 100.0) if g_total > 0 else 0.0
+            goal_discipline[g_title] = round(g_pct, 1)
 
-        if cat_hours:
-            st.bar_chart(cat_hours)
+        if goal_discipline:
+            st.bar_chart(goal_discipline)
         else:
-            st.caption("Chưa có dữ liệu phân bổ mục tiêu.")
+            st.caption("Chưa có dữ liệu mục tiêu để lập biểu đồ kỷ luật.")
 
-        st.markdown("---")
-
-        # Row 3: Tỷ Lệ % Hoàn Thành Từng Mục Tiêu
-        st.markdown("#### 🎯 Tỷ Lệ % Hoàn Thành Từng Mục Tiêu:")
         if user_goals:
             for g in user_goals:
                 g_title = g.get("title") or g.get("goal_name", "Mục tiêu")
@@ -2613,79 +2614,128 @@ with tab_retro:
                 with col_gt:
                     st.markdown(f"**{g_title}** ({g_done}/{g_total} task • `{g.get('preferred_time', 'Linh hoạt')}`)")
                 with col_gp:
-                    st.caption(f"Tiến độ: **{g_pct:.0f}%**")
+                    st.caption(f"Kỷ luật: **{g_pct:.0f}%**")
                 st.progress(min(1.0, g_pct / 100.0))
         else:
             st.caption("Chưa có mục tiêu nào trong hệ thống.")
 
         st.markdown("---")
 
-        # Row 4: Phân Tích Quy Luật 7 Ngày (7-Day Pattern Recognition)
-        st.markdown("#### 🔍 Nhận Diện Quy Luật 7 Ngày Gần Nhất (Pattern Analysis):")
-        pattern_data = latest_log.get("pattern_analysis") if isinstance(latest_log.get("pattern_analysis"), dict) else {}
-        missed_slots = pattern_data.get("frequent_missed_slots", [])
-        overwhelm_res = pattern_data.get("overwhelming_resource_types", [])
-        observations = pattern_data.get("key_observations", "")
+        # Row 3: Tự động soi điểm mù hành vi (Behavioral Blindspots)
+        st.markdown("#### 🚨 Soi Điểm Mù Hành Vi & Nhịp Sinh Học (7 Ngày Gần Nhất):")
+        missed_slot_counts = {}
+        missed_tasks_detail = {}
+        for t in uncompleted_tasks_list:
+            slot = t.get("time_slot") or t.get("session") or "Khung giờ khác"
+            missed_slot_counts[slot] = missed_slot_counts.get(slot, 0) + 1
+            td = t.get("task_detail") or "Nhiệm vụ chưa hoàn thành"
+            gt = t.get("goal_title") or "Mục tiêu"
+            task_key = f"{td} ({gt})"
+            missed_tasks_detail[task_key] = missed_tasks_detail.get(task_key, 0) + 1
 
-        if missed_slots or overwhelm_res or observations:
-            with st.container(border=True):
-                if missed_slots:
-                    st.markdown(f"⏰ **Khung giờ hay bị bỏ lỡ nhất:** `{' • '.join(missed_slots)}`")
-                if overwhelm_res:
-                    st.markdown(f"📚 **Tài liệu/Nhiệm vụ có dấu hiệu gây ngợp:** `{' • '.join(overwhelm_res)}`")
-                if observations:
-                    st.info(f"💡 **Đúc kết từ Coach:** {observations}")
-        else:
-            st.caption("Chưa đủ dữ liệu 7 ngày để đúc kết quy luật. Hãy tiếp tục check-in hàng ngày cùng Retrospective Coach!")
+        sorted_missed_slots = sorted(missed_slot_counts.items(), key=lambda x: x[1], reverse=True)
+        sorted_missed_tasks = sorted(missed_tasks_detail.items(), key=lambda x: x[1], reverse=True)
+
+        with st.container(border=True):
+            if sorted_missed_slots:
+                c_ms_1, c_ms_2 = st.columns(2)
+                with c_ms_1:
+                    st.markdown("**⏰ Khung Giờ Hay Bị Trượt Nhất:**")
+                    for s_name, s_count in sorted_missed_slots[:3]:
+                        st.error(f"• **`{s_name}`**: trượt {s_count} task")
+                with c_ms_2:
+                    st.markdown("**📌 Đầu Việc Hay Bị Bỏ Lỡ Nhất:**")
+                    for t_name, t_count in sorted_missed_tasks[:3]:
+                        st.warning(f"• **{t_name}**: lỡ {t_count} lần")
+
+                # Chẩn đoán sinh học tự động
+                has_morning_miss = any("sáng" in s.lower() or "06:" in s or "07:" in s for s, _ in sorted_missed_slots)
+                has_night_miss = any("tối" in s.lower() or "19:" in s or "20:" in s or "21:" in s for s, _ in sorted_missed_slots)
+
+                if has_morning_miss:
+                    st.info("💡 **Chẩn đoán nhịp sinh học sáng:** Thường xuyên trượt lịch buổi sáng cho thấy thói quen thức khuya hoặc ngủ không đủ giấc. Khuyến nghị đi ngủ trước 22:15 hoặc dời khung giờ thực thi sang buổi chiều (17:30 - 18:30).")
+                if has_night_miss:
+                    st.info("💡 **Chẩn đoán nhịp sinh học tối:** Bỏ lỡ khung giờ tối muộn là dấu hiệu cạn kiệt năng lượng ý chí (ego depletion) sau cả ngày. Khuyến nghị dời task nặng sang sáng (08:30) hoặc giảm thời lượng xuống 45 phút.")
+            else:
+                st.success("🎉 **Tuyệt vời! Bạn không bỏ lỡ bất kỳ nhiệm vụ nào trong 7 ngày qua.** Kỷ luật thép được duy trì rất tốt!")
 
         st.markdown("---")
 
-        # Row 5: Nút Khép Kín Vòng Lặp Gọi Architect Bot Cập Nhật Lại Giai Đoạn 1
-        st.markdown("#### 🔄 Cơ Chế Khép Kín Vòng Lặp (Closed-Loop Adaptation):")
-        st.caption("Khi gặp tình trạng quá tải hoặc task quá khó, hãy bấm nút dưới đây để hệ thống tự động gọi **Architect Bot** điều chỉnh lại khung giờ hoặc giảm tải tài liệu trực tiếp trên MongoDB:")
+        # Row 4: Đề xuất Tái Cấu Trúc Khép Kín & Nút 1-Click Cập Nhật
+        st.markdown("#### 🔄 Cơ Chế Tái Cấu Trúc Khép Kín (Closed-Loop Adaptation):")
+        st.caption("Khi gặp tình trạng quá tải hoặc trượt lịch, hãy áp dụng đề xuất tái cấu trúc dưới đây để tự động cập nhật Giai đoạn 1 & 2 và đồng bộ Google Calendar:")
 
-        if st.button("🔄 Áp dụng điều chỉnh ngược lại Thiết lập (Giai đoạn 1)", type="primary", use_container_width=True, key=f"btn_apply_loop_{current_username}"):
-            if latest_log and (latest_log.get("recommended_adjustments") or latest_log.get("proposed_adjustment")):
-                adj_desc = latest_log.get("recommended_adjustments", "")
-                prop_adj = latest_log.get("proposed_adjustment") or {}
-                target_gid = prop_adj.get("target_goal_id")
-                target_title = prop_adj.get("target_goal_title") or ""
-                rec_hours = prop_adj.get("recommended_daily_hours")
-                rec_time = prop_adj.get("recommended_preferred_time")
+        prop_adj = latest_log.get("proposed_adjustment") or {}
+        rec_target = prop_adj.get("target_goal_title") or (user_goals[0].get("title") if user_goals else "Mục tiêu")
+        rec_time = prop_adj.get("recommended_preferred_time") or "17:30 - 18:30 (Chiều)"
+        rec_sleep = prop_adj.get("recommended_sleep_time") or "22:15"
+        rec_hours = prop_adj.get("recommended_daily_hours") or 1.5
+        updated_strat = prop_adj.get("updated_strategy_summary") or f"Tái cấu trúc nhịp sinh học: chuyển giờ rèn luyện sang {rec_time}, ngủ sớm lúc {rec_sleep} và tối ưu {rec_hours}h Deep Work."
+        adj_reason = prop_adj.get("adjustment_explanation") or latest_log.get("recommended_adjustments", "Tối ưu lại khung giờ và bảo vệ nhịp sinh học.")
 
-                if not target_gid and user_goals:
-                    target_gid = user_goals[0].get("id") or user_goals[0].get("goal_id")
-                    target_title = user_goals[0].get("title") or user_goals[0].get("goal_name", "")
+        with st.container(border=True):
+            st.markdown(f"**🎯 Mục tiêu điều chỉnh:** `{rec_target}`")
+            st.markdown(f"**⏰ Khung giờ mới đề xuất:** `{rec_time}`")
+            st.markdown(f"**💤 Giờ ngủ tối ưu đề xuất:** `{rec_sleep}`")
+            st.markdown(f"**⏳ Thời lượng mới:** `{rec_hours} giờ/ngày`")
+            st.markdown(f"**📝 Chiến lược mới (Giai đoạn 1):** {updated_strat}")
+            st.markdown(f"**💡 Lý do điều chỉnh:** {adj_reason}")
 
-                with st.spinner("Đang kích hoạt Architect Bot để đồng bộ điều chỉnh ngược lại Giai đoạn 1 lên MongoDB..."):
-                    if architect_chat is not None:
-                        adjust_cmd = (
-                            f"Áp dụng điều chỉnh chiến lược từ Giai đoạn 3 cho mục tiêu '{target_title}': "
-                            f"{adj_desc}. Khung giờ đề xuất: {rec_time or '08:00 - 10:00 Sáng'}. "
-                            f"Thời lượng đề xuất: {rec_hours or 1.5} giờ/ngày. Hãy tái cấu trúc lại lộ trình cho phù hợp!"
-                        )
-                        arch_res = architect_chat(
-                            user_message=adjust_cmd,
-                            goal_id=target_gid,
-                            username=current_username,
-                            force_breakdown=True,
-                        )
-                    else:
-                        # Fallback nếu Architect Bot chưa sẵn sàng
-                        for g in user_goals:
-                            if g.get("id") == target_gid or g.get("goal_id") == target_gid:
-                                if rec_hours:
-                                    g["daily_hours"] = float(rec_hours)
-                                if rec_time:
-                                    g["preferred_time"] = rec_time
-                        save_user_goals(user_goals, username=current_username)
+        if st.button("✨ Áp dụng điều chỉnh này vào Kế hoạch (Giai đoạn 1 & 2)", type="primary", use_container_width=True, key=f"btn_apply_loop_{current_username}"):
+            with st.spinner("Đang tự động cập nhật Giai đoạn 1, tái cấu trúc Giai đoạn 2 và đồng bộ Google Calendar..."):
+                # 1. Cập nhật Giai đoạn 1 (user_goals)
+                matched_goal = None
+                for g in user_goals:
+                    gid = g.get("id") or g.get("goal_id")
+                    gt = (g.get("title") or g.get("goal_name") or "").lower().strip()
+                    if (prop_adj.get("target_goal_id") and gid == prop_adj.get("target_goal_id")) or (rec_target and (rec_target.lower().strip() in gt or gt in rec_target.lower().strip())):
+                        matched_goal = g
+                        if rec_hours:
+                            g["daily_hours"] = float(rec_hours)
+                        if rec_time:
+                            g["preferred_time"] = rec_time
+                        if updated_strat:
+                            g["strategy_summary"] = updated_strat
+                        break
 
+                if not matched_goal and user_goals:
+                    matched_goal = user_goals[0]
+                    if rec_hours:
+                        matched_goal["daily_hours"] = float(rec_hours)
+                    if rec_time:
+                        matched_goal["preferred_time"] = rec_time
+                    if updated_strat:
+                        matched_goal["strategy_summary"] = updated_strat
+
+                save_user_goals(user_goals, username=current_username)
                 st.session_state[goals_key] = load_user_goals(current_username)
-                st.session_state[master_schedule_key] = load_master_schedule(current_username)
-                st.success(f"🎉 Đã kích hoạt Architect Bot điều chỉnh thành công mục tiêu '{target_title}' trên MongoDB: {adj_desc}")
+
+                # 2. Tái cấu trúc Giai đoạn 2 (master_schedule via scheduler_chat)
+                target_goal_name = matched_goal.get("title") or matched_goal.get("goal_name", "Mục tiêu") if matched_goal else rec_target
+                if scheduler_chat is not None:
+                    sched_prompt = (
+                        f"Tái cấu trúc lại Master Schedule 7 ngày cho mục tiêu '{target_goal_name}' "
+                        f"theo khung giờ mới: {rec_time}, thời lượng: {rec_hours} giờ/ngày, "
+                        f"giờ đi ngủ tối ưu: {rec_sleep}. "
+                        f"Chiến lược mới: {updated_strat}. "
+                        f"Hãy lập lịch cân bằng, chi tiết 7 ngày từ hôm nay!"
+                    )
+                    sched_res = scheduler_chat(sched_prompt, username=current_username)
+
+                fresh_ms = load_master_schedule(current_username)
+                st.session_state[master_schedule_key] = fresh_ms
+
+                # 3. Đồng bộ lại lên Google Calendar nếu đã kết nối
+                gcal_msg = ""
+                if is_calendar_connected(current_username):
+                    gcal_sync = sync_schedule_to_google_calendar(current_username, fresh_ms)
+                    if gcal_sync.get("success"):
+                        gcal_msg = f" • 📅 Đã đồng bộ {gcal_sync.get('synced_count', 0)} sự kiện lên Google Calendar!"
+                    else:
+                        gcal_msg = f" • ⚠️ Đồng bộ Google Calendar: {gcal_sync.get('message')}"
+
+                st.success(f"🎉 Đã tái cấu trúc khép kín thành công! Giai đoạn 1 & 2 đã được cập nhật tối ưu.{gcal_msg}")
                 st.rerun()
-            else:
-                st.info("💡 Bạn hãy chia sẻ phản hồi với Retrospective Coach ở cột bên phải để Coach tạo đề xuất điều chỉnh cá nhân hóa trước!")
 
         st.markdown("---")
         st.markdown("#### 📜 Lịch Sử Nhật Ký Khai Vấn Hồi Cứu (Retrospective Logs):")
@@ -2706,6 +2756,24 @@ with tab_retro:
     with col_chat_retro:
         st.markdown("#### 💬 Trò Chuyện Cùng Retrospective Coach")
         st.caption("Check-in cuối ngày • Lắng nghe cảm xúc • Nhận diện quy luật 7 ngày • Đề xuất điều chỉnh")
+
+        if st.button("🔍 Phân tích tuần qua cùng Coach", key=f"btn_coach_weekly_analyze_{current_username}", type="secondary", use_container_width=True):
+            user_msg = "Chào Coach, hãy phân tích toàn bộ lịch trình 7 ngày qua của tôi từ Giai đoạn 2, chỉ ra các điểm mù hành vi và đề xuất giải pháp tái cấu trúc tối ưu."
+            st.session_state[chat_retro_key].append({"role": "user", "content": user_msg})
+            with st.spinner("Retrospective Coach đang soi điểm mù 7 ngày và sinh đề xuất tái cấu trúc..."):
+                if retrospective_chat is not None:
+                    res = retrospective_chat(
+                        user_message=user_msg,
+                        username=current_username,
+                        chat_history=st.session_state[chat_retro_key],
+                    )
+                    retro_rep = res.get("response", "Cảm ơn bạn đã check-in.")
+                else:
+                    retro_rep = "Hệ thống đang chuẩn bị kết nối AI..."
+                st.session_state[chat_retro_key].append({"role": "assistant", "content": retro_rep})
+                st.session_state[retro_logs_key] = load_retrospective_logs(current_username)
+                st.session_state[goals_key] = load_user_goals(current_username)
+                st.rerun()
 
         chat_container_retro = st.container(height=520)
         with chat_container_retro:

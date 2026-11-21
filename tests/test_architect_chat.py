@@ -348,6 +348,102 @@ class TestArchitectAndImports(unittest.TestCase):
         self.assertEqual(end_dt.hour, 10)
         self.assertEqual(end_dt.minute, 0)
 
+    def test_phase3_retrospective_blindspots_and_closed_loop_adaptation(self):
+        """Bảo đảm Giai đoạn 3: Soi điểm mù hành vi, khai vấn thấu cảm và cập nhật khép kín ngược lại Giai đoạn 1 & 2."""
+        from memory.goals import load_retrospective_logs
+
+        test_goal = {
+            "id": f"goal_{uuid.uuid4().hex[:6]}",
+            "title": "Tập Gym & Tăng cơ giảm mỡ",
+            "category": "Sức khỏe",
+            "priority": "P1 - Urgent",
+            "preferred_time": "06:00 - 07:30 Sáng",
+            "daily_hours": 2.0,
+            "duration_days": 90,
+            "status": "active",
+            "strategy_summary": "Tập kháng lực cường độ cao lúc sáng sớm.",
+            "breakdown": {},
+        }
+        save_user_goals([test_goal], username=self.test_username)
+
+        # Giả lập Master Schedule có các task sáng sớm bị bỏ lỡ (is_done=False)
+        mock_schedule = [
+            {
+                "date": "Thứ Hai",
+                "session": "Sáng",
+                "time_slot": "06:00 - 07:30",
+                "task_detail": "Tập Squat và Deadlift",
+                "goal_id": test_goal["id"],
+                "goal_title": test_goal["title"],
+                "is_done": False,
+            },
+            {
+                "date": "Thứ Ba",
+                "session": "Sáng",
+                "time_slot": "06:00 - 07:30",
+                "task_detail": "Cardio ngắt quãng HIIT",
+                "goal_id": test_goal["id"],
+                "goal_title": test_goal["title"],
+                "is_done": False,
+            },
+            {
+                "date": "Thứ Tư",
+                "session": "Sáng",
+                "time_slot": "06:00 - 07:30",
+                "task_detail": "Tập ngực và bắp tay sau",
+                "goal_id": test_goal["id"],
+                "goal_title": test_goal["title"],
+                "is_done": False,
+            },
+            {
+                "date": "Thứ Năm",
+                "session": "Tối",
+                "time_slot": "21:00 - 21:30",
+                "task_detail": "Giãn cơ và uống Whey",
+                "goal_id": test_goal["id"],
+                "goal_title": test_goal["title"],
+                "is_done": True,
+            },
+        ]
+        save_master_schedule(mock_schedule, username=self.test_username)
+
+        # 1. Gọi retrospective_chat phân tích điểm mù
+        res = retrospective_chat(
+            user_message="Dạo này tôi hay thức khuya làm việc nên sáng 6h không dậy nổi để tập, cảm thấy rất mệt mỏi.",
+            username=self.test_username,
+        )
+
+        self.assertIn("response", res)
+        self.assertIn("pattern_analysis", res)
+        self.assertIn("proposed_adjustments", res)
+
+        prop_adj = res["proposed_adjustments"]
+        self.assertIsNotNone(prop_adj)
+        # Kiểm tra Coach đã phát hiện điểm mù và đề xuất khung giờ mới / giờ ngủ / hạ tải
+        rec_time = prop_adj.get("recommended_preferred_time")
+        rec_sleep = prop_adj.get("recommended_sleep_time")
+        rec_hours = prop_adj.get("recommended_daily_hours")
+        updated_strat = prop_adj.get("updated_strategy_summary")
+
+        self.assertTrue(bool(rec_time or rec_sleep or rec_hours or updated_strat))
+
+        # 2. Kiểm tra khép kín: user_goals ở Giai đoạn 1 đã được cập nhật tự động
+        updated_goals = load_user_goals(self.test_username)
+        self.assertEqual(len(updated_goals), 1)
+        g = updated_goals[0]
+        if rec_time:
+            self.assertEqual(g.get("preferred_time"), rec_time)
+        if rec_hours:
+            self.assertEqual(g.get("daily_hours"), float(rec_hours))
+        if updated_strat:
+            self.assertEqual(g.get("strategy_summary"), updated_strat)
+
+        # 3. Kiểm tra nhật ký retrospective_logs đã được lưu vào MongoDB
+        r_logs = load_retrospective_logs(self.test_username)
+        self.assertTrue(len(r_logs) >= 1)
+        self.assertIn("pattern_analysis", r_logs[-1])
+
+
 
 if __name__ == "__main__":
     unittest.main()
