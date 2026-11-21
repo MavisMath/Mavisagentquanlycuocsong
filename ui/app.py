@@ -1797,24 +1797,82 @@ with tab_sched:
                             st.link_button(f"📦 Mở Tài Liệu: {r_item['res_title']}", url=r_item["link"])
 
         else:
-            mode = st.radio(
-                "Chế độ hiển thị lịch:",
-                options=["🌐 Lịch Tổng Hợp Tất Cả Mục Tiêu (Master Schedule)", "🎯 Xem Lịch Riêng Theo Từng Mục Tiêu"],
-                horizontal=True,
-                key=f"sched_mode_{current_username}",
-            )
+            STANDARD_DAYS = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
+            DAY_SHORT = {
+                "Thứ Hai": "Thứ 2",
+                "Thứ Ba": "Thứ 3",
+                "Thứ Tư": "Thứ 4",
+                "Thứ Năm": "Thứ 5",
+                "Thứ Sáu": "Thứ 6",
+                "Thứ Bảy": "Thứ 7",
+                "Chủ Nhật": "Chủ Nhật",
+            }
+
+            # ------------------------------------------------------------------
+            # 1. BỘ CHỌN GÓC NHÌN THỜI GIAN & PHẠM VI MỤC TIÊU
+            # ------------------------------------------------------------------
+            st.markdown("#### 🧭 Góc Nhìn Thời Gian & Lịch Trình Điều Hành:")
+            view_options = ["📅 Theo Ngày", "🗓️ Theo Tuần", "📆 Theo Tháng", "📊 Theo Quý"]
+            view_key = f"sched_view_mode_{current_username}"
+            if hasattr(st, "segmented_control"):
+                selected_view = st.segmented_control(
+                    "Góc nhìn thời gian:",
+                    options=view_options,
+                    default=st.session_state.get(view_key, "📅 Theo Ngày"),
+                    key=view_key,
+                    label_visibility="collapsed",
+                )
+            else:
+                default_idx = view_options.index(st.session_state.get(view_key, "📅 Theo Ngày")) if st.session_state.get(view_key) in view_options else 0
+                selected_view = st.radio(
+                    "Góc nhìn thời gian:",
+                    options=view_options,
+                    index=default_idx,
+                    horizontal=True,
+                    key=view_key,
+                    label_visibility="collapsed",
+                )
+            if not selected_view:
+                selected_view = "📅 Theo Ngày"
+
+            col_mode, col_spec = st.columns([1.1, 0.9])
+            with col_mode:
+                mode = st.radio(
+                    "Phạm vi hiển thị:",
+                    options=["🌐 Lịch Tổng Hợp Tất Cả Mục Tiêu (Master Schedule)", "🎯 Xem Lịch Riêng Theo Từng Mục Tiêu"],
+                    horizontal=True,
+                    key=f"sched_mode_{current_username}",
+                )
 
             filtered_schedule = active_schedule
-            if mode == "🎯 Xem Lịch Riêng Theo Từng Mục Tiêu":
-                unique_goals = list(set(t.get("goal_title", "Mục tiêu") for t in active_schedule if t.get("goal_title")))
-                if unique_goals:
-                    chosen_g = st.selectbox("Chọn mục tiêu cụ thể:", options=unique_goals, key=f"sel_ms_goal_{current_username}")
-                    filtered_schedule = [t for t in active_schedule if t.get("goal_title") == chosen_g]
-                else:
-                    st.info("Chưa có mục tiêu nào trong lịch.")
+            with col_spec:
+                if mode == "🎯 Xem Lịch Riêng Theo Từng Mục Tiêu":
+                    unique_goals = list(dict.fromkeys(t.get("goal_title", "Mục tiêu") for t in active_schedule if t.get("goal_title")))
+                    if unique_goals:
+                        chosen_g = st.selectbox("Chọn mục tiêu cụ thể:", options=unique_goals, key=f"sel_ms_goal_{current_username}")
+                        filtered_schedule = [t for t in active_schedule if t.get("goal_title") == chosen_g]
+                    else:
+                        st.info("Chưa có mục tiêu nào trong lịch.")
 
-            st.markdown("---")
-            # Nút xuất lịch
+            # Kiểm tra xem lịch đã đủ 7 ngày chưa và hỗ trợ tạo nhanh 7 ngày
+            unique_sched_days = set(t.get("date") for t in filtered_schedule if t.get("date"))
+            if len(unique_sched_days) < 7 and user_goals_sched:
+                col_btn_gen, col_tip_gen = st.columns([0.45, 0.55])
+                with col_btn_gen:
+                    if st.button("⚡ Tự Động Xếp Đủ Lịch 7 Ngày (Thứ 2 - CN)", key=f"btn_auto_7d_{current_username}", use_container_width=True):
+                        with st.spinner("AI Master Scheduler đang phân bổ đầy đủ 7 ngày theo nhịp sinh học..."):
+                            if scheduler_chat is not None:
+                                res = scheduler_chat(
+                                    user_message="Tự động xếp đủ lịch trình 7 ngày từ Thứ Hai đến Chủ Nhật cho toàn bộ active goals theo đúng nhịp sinh học",
+                                    username=current_username,
+                                )
+                                st.session_state[master_schedule_key] = load_master_schedule(current_username)
+                                st.success("✅ Đã cập nhật đủ lịch trình 7 ngày!")
+                                st.rerun()
+                with col_tip_gen:
+                    st.caption("💡 Lịch hiện có ít hơn 7 ngày. Bấm để AI tự động phân bổ đủ 7 ngày Thứ Hai - Chủ Nhật.")
+
+            # Nút xuất lịch ICS & Google Calendar
             c_ics, c_gcal = st.columns(2)
             with c_ics:
                 ics_text = generate_ics_from_master_schedule(filtered_schedule, current_username)
@@ -1836,26 +1894,31 @@ with tab_sched:
                 st.link_button("🌐 Mở Google Calendar (Thêm Sự Kiện 1 Chạm)", url=gcal_link, use_container_width=True)
 
             st.markdown("---")
-            st.markdown("#### 📋 Checklist Thực Thi Tương Tác Hàng Ngày:")
 
             if not filtered_schedule:
                 st.info(
-                    "💡 Chưa có lịch trình. Bạn hãy chat với **AI Master Scheduler** ở cột bên phải "
+                    "💡 Chưa có lịch trình. Bạn hãy bấm nút **'⚡ Tự Động Xếp Đủ Lịch 7 Ngày'** ở trên hoặc chat với **AI Master Scheduler** ở cột bên phải "
                     "(ví dụ: *'Hãy gom tất cả active goals để xếp lịch tuần này cho tôi'*) để tạo lịch ngay lập tức!"
                 )
             else:
-                days_order = []
-                for t in filtered_schedule:
-                    d = t.get("date", "Hôm nay")
-                    if d not in days_order:
-                        days_order.append(d)
+                # ==============================================================
+                # GÓC NHÌN 1: 📅 THEO NGÀY (DAILY VIEW)
+                # ==============================================================
+                if selected_view == "📅 Theo Ngày":
+                    available_days = [d for d in STANDARD_DAYS if any(t.get("date") == d for t in filtered_schedule)]
+                    if not available_days:
+                        available_days = list(dict.fromkeys(t.get("date", "Hôm nay") for t in filtered_schedule)) or STANDARD_DAYS
 
-                for d in days_order:
-                    day_tasks = [t for t in filtered_schedule if t.get("date") == d]
+                    sel_day = st.selectbox(
+                        "📅 Chọn ngày xem chi tiết:",
+                        options=available_days,
+                        key=f"sel_daily_day_{current_username}",
+                    )
+
+                    day_tasks = [t for t in filtered_schedule if t.get("date") == sel_day]
                     deferred_tasks = []
                     displayed_tasks = day_tasks
 
-                    # Nếu ở Chế độ Duy trì tối thiểu (30%), lọc giữ lại tối đa 3 task nhẹ nhất
                     if cur_energy_mode == "🛡️ Duy Trì Tối Thiểu (30% - Khi mệt/bận)":
                         light_tasks = []
                         heavy_tasks = []
@@ -1876,75 +1939,365 @@ with tab_sched:
 
                     done_day = sum(1 for t in displayed_tasks if t.get("is_done") is True)
                     total_day = len(displayed_tasks)
+                    pct_day = int((done_day / total_day * 100)) if total_day > 0 else 0
 
-                    with st.expander(f"📅 **{d}** — Tiến độ: {done_day}/{total_day} hoàn thành", expanded=(done_day < total_day)):
-                        for sess in ["Sáng", "Chiều", "Tối"]:
-                            sess_tasks = [t for t in displayed_tasks if t.get("session") == sess]
-                            if sess_tasks:
-                                st.markdown(f"##### ⏰ Buổi {sess}:")
-                                for idx, task in enumerate(sess_tasks):
-                                    t_detail = task.get("task_detail", "Nhiệm vụ")
-                                    t_slot = task.get("time_slot", "08:00 - 10:00")
-                                    t_goal = task.get("goal_title", "")
-                                    t_link = task.get("resource_url") or task.get("resource_link", "")
-                                    t_res_title = task.get("resource_title", "")
-                                    is_done_val = bool(task.get("is_done", False))
+                    c_m1, c_m2, c_m3 = st.columns(3)
+                    with c_m1:
+                        st.metric("📌 Tổng nhiệm vụ ngày", f"{total_day} task")
+                    with c_m2:
+                        st.metric("✅ Đã hoàn thành", f"{done_day}/{total_day}")
+                    with c_m3:
+                        st.metric("⚡ Tỷ lệ thực thi", f"{pct_day}%")
 
-                                    # Nhãn năng lượng
-                                    t_energy = task.get("energy_level")
-                                    if not t_energy:
-                                        if sess == "Sáng":
-                                            t_energy = "🔴 Deep Work"
-                                        elif sess == "Chiều":
-                                            t_energy = "🟡 Shallow Work"
+                    st.progress(pct_day / 100)
+
+                    for sess in ["Sáng", "Chiều", "Tối"]:
+                        sess_tasks = [t for t in displayed_tasks if t.get("session") == sess]
+                        if sess_tasks:
+                            st.markdown(f"##### ⏰ Buổi {sess}:")
+                            for idx, task in enumerate(sess_tasks):
+                                t_detail = task.get("task_detail", "Nhiệm vụ")
+                                t_slot = task.get("time_slot", "08:00 - 10:00")
+                                t_goal = task.get("goal_title", "")
+                                t_link = task.get("resource_url") or task.get("resource_link", "")
+                                t_res_title = task.get("resource_title", "")
+                                is_done_val = bool(task.get("is_done", False))
+
+                                t_energy = task.get("energy_level")
+                                if not t_energy:
+                                    if sess == "Sáng":
+                                        t_energy = "🔴 Deep Work"
+                                    elif sess == "Chiều":
+                                        t_energy = "🟡 Shallow Work"
+                                    else:
+                                        t_energy = "🟢 Recharge"
+
+                                t_dod = task.get("definition_of_done")
+                                if not t_dod:
+                                    t_dod = f"Hoàn thành trọn vẹn nội dung '{t_detail}' và ghi chú tiến độ."
+
+                                chk_key = f"chk_day_{current_username}_{sel_day}_{sess}_{idx}_{abs(hash(t_detail)) % 100000}"
+
+                                with st.container(border=True):
+                                    col_chk, col_card = st.columns([0.08, 0.92])
+                                    with col_chk:
+                                        checked = st.checkbox("", value=is_done_val, key=chk_key, label_visibility="collapsed")
+                                        if checked != is_done_val:
+                                            update_master_schedule_task_status(
+                                                task_identifier=t_detail,
+                                                is_done=checked,
+                                                date=sel_day,
+                                                username=current_username,
+                                            )
+                                            task["is_done"] = checked
+                                            st.session_state[master_schedule_key] = load_master_schedule(current_username)
+                                            st.toast(f"✅ Đã cập nhật: {t_detail[:35]}...")
+                                            st.rerun()
+                                    with col_card:
+                                        if t_goal:
+                                            st.markdown(f"**{t_energy}** &nbsp;|&nbsp; ⏰ **{t_slot}** — **{t_detail}** `[🎯 {t_goal}]`")
                                         else:
-                                            t_energy = "🟢 Recharge"
+                                            st.markdown(f"**{t_energy}** &nbsp;|&nbsp; ⏰ **{t_slot}** — **{t_detail}**")
 
-                                    # Tiêu chí hoàn thành (DoD)
-                                    t_dod = task.get("definition_of_done")
-                                    if not t_dod:
-                                        t_dod = f"Hoàn thành trọn vẹn nội dung '{t_detail}' và ghi chú tiến độ."
+                                        if is_done_val:
+                                            st.caption("✅ :green[**Đã hoàn thành xuất sắc!**]")
 
-                                    chk_key = f"chk_{current_username}_{d}_{sess}_{idx}_{abs(hash(t_detail)) % 100000}"
+                                        st.caption(f"🏁 **Tiêu chí hoàn thành (DoD):** {t_dod}")
 
-                                    with st.container(border=True):
-                                        col_chk, col_card = st.columns([0.08, 0.92])
-                                        with col_chk:
-                                            checked = st.checkbox("", value=is_done_val, key=chk_key, label_visibility="collapsed")
-                                            if checked != is_done_val:
+                                        if t_link:
+                                            btn_lbl = f"📦 Mở Tài Liệu: {t_res_title}" if (t_res_title and len(t_res_title) < 35) else "📦 Mở Tài Liệu Thực Tế (1-Click)"
+                                            st.link_button(label=btn_lbl, url=t_link, use_container_width=False)
+
+                    if deferred_tasks:
+                        st.markdown("---")
+                        with st.expander(f"💤 {len(deferred_tasks)} task Deep Work đã tự động trượt sang ngày mai (Bảo toàn Streak, không tính trễ):", expanded=False):
+                            for dt in deferred_tasks:
+                                dt_title = dt.get("task_detail", "Nhiệm vụ")
+                                dt_slot = dt.get("time_slot", "")
+                                dt_goal = dt.get("goal_title", "")
+                                st.markdown(f"- ▫️ ⏰ **{dt_slot}**: {dt_title} `[🎯 {dt_goal}]` &nbsp; `:orange[Đã trượt sang ngày mai]`")
+
+                # ==============================================================
+                # GÓC NHÌN 2: 🗓️ THEO TUẦN (WEEKLY MATRIX VIEW - 3 HÀNG X 7 CỘT)
+                # ==============================================================
+                elif selected_view == "🗓️ Theo Tuần":
+                    total_wk = len(filtered_schedule)
+                    done_wk = sum(1 for t in filtered_schedule if t.get("is_done") is True)
+                    pct_wk = int((done_wk / total_wk * 100)) if total_wk > 0 else 0
+
+                    c_w1, c_w2, c_w3 = st.columns(3)
+                    with c_w1:
+                        st.metric("🗓️ Tổng nhiệm vụ tuần", f"{total_wk} task")
+                    with c_w2:
+                        st.metric("✅ Đã hoàn thành tuần", f"{done_wk}/{total_wk}")
+                    with c_w3:
+                        st.metric("⚡ Tiến độ thực thi tuần", f"{pct_wk}%")
+
+                    st.progress(pct_wk / 100)
+                    st.caption("💡 Ma trận toàn cảnh 7 ngày chia theo 3 buổi (Sáng / Chiều / Tối) không chồng chéo:")
+
+                    # Header 7 cột cho 7 ngày
+                    col_headers = st.columns(7)
+                    for d_idx, d_name in enumerate(STANDARD_DAYS):
+                        d_tasks = [t for t in filtered_schedule if t.get("date") == d_name]
+                        d_done = sum(1 for t in d_tasks if t.get("is_done") is True)
+                        d_tot = len(d_tasks)
+                        with col_headers[d_idx]:
+                            st.markdown(f"**{DAY_SHORT.get(d_name, d_name)}**")
+                            if d_tot > 0:
+                                st.caption(f"{d_done}/{d_tot} xong")
+                            else:
+                                st.caption("Nghỉ")
+
+                    # 3 Hàng: Sáng / Chiều / Tối
+                    session_defs = [
+                        ("🌅 Buổi Sáng", "Sáng", "08:00 - 11:30"),
+                        ("☀️ Buổi Chiều", "Chiều", "14:00 - 17:30"),
+                        ("🌙 Buổi Tối", "Tối", "19:30 - 22:00"),
+                    ]
+
+                    for sess_title, sess_name, sess_time in session_defs:
+                        st.markdown(f"##### {sess_title} ({sess_time}):")
+                        cols_sess = st.columns(7)
+                        for d_idx, d_name in enumerate(STANDARD_DAYS):
+                            with cols_sess[d_idx]:
+                                cell_tasks = [t for t in filtered_schedule if t.get("date") == d_name and t.get("session") == sess_name]
+                                if not cell_tasks:
+                                    st.caption("▫️ *Trống*")
+                                else:
+                                    for t_idx, tk in enumerate(cell_tasks):
+                                        t_detail = tk.get("task_detail", "Nhiệm vụ")
+                                        t_energy = tk.get("energy_level", "🔴 Deep Work")
+                                        energy_badge = "🔴" if ("deep" in str(t_energy).lower() or "🔴" in str(t_energy)) else ("🟡" if ("shallow" in str(t_energy).lower() or "🟡" in str(t_energy)) else "🟢")
+                                        t_is_done = bool(tk.get("is_done", False))
+                                        t_dod = tk.get("definition_of_done", "")
+                                        t_link = tk.get("resource_url") or tk.get("resource_link", "")
+
+                                        wk_chk_key = f"chk_wk_{current_username}_{d_name}_{sess_name}_{t_idx}_{abs(hash(t_detail)) % 100000}"
+
+                                        with st.container(border=True):
+                                            c_w_chk, c_w_txt = st.columns([0.22, 0.78])
+                                            with c_w_chk:
+                                                new_done = st.checkbox("", value=t_is_done, key=wk_chk_key, label_visibility="collapsed")
+                                                if new_done != t_is_done:
+                                                    update_master_schedule_task_status(
+                                                        task_identifier=t_detail,
+                                                        is_done=new_done,
+                                                        date=d_name,
+                                                        username=current_username,
+                                                    )
+                                                    st.session_state[master_schedule_key] = load_master_schedule(current_username)
+                                                    st.toast(f"✅ Đã cập nhật: {t_detail[:30]}...")
+                                                    st.rerun()
+                                            with c_w_txt:
+                                                st.markdown(f"{energy_badge} **{tk.get('time_slot', '')}**")
+                                                if t_is_done:
+                                                    st.caption(f"~~{t_detail[:40]}~~")
+                                                else:
+                                                    st.caption(f"**{t_detail[:40]}**")
+                                                if t_dod:
+                                                    st.caption(f"🏁 {t_dod[:40]}...")
+                                                if t_link:
+                                                    st.link_button("📦 Tài liệu", url=t_link, use_container_width=True)
+
+                # ==============================================================
+                # GÓC NHÌN 3: 📆 THEO THÁNG (MONTHLY 4-WEEK GRID VIEW)
+                # ==============================================================
+                elif selected_view == "📆 Theo Tháng":
+                    tot_mth = len(filtered_schedule)
+                    done_mth = sum(1 for t in filtered_schedule if t.get("is_done") is True)
+                    pct_mth = int((done_mth / tot_mth * 100)) if tot_mth > 0 else 0
+
+                    c_m1, c_m2, c_m3 = st.columns(3)
+                    with c_m1:
+                        st.metric("📆 Nhiệm vụ tháng", f"{tot_mth} task")
+                    with c_m2:
+                        st.metric("✅ Đã hoàn thành", f"{done_mth}/{tot_mth}")
+                    with c_m3:
+                        st.metric("⚡ Tỷ lệ tích lũy tháng", f"{pct_mth}%")
+
+                    st.progress(pct_mth / 100)
+
+                    # Trích xuất mục tiêu tháng từ Giai đoạn 1 nếu có
+                    monthly_targets = []
+                    for g in user_goals_sched:
+                        bd = g.get("breakdown", {})
+                        for m_item in bd.get("monthly", []):
+                            m_title = m_item.get("month", m_item.get("title", ""))
+                            m_focus = m_item.get("focus", m_item.get("objective", ""))
+                            if m_focus:
+                                monthly_targets.append(f"🎯 **{g.get('title', 'Mục tiêu')}**: {m_focus}")
+
+                    if monthly_targets:
+                        with st.expander("🎯 **Mục Tiêu Trọng Tâm Tháng Này (Đồng bộ từ Giai đoạn 1):**", expanded=True):
+                            for mt in monthly_targets:
+                                st.markdown(f"- {mt}")
+
+                    # Bộ chọn tuần chi tiết trong tháng
+                    sel_week_mth = st.radio(
+                        "Chọn tuần trong tháng:",
+                        options=["Toàn Bộ Tháng (4 Tuần)", "Tuần 1: Khởi Động & Nền Tảng", "Tuần 2: Tăng Tốc & Kỷ Luật", "Tuần 3: Chuyên Sâu & Bứt Phá", "Tuần 4: Về Đích & Tinh Chỉnh"],
+                        horizontal=True,
+                        key=f"sel_mth_wk_{current_username}",
+                    )
+
+                    week_ranges = []
+                    if sel_week_mth == "Toàn Bộ Tháng (4 Tuần)":
+                        week_ranges = [
+                            ("Tuần 1: Khởi Động & Nền Tảng", 1),
+                            ("Tuần 2: Tăng Tốc & Kỷ Luật", 2),
+                            ("Tuần 3: Chuyên Sâu & Bứt Phá", 3),
+                            ("Tuần 4: Về Đích & Tinh Chỉnh", 4),
+                        ]
+                    else:
+                        w_num = 1 if "Tuần 1" in sel_week_mth else (2 if "Tuần 2" in sel_week_mth else (3 if "Tuần 3" in sel_week_mth else 4))
+                        week_ranges = [(sel_week_mth, w_num)]
+
+                    for w_label, w_idx in week_ranges:
+                        st.markdown(f"#### 🗓️ {w_label}")
+                        cols_m_days = st.columns(7)
+                        for d_idx, d_name in enumerate(STANDARD_DAYS):
+                            day_tasks = [t for t in filtered_schedule if t.get("date") == d_name]
+                            d_done = sum(1 for t in day_tasks if t.get("is_done") is True)
+                            d_tot = len(day_tasks)
+                            with cols_m_days[d_idx]:
+                                with st.container(border=True):
+                                    st.markdown(f"**{DAY_SHORT.get(d_name, d_name)}**")
+                                    badge_color = ":green" if (d_tot > 0 and d_done == d_tot) else (":orange" if d_done > 0 else ":gray")
+                                    st.caption(f"{badge_color}[**{d_done}/{d_tot} task**]")
+
+                                    if day_tasks:
+                                        for t_idx, tk in enumerate(day_tasks):
+                                            t_detail = tk.get("task_detail", "Nhiệm vụ")
+                                            t_energy = tk.get("energy_level", "🔴")
+                                            e_icon = "🔴" if "deep" in str(t_energy).lower() or "🔴" in str(t_energy) else ("🟡" if "shallow" in str(t_energy).lower() or "🟡" in str(t_energy) else "🟢")
+                                            t_done = bool(tk.get("is_done", False))
+                                            m_chk_key = f"chk_mth_{current_username}_{w_idx}_{d_name}_{t_idx}_{abs(hash(t_detail)) % 100000}"
+
+                                            new_m_done = st.checkbox(
+                                                f"{e_icon} {t_detail[:28]}...",
+                                                value=t_done,
+                                                key=m_chk_key,
+                                            )
+                                            if new_m_done != t_done:
                                                 update_master_schedule_task_status(
                                                     task_identifier=t_detail,
-                                                    is_done=checked,
-                                                    date=d,
+                                                    is_done=new_m_done,
+                                                    date=d_name,
                                                     username=current_username,
                                                 )
-                                                task["is_done"] = checked
                                                 st.session_state[master_schedule_key] = load_master_schedule(current_username)
-                                                st.toast(f"✅ Đã cập nhật: {t_detail[:35]}...")
+                                                st.toast(f"✅ Đã cập nhật: {t_detail[:30]}...")
                                                 st.rerun()
-                                        with col_card:
-                                            if t_goal:
-                                                st.markdown(f"**{t_energy}** &nbsp;|&nbsp; ⏰ **{t_slot}** — **{t_detail}** `[🎯 {t_goal}]`")
-                                            else:
-                                                st.markdown(f"**{t_energy}** &nbsp;|&nbsp; ⏰ **{t_slot}** — **{t_detail}**")
+                                    else:
+                                        st.caption("▫️ *Không có task*")
 
-                                            if is_done_val:
-                                                st.caption("✅ :green[**Đã hoàn thành!**]")
+                # ==============================================================
+                # GÓC NHÌN 4: 📊 THEO QUÝ (QUARTERLY 90-DAY ROADMAP VIEW)
+                # ==============================================================
+                elif selected_view == "📊 Theo Quý":
+                    q_total = len(filtered_schedule)
+                    q_done = sum(1 for t in filtered_schedule if t.get("is_done") is True)
+                    q_pct = int((q_done / q_total * 100)) if q_total > 0 else 0
 
-                                            st.caption(f"🏁 **Tiêu chí hoàn thành (DoD):** {t_dod}")
+                    st.markdown("#### 🚀 Tổng Quan Lộ Trình 90 Ngày (Quý I - 3 Giai Đoạn):")
+                    c_q1, c_q2, c_q3, c_q4 = st.columns(4)
+                    with c_q1:
+                        st.metric("🏁 Tiến độ Quý (90 ngày)", f"{q_pct}%")
+                    with c_q2:
+                        st.metric("📋 Tổng nhiệm vụ đã lập", f"{q_total} task")
+                    with c_q3:
+                        st.metric("✅ Đã hoàn thành thực tế", f"{q_done} task")
+                    with c_q4:
+                        st.metric("⏳ Nhiệm vụ đang chờ", f"{q_total - q_done} task")
 
-                                            if t_link:
-                                                btn_lbl = f"📦 Mở Tài Liệu: {t_res_title}" if (t_res_title and len(t_res_title) < 35) else "📦 Mở Tài Liệu Thực Tế (1-Click)"
-                                                st.link_button(label=btn_lbl, url=t_link, use_container_width=False)
+                    st.progress(q_pct / 100)
 
-                        if deferred_tasks:
-                            st.markdown("---")
-                            with st.expander(f"💤 {len(deferred_tasks)} task Deep Work đã tự động trượt sang ngày mai (Bảo toàn Streak, không tính trễ):", expanded=False):
-                                for dt in deferred_tasks:
-                                    dt_title = dt.get("task_detail", "Nhiệm vụ")
-                                    dt_slot = dt.get("time_slot", "")
-                                    dt_goal = dt.get("goal_title", "")
-                                    st.markdown(f"- ▫️ ⏰ **{dt_slot}**: {dt_title} `[🎯 {dt_goal}]` &nbsp; `:orange[Đã trượt sang ngày mai]`")
+                    # 3 Giai đoạn của Quý
+                    quarter_phases = [
+                        {
+                            "phase_num": 1,
+                            "title": "Giai Đoạn 1: Tháng 1 (Ngày 1 - 30) — Xây Dựng Nền Tảng & Thói Quen Cốt Lõi",
+                            "focus": "Thiết lập nhịp sinh học cố định, nạp kiến thức/kỹ năng nền móng, xây dựng chuỗi kỷ luật 30 ngày không đứt đoạn.",
+                            "target": "Đạt 100% thời lượng cam kết mỗi ngày, hoàn thành bộ giáo trình/bài tập cơ bản.",
+                            "progress": min(100, int(q_pct * 1.5)) if q_pct > 0 else 0,
+                            "resources": "Bộ tài liệu nhập môn, checklist theo dõi nhịp sinh học, Notion Tracker.",
+                        },
+                        {
+                            "phase_num": 2,
+                            "title": "Giai Đoạn 2: Tháng 2 (Ngày 31 - 60) — Tăng Tốc Khối Lượng & Chuyên Sâu Kỹ Năng",
+                            "focus": "Gia tăng độ khó của bài tập Deep Work, chuyển dần sang giải quyết bài toán phức tạp và thực hành chuyên sâu.",
+                            "target": "Vượt qua ngưỡng cản tâm lý (Plateau), tăng 40% khối lượng thực hành thực tế.",
+                            "progress": min(100, int(q_pct * 1.0)) if q_pct > 0 else 0,
+                            "resources": "Tài liệu chuyên sâu, đề thi thử / dự án thực chiến, công cụ đo lường KPI.",
+                        },
+                        {
+                            "phase_num": 3,
+                            "title": "Giai Đoạn 3: Tháng 3 (Ngày 61 - 90) — Thực Chiến Đỉnh Cao & Chạm Mốc KPI",
+                            "focus": "Tổng ôn, mô phỏng áp lực thực tế, đóng gói kết quả đầu ra và kiểm thử tiêu chuẩn hoàn thành DoD.",
+                            "target": "Chạm mốc mục tiêu đầu ra đã cam kết với CEO Coach (VD: IELTS 7.5, Giảm 15kg, Hoàn thành dự án).",
+                            "progress": min(100, int(q_pct * 0.7)) if q_pct > 0 else 0,
+                            "resources": "Bộ đề thi chuẩn quốc tế / Hệ thống đánh giá cuối kỳ / Báo cáo nghiệm thu.",
+                        },
+                    ]
+
+                    # Bổ sung dữ liệu thực tế từ breakdown của Active Goals nếu có
+                    for g in user_goals_sched:
+                        g_title = g.get("title") or g.get("goal_name", "Mục tiêu")
+                        bd = g.get("breakdown", {})
+                        q_items = bd.get("quarterly", [])
+                        if q_items and len(q_items) >= 1:
+                            quarter_phases[0]["focus"] = f"[{g_title}] " + str(q_items[0].get("focus", q_items[0].get("objective", quarter_phases[0]["focus"])))
+                            if len(q_items) >= 2:
+                                quarter_phases[1]["focus"] = f"[{g_title}] " + str(q_items[1].get("focus", q_items[1].get("objective", quarter_phases[1]["focus"])))
+                            if len(q_items) >= 3:
+                                quarter_phases[2]["focus"] = f"[{g_title}] " + str(q_items[2].get("focus", q_items[2].get("objective", quarter_phases[2]["focus"])))
+
+                    for phase in quarter_phases:
+                        with st.container(border=True):
+                            st.markdown(f"#### 🏆 {phase['title']}")
+                            p_col1, p_col2 = st.columns([0.7, 0.3])
+                            with p_col1:
+                                st.markdown(f"🎯 **Trọng tâm thực thi:** {phase['focus']}")
+                                st.markdown(f"🏁 **Cột mốc kết quả (Target):** {phase['target']}")
+                                st.caption(f"📦 **Tài nguyên hỗ trợ:** {phase['resources']}")
+                            with p_col2:
+                                st.markdown(f"**Tiến độ giai đoạn:** `{phase['progress']}%`")
+                                st.progress(phase['progress'] / 100)
+                                if phase['progress'] >= 100:
+                                    st.success("🎉 Giai đoạn hoàn tất!")
+                                elif phase['progress'] > 0:
+                                    st.info("⚡ Đang tăng tốc")
+                                else:
+                                    st.caption("⏳ Chưa bắt đầu")
+
+                    # Checklist nhiệm vụ trọng tâm của Quý
+                    st.markdown("---")
+                    st.markdown("##### 📋 Checklist Nhiệm Vụ Trọng Tâm Toàn Quý (Tương Tác Real-time):")
+                    for t_idx, tk in enumerate(filtered_schedule[:14]):  # Top 14 nhiệm vụ tiêu biểu
+                        t_detail = tk.get("task_detail", "Nhiệm vụ")
+                        t_date = tk.get("date", "Thứ Hai")
+                        t_slot = tk.get("time_slot", "")
+                        t_goal = tk.get("goal_title", "")
+                        t_done = bool(tk.get("is_done", False))
+                        t_energy = tk.get("energy_level", "🔴 Deep Work")
+                        q_chk_key = f"chk_qtr_{current_username}_{t_date}_{t_idx}_{abs(hash(t_detail)) % 100000}"
+
+                        col_q_c, col_q_t = st.columns([0.08, 0.92])
+                        with col_q_c:
+                            new_q_done = st.checkbox("", value=t_done, key=q_chk_key, label_visibility="collapsed")
+                            if new_q_done != t_done:
+                                update_master_schedule_task_status(
+                                    task_identifier=t_detail,
+                                    is_done=new_q_done,
+                                    date=t_date,
+                                    username=current_username,
+                                )
+                                st.session_state[master_schedule_key] = load_master_schedule(current_username)
+                                st.toast(f"✅ Đã cập nhật: {t_detail[:35]}...")
+                                st.rerun()
+                        with col_q_t:
+                            st.markdown(f"**{t_energy}** &nbsp;|&nbsp; 📅 **{t_date}** ({t_slot}) — **{t_detail}** `[🎯 {t_goal}]`")
 
     with col_chat_sched:
         st.markdown("#### 💬 Trò Chuyện Cùng Master Scheduler")

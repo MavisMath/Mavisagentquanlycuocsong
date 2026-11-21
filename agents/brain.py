@@ -3806,15 +3806,18 @@ LỊCH HIỆN CÓ TRONG MASTER SCHEDULE (NẾU ĐÃ CÓ):
 
 QUY TẮC NHỊP SINH HỌC & XẾP LỊCH ĐIỀU HÀNH BẮT BUỘC:
 1. KHÔNG TRÙNG LẶP: Mỗi khung giờ trong ngày chỉ xếp DUY NHẤT 1 mục tiêu.
-2. Buổi Sáng (08:00 - 10:00): Ưu tiên tuyệt đối cho mục tiêu có độ ưu tiên cao nhất (P1) hoặc tác vụ nhận thức nặng (giải đề, tư duy logic).
-3. Buổi Chiều (14:00 - 16:00 hoặc 16:00 - 18:00): Các tác vụ thực hành, thể chất, review.
-4. Buổi Tối (19:30 - 21:00): Habit stacking, ôn tập nhẹ hoặc Recovery Buffer.
+2. Buổi Sáng (08:00 - 10:00 hoặc 06:00 - 07:30): Ưu tiên tuyệt đối cho mục tiêu có độ ưu tiên cao nhất (P1) hoặc tác vụ nhận thức nặng (giải đề, tư duy logic) hoặc tập luyện thể chất sáng.
+3. Buổi Chiều (14:00 - 16:00 hoặc 16:00 - 18:00): Các tác vụ thực hành, thể chất, kỹ năng, review.
+4. Buổi Tối (19:30 - 21:00): Habit stacking, ôn tập nhẹ, tổng kết hoặc Recovery Buffer.
 5. KHI NGƯỜI DÙNG BÁO BẬN (VD: 'hôm nay bận đi tiệc', 'chiều nay bận họp', 'dời task sang mai'):
    - Đặt is_reschedule_request = True.
    - Nhận diện các task bị ảnh hưởng, tự động dời sang ngày tiếp theo hoặc buổi sáng cuối tuần.
    - Thêm tên các task đã dời vào rescheduled_task_names.
-6. Mỗi phần tử trong master_schedule bắt buộc gồm:
-   - date: Ngày trong tuần (VD: 'Thứ Hai').
+6. ĐẢM BẢO ĐỦ 7 NGÀY TRONG TUẦN (Thứ Hai, Thứ Ba, Thứ Tư, Thứ Năm, Thứ Sáu, Thứ Bảy, Chủ Nhật):
+   - BẮT BUỘC xếp lịch đầy đủ cho cả 7 ngày trong tuần từ 'Thứ Hai' đến 'Chủ Nhật' theo đúng tần suất của các active goals (tuyệt đối không chỉ sinh mỗi Thứ Hai hoặc bỏ sót ngày cuối tuần).
+   - Thứ Bảy và Chủ Nhật bố trí các buổi thực hành dự án, tổng kết tuần, rèn luyện thể chất hoặc bù task.
+7. Mỗi phần tử trong master_schedule bắt buộc gồm:
+   - date: Ngày trong tuần ('Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy', hoặc 'Chủ Nhật').
    - session: 'Sáng', 'Chiều', hoặc 'Tối'.
    - time_slot: Khung giờ cụ thể không trùng lặp (VD: '08:00 - 10:00').
    - goal_id, goal_title: ID và Tên mục tiêu tương ứng.
@@ -3824,7 +3827,7 @@ QUY TẮC NHỊP SINH HỌC & XẾP LỊCH ĐIỀU HÀNH BẮT BUỘC:
    - resource_url, resource_link: Link tài liệu thực tế chuẩn xác.
    - resource_title: Tên gói tài liệu đi kèm.
    - is_done: Mặc định False.
-7. TÁI CẤU TRÚC ĐỘNG THEO NĂNG LƯỢNG NGÀY (DYNAMIC ENERGY RESCHEDULING):
+8. TÁI CẤU TRÚC ĐỘNG THEO NĂNG LƯỢNG NGÀY (DYNAMIC ENERGY RESCHEDULING):
    - Nếu người dùng báo mệt mỏi, bận rộn, xin hạ tải hoặc yêu cầu 'Duy trì tối thiểu 30%':
      * Đặt is_reschedule_request = True.
      * Tự động trượt các task '🔴 Deep Work' sang ngày tiếp theo (không báo trễ hạn).
@@ -3852,32 +3855,78 @@ YÊU CẦU CỦA NGƯỜI DÙNG:
         is_rescheduled = output.is_reschedule_request
     except Exception as e:
         print(f"Lỗi invoke trong scheduler_chat: {e}")
-        # Fallback tạo lịch mẫu phân chia sáng / chiều / tối kèm nhãn năng lượng và DoD
-        days = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu"]
+        # Fallback tạo lịch mẫu chuẩn 7 ngày (Thứ Hai -> Chủ Nhật) kèm nhãn năng lượng và DoD
+        days = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
         schedule_dicts = []
-        for d in days:
-            for idx, g in enumerate(active_goals):
-                g_title = g.get("title") or g.get("goal_name", "Mục tiêu")
-                slot = "08:00 - 10:00" if idx == 0 else ("14:30 - 16:00" if idx == 1 else "19:30 - 21:00")
-                sess = "Sáng" if idx == 0 else ("Chiều" if idx == 1 else "Tối")
-                energy = "🔴 Deep Work" if idx == 0 else ("🟡 Shallow Work" if idx == 1 else "🟢 Recharge")
-                schedule_dicts.append({
-                    "date": d,
-                    "session": sess,
-                    "time_slot": slot,
-                    "goal_id": g.get("id", f"g{idx}"),
-                    "goal_title": g_title,
-                    "task_detail": f"Nghiên cứu và thực hành bài tập cho {g_title}",
-                    "energy_level": energy,
-                    "definition_of_done": f"Hoàn thành trọn vẹn bài tập trọng tâm cho {g_title} và ghi chú tiến độ.",
-                    "resource_link": "https://cambridgeenglish.org",
-                    "resource_url": "https://cambridgeenglish.org",
-                    "resource_title": f"Tài liệu chuẩn mực cho {g_title}",
-                    "is_done": False,
-                })
+        if active_goals:
+            for day_idx, d in enumerate(days):
+                for idx, g in enumerate(active_goals):
+                    g_title = g.get("title") or g.get("goal_name", "Mục tiêu")
+                    g_id = g.get("id", f"g{idx}")
+                    g_domain = detect_goal_domain(goal_title=g_title, category=g.get("category", ""))
+                    bd = g.get("breakdown") or {}
+                    weekly = bd.get("weekly", [])
+                    tasks_source = []
+                    for w in weekly:
+                        for tk in w.get("tasks", []):
+                            tasks_source.append(tk)
+
+                    if tasks_source:
+                        chosen_task_obj = tasks_source[(day_idx + idx) % len(tasks_source)]
+                        t_detail = chosen_task_obj.get("task", chosen_task_obj.get("detail", f"Thực hiện bài tập cho {g_title}"))
+                        t_energy = chosen_task_obj.get("energy_level") or ("🔴 Deep Work" if idx == 0 else "🟡 Shallow Work")
+                        t_dod = chosen_task_obj.get("definition_of_done") or f"Hoàn thành trọn vẹn nội dung '{t_detail}' và ghi chú tiến độ."
+                    else:
+                        if g_domain == "health":
+                            t_detail = f"Tập luyện và duy trì thực đơn dinh dưỡng cho {g_title}"
+                            t_energy = "🔴 Deep Work" if day_idx % 2 == 0 else "🟢 Recharge"
+                            t_dod = "Hoàn thành bài tập đúng form và ghi nhật ký dinh dưỡng trong ngày."
+                        elif g_domain == "language":
+                            t_detail = f"Luyện tập kỹ năng trọng tâm và mở rộng vốn từ vựng cho {g_title}"
+                            t_energy = "🔴 Deep Work" if idx == 0 else "🟡 Shallow Work"
+                            t_dod = f"Giải quyết trọn vẹn 1 chủ đề trọng tâm và ghi chép 15 từ vựng mới."
+                        elif g_domain == "career_finance":
+                            t_detail = f"Thực thi hạng mục công việc và đo lường chỉ số cho {g_title}"
+                            t_energy = "🔴 Deep Work" if idx == 0 else "🟡 Shallow Work"
+                            t_dod = f"Hoàn thành bàn giao kết quả công việc theo đúng tiêu chuẩn KPI."
+                        else:
+                            t_detail = f"Nghiên cứu và thực hành bài tập trọng tâm cho {g_title}"
+                            t_energy = "🔴 Deep Work" if idx == 0 else "🟡 Shallow Work"
+                            t_dod = f"Hoàn thành trọn vẹn bài tập trọng tâm cho {g_title} và ghi chú tiến độ."
+
+                    slot = "08:00 - 10:00" if idx == 0 else ("14:30 - 16:00" if idx == 1 else "19:30 - 21:00")
+                    sess = "Sáng" if idx == 0 else ("Chiều" if idx == 1 else "Tối")
+                    if day_idx in (5, 6):  # Cuối tuần
+                        if idx == 0:
+                            slot = "08:30 - 10:30"
+                            sess = "Sáng"
+                        elif idx == 1:
+                            slot = "15:00 - 16:30"
+                            sess = "Chiều"
+                        else:
+                            slot = "20:00 - 21:00"
+                            sess = "Tối"
+
+                    res_url = "https://cambridgeenglish.org" if g_domain == "language" else ("https://hubermanlab.com" if g_domain == "health" else "https://developer.mozilla.org")
+                    res_title = f"Tài liệu chuẩn mực cho {g_title}"
+
+                    schedule_dicts.append({
+                        "date": d,
+                        "session": sess,
+                        "time_slot": slot,
+                        "goal_id": g_id,
+                        "goal_title": g_title,
+                        "task_detail": t_detail,
+                        "energy_level": t_energy,
+                        "definition_of_done": t_dod,
+                        "resource_link": res_url,
+                        "resource_url": res_url,
+                        "resource_title": res_title,
+                        "is_done": False,
+                    })
         rescheduled_tasks = []
         is_rescheduled = False
-        response_text = "Tôi đã phân rã toàn bộ các mục tiêu Active vào Master Schedule theo đúng nguyên tắc nhịp sinh học (Sáng học nặng, Chiều thực hành, Tối ôn tập) kèm nhãn năng lượng (🔴/🟡/🟢) và Tiêu chí hoàn thành (DoD) mà không trùng lặp giờ giấc!"
+        response_text = "Tôi đã phân rã toàn bộ các mục tiêu Active vào Master Schedule đầy đủ 7 ngày (Thứ Hai đến Chủ Nhật) theo đúng nguyên tắc nhịp sinh học (Sáng học nặng, Chiều thực hành, Tối ôn tập) kèm nhãn năng lượng (🔴/🟡/🟢) và Tiêu chí hoàn thành (DoD) mà không trùng lặp giờ giấc!"
 
     save_master_schedule(schedule_dicts, username=username)
 

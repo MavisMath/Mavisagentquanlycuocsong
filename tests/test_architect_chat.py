@@ -240,6 +240,64 @@ class TestArchitectAndImports(unittest.TestCase):
         self.assertTrue(callable(scheduler_chat))
         self.assertTrue(callable(retrospective_chat))
 
+    def test_scheduler_chat_generates_7_full_days(self):
+        """Bảo đảm scheduler_chat sinh đầy đủ lịch trình 7 ngày (Thứ Hai -> Chủ Nhật) kèm nhãn năng lượng và DoD."""
+        test_goal = {
+            "id": f"goal_{uuid.uuid4().hex[:6]}",
+            "title": "Chinh phục IELTS 7.5 Speaking & Writing",
+            "category": "Ngoại ngữ",
+            "priority": "P1 - Urgent",
+            "preferred_time": "08:00 - 10:00 Sáng",
+            "daily_hours": 2.0,
+            "duration_days": 90,
+            "status": "active",
+            "strategy_summary": "Luyện đề Cam 16-18 và phản xạ 1-1 theo phương pháp Spaced Repetition.",
+            "breakdown": {
+                "weekly": [
+                    {
+                        "week": 1,
+                        "tasks": [
+                            {
+                                "task": "Luyện 3 đề Speaking Part 2 chủ đề Công nghệ",
+                                "energy_level": "🔴 Deep Work",
+                                "definition_of_done": "Ghi âm 3 bài nói đạt độ trôi chảy 7.0+",
+                                "resource_url": "https://cambridgeenglish.org",
+                            },
+                            {
+                                "task": "Ôn tập 30 collocation chủ đề Môi trường",
+                                "energy_level": "🟡 Shallow Work",
+                                "definition_of_done": "Ghi nhớ và hoàn thành flashcard Quizlet",
+                                "resource_url": "https://quizlet.com",
+                            },
+                        ],
+                    }
+                ]
+            },
+        }
+        save_user_goals([test_goal], username=self.test_username)
+
+        res = scheduler_chat(
+            user_message="Hãy gom active goals để xếp đầy đủ lịch trình 7 ngày tuần này",
+            username=self.test_username,
+        )
+
+        self.assertIn("master_schedule", res)
+        sched = res["master_schedule"]
+        self.assertTrue(len(sched) >= 7, f"Lịch trình phải có ít nhất 7 task cho 7 ngày, thực tế: {len(sched)}")
+
+        found_days = set(t.get("date") for t in sched)
+        expected_days = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
+        for ed in expected_days:
+            self.assertIn(ed, found_days, f"Thiếu ngày {ed} trong master_schedule: {found_days}")
+
+        # Kiểm tra task đầu tiên có đầy đủ energy_level, DoD và resource
+        first_t = sched[0]
+        self.assertIn("energy_level", first_t)
+        self.assertTrue(any(e in first_t["energy_level"] for e in ["🔴", "🟡", "🟢", "Deep", "Shallow", "Recharge"]))
+        self.assertIn("definition_of_done", first_t)
+        self.assertTrue(len(first_t["definition_of_done"]) > 0)
+        self.assertTrue(bool(first_t.get("resource_url") or first_t.get("resource_link")))
+
 
 if __name__ == "__main__":
     unittest.main()
