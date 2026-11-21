@@ -2953,7 +2953,11 @@ Tin nhắn hiện tại của người dùng: "{user_message}"
                 matched_idx = idx
                 break
 
-        goal_id = current_goals[matched_idx].get("id", f"goal_{uuid.uuid4().hex[:6]}") if matched_idx is not None else f"goal_{uuid.uuid4().hex[:6]}"
+        if matched_idx is not None and isinstance(current_goals[matched_idx], dict):
+            existing_id = current_goals[matched_idx].get("id") or current_goals[matched_idx].get("goal_id")
+            goal_id = existing_id if existing_id else f"goal_{uuid.uuid4().hex[:6]}"
+        else:
+            goal_id = f"goal_{uuid.uuid4().hex[:6]}"
         new_goal_record = {
             "id": goal_id,
             "goal_id": goal_id,
