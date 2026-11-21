@@ -90,6 +90,11 @@ try:
         get_user_state_full,
         detect_goal_domain,
         DOMAIN_TERMINOLOGY,
+        get_vietnam_today_str,
+        compute_target_date,
+        generate_detailed_master_schedule,
+        ensure_schedule_covers_date,
+        VIETNAM_WEEKDAYS,
     )
 except Exception:
     import memory.goals as _mg
@@ -129,6 +134,11 @@ except Exception:
     get_user_state_full = getattr(_mg, "get_user_state_full", lambda *args, **kwargs: {})
     detect_goal_domain = getattr(_mg, "detect_goal_domain", lambda *args, **kwargs: "general")
     DOMAIN_TERMINOLOGY = getattr(_mg, "DOMAIN_TERMINOLOGY", {})
+    get_vietnam_today_str = getattr(_mg, "get_vietnam_today_str", lambda: "2026-11-21")
+    compute_target_date = getattr(_mg, "compute_target_date", lambda s, d: "2027-02-19")
+    generate_detailed_master_schedule = getattr(_mg, "generate_detailed_master_schedule", lambda *args, **kwargs: [])
+    ensure_schedule_covers_date = getattr(_mg, "ensure_schedule_covers_date", lambda *args, **kwargs: [])
+    VIETNAM_WEEKDAYS = getattr(_mg, "VIETNAM_WEEKDAYS", {0: "Thứ Hai", 1: "Thứ Ba", 2: "Thứ Tư", 3: "Thứ Năm", 4: "Thứ Sáu", 5: "Thứ Bảy", 6: "Chủ Nhật"})
 from agents.task_estimator import analyze_and_estimate_goal
 try:
     from tools.document_ingestor import scan_and_retrieve_context
@@ -3000,6 +3010,8 @@ Tin nhắn hiện tại của người dùng: "{user_message}"
             goal_id = existing_id if existing_id else f"goal_{uuid.uuid4().hex[:6]}"
         else:
             goal_id = f"goal_{uuid.uuid4().hex[:6]}"
+        goal_dur = int(analysis.duration_days or 90)
+        goal_start = get_vietnam_today_str()
         new_goal_record = {
             "id": goal_id,
             "goal_id": goal_id,
@@ -3010,7 +3022,9 @@ Tin nhắn hiện tại của người dùng: "{user_message}"
             "preferred_time": analysis.preferred_time or "08:00 - 10:00 Sáng",
             "preferred_slots": analysis.preferred_time or "08:00 - 10:00 Sáng",
             "daily_hours": float(analysis.daily_hours or 1.5),
-            "duration_days": int(analysis.duration_days or 90),
+            "duration_days": goal_dur,
+            "start_date": goal_start,
+            "target_date": compute_target_date(goal_start, goal_dur),
             "current_level": analysis.current_level or "Cơ bản",
             "status": "evaluating",
             "is_complete": True,
@@ -3789,6 +3803,11 @@ CHỈ THỊ KIẾN TRÚC & PHÂN CẤP 4 TẦNG BẮT BUỘC:
     if result.updated_daily_hours:
         target_goal["daily_hours"] = float(result.updated_daily_hours)
 
+    if not target_goal.get("start_date"):
+        target_goal["start_date"] = get_vietnam_today_str()
+    d_days = int(target_goal.get("duration_days", 90))
+    target_goal["target_date"] = compute_target_date(target_goal["start_date"], d_days)
+
     target_goal["status"] = "active"
     target_goal["is_complete"] = True
 
@@ -3800,20 +3819,17 @@ CHỈ THỊ KIẾN TRÚC & PHÂN CẤP 4 TẦNG BẮT BUỘC:
     save_user_goals(goals, username=username)
     save_user_resources(updated_bd["resources"], username=username)
 
-    # Tự động kích hoạt scheduler_chat để sinh lịch chi tiết 7 ngày (Ăn gì + Tập gì) đẩy thẳng sang Giai đoạn 2 (master_schedule)
+    # Tự động sinh lịch chi tiết 14 ngày thực tế (Ăn gì + Tập gì) đẩy thẳng sang Giai đoạn 2 (master_schedule)
     try:
-        sched_instruction = (
-            f"Tự động lập lịch chi tiết 7 ngày (Thứ Hai đến Chủ Nhật) cho mục tiêu '{goal_title}' vừa được xuất bản lộ trình. "
-            f"Phương pháp: {target_goal['strategy_summary']}. "
-            f"Tách rõ các hạng mục Tập luyện / Học tập chuyên sâu (bài tập cụ thể, hiệp/reps hoặc module) "
-            f"và Dinh dưỡng/Thói quen đời sống (Ăn gì: thực đơn & calo cụ thể, Uống gì, Ngủ mấy giờ) "
-            f"vào từng buổi Sáng, Chiều, Tối không trùng lặp!"
-        )
-        scheduler_chat(
-            user_message=sched_instruction,
+        detailed_sched = generate_detailed_master_schedule(
+            active_goals=[target_goal],
+            start_date_str=target_goal["start_date"],
+            num_days=14,
             username=username,
         )
+        save_master_schedule(detailed_sched, username=username)
     except Exception as e_sched:
+        print(f"Lỗi tự động sinh Master Schedule trong architect_chat: {e_sched}")
         print(f"Lỗi tự động kích hoạt Master Schedule trong architect_chat: {e_sched}")
 
     success_notice = "✅ Lộ trình 4 tầng đã được xuất bản ở cột bên trái! Hãy chuyển sang Tab Giai đoạn 2 (Lịch Trình Thực Thi) để xem và tinh chỉnh lịch chi tiết từng ngày."
@@ -3837,12 +3853,13 @@ CHỈ THỊ KIẾN TRÚC & PHÂN CẤP 4 TẦNG BẮT BUỘC:
 # ------------------------------------------------------------------------------
 
 class MasterScheduleTaskItem(BaseModel):
-    date: str = Field(description="Ngày trong tuần (VD: 'Thứ Hai', 'Thứ Ba', hoặc '2026-11-23')")
+    date: str = Field(description="Ngày lịch thực tế định dạng YYYY-MM-DD (VD: '2026-11-21')")
+    day_name: Optional[str] = Field(default="", description="Tên thứ trong tuần (VD: 'Thứ Bảy')")
     session: str = Field(description="'Sáng', 'Chiều', hoặc 'Tối'")
-    time_slot: str = Field(description="Khung giờ cụ thể không trùng lặp (VD: '08:00 - 10:00', '14:30 - 16:00')")
-    goal_id: str = Field(description="ID mục tiêu tương ứng")
+    time_slot: str = Field(description="Khung giờ cụ thể không trùng lặp (VD: '06:30 - 07:00', '12:00 - 12:30', '19:00 - 19:30')")
+    goal_id: str = Field(description="ID mục tiêu tương ứng (hoặc 'life_nutrition_meal1', 'life_fitness', 'life_sleep')")
     goal_title: str = Field(description="Tên mục tiêu tương ứng")
-    task_detail: str = Field(description="Nhiệm vụ cụ thể chi tiết kèm bài tập/nội dung")
+    task_detail: str = Field(description="Nhiệm vụ cụ thể chi tiết kèm bài tập/nội dung hoặc thực đơn định lượng gram/calo (Cấm gộp 1 dòng chung chung)")
     energy_level: str = Field(default="🔴 Deep Work", description="Nhãn độ nặng não: '🔴 Deep Work' (nhận thức nặng/tập trung cao), '🟡 Shallow Work' (nhẹ nhàng/ôn tập/flashcard), hoặc '🟢 Recharge' (vận động/phục hồi/nghỉ ngơi)")
     definition_of_done: str = Field(default="", description="Tiêu chí hoàn thành (DoD) cụ thể của buổi đó")
     resource_link: str = Field(default="", description="Link tài liệu hoặc tài nguyên đi kèm")
@@ -3889,6 +3906,8 @@ def scheduler_chat(
             "preferred_time": g.get("preferred_time"),
             "daily_hours": g.get("daily_hours", 1.5),
             "priority": g.get("priority", "P2 - High"),
+            "start_date": g.get("start_date", get_vietnam_today_str()),
+            "target_date": g.get("target_date", compute_target_date(get_vietnam_today_str(), 90)),
             "immediate_tasks": w1_tasks,
         })
 
@@ -3900,8 +3919,9 @@ def scheduler_chat(
     except Exception:
         pass
 
+    today_str = get_vietnam_today_str()
     scheduler_prompt = f"""Bạn là Bậc Thầy Phân Bổ Lịch Trình Điều Hành (AI Master Scheduler) của hệ thống Mavis.
-Nhiệm vụ: Chuyên trách GIAI ĐOẠN 2 — Gom toàn bộ mục tiêu đang Active để xếp lịch không trùng lặp vào master_schedule, hoặc dời lịch linh hoạt khi người dùng báo bận.
+Nhiệm vụ: Chuyên trách GIAI ĐOẠN 2 — Gom toàn bộ mục tiêu đang Active để xếp lịch không trùng lặp vào master_schedule theo TRỤC THỜI GIAN THỰC (YYYY-MM-DD), hoặc dời lịch linh hoạt khi người dùng báo bận.
 
 DANH SÁCH MỤC TIÊU ACTIVE CẦN XẾP LỊCH TỪ MONGODB:
 {json.dumps(active_summary, ensure_ascii=False, indent=2)}
@@ -3914,40 +3934,32 @@ THÔNG TIN LỊCH BẬN THỰC TẾ TRÊN GOOGLE CALENDAR CỦA NGƯỜI DÙNG:
 
 QUY TẮC NHỊP SINH HỌC & XẾP LỊCH ĐIỀU HÀNH BẮT BUỘC:
 1. KHÔNG TRÙNG LẶP: Mỗi khung giờ trong ngày chỉ xếp DUY NHẤT 1 mục tiêu. Tuyệt đối không xếp đè lên các khung giờ bận thực tế trên Google Calendar của người dùng.
-2. Buổi Sáng (08:00 - 11:30 hoặc 06:00 - 07:30): Ưu tiên tuyệt đối cho mục tiêu có độ ưu tiên cao nhất (P1) hoặc tác vụ nhận thức nặng (giải đề, tư duy logic) hoặc tập luyện thể chất sáng.
-3. Buổi Chiều (14:00 - 16:30 hoặc 17:00 - 18:30): Các tác vụ thực hành, kỹ năng, thể chất, review.
-4. Buổi Tối (19:30 - 21:30): Habit stacking, ôn tập nhẹ, tổng kết hoặc Recovery Buffer.
-5. CHI TIẾT HÓA 4 HẠNG MỤC ĐỜI SỐNG THỰC TẾ TRONG 7 NGÀY (Thứ Hai đến Chủ Nhật):
-   Lịch trình mỗi ngày bắt buộc phân bổ rõ ràng và thực tế:
-   - ĂN GÌ: Bữa sáng, bữa trưa, bữa tối với thực đơn cụ thể phù hợp với mục tiêu (VD: sáng yến mạch trứng luộc, trưa ức gà cơm gạo lứt, tối cá hồi hấp rau củ, kiểm soát thâm hụt calo/eat clean).
-   - UỐNG GÌ: Nước ấm chanh sáng sớm, 2.5 lít nước lọc trong ngày, bù điện giải khi tập, trà hoa cúc thảo mộc trước khi ngủ.
-   - HỌC GÌ / TẬP GÌ: Phân bổ các tác vụ chuyên sâu (Deep Work học tập/làm việc P1 buổi sáng), kỹ năng thực hành buổi chiều, và bài tập thể chất cụ thể (kháng lực/cardio).
-   - NGỦ MẤY GIỜ: Giờ đi ngủ phục hồi cố định (22:30 tắt thiết bị, ngủ sâu 7.5 - 8 tiếng).
-6. KHI NGƯỜI DÙNG BÁO BẬN (VD: 'hôm nay bận đi tiệc', 'chiều nay bận họp', 'dời task sang mai'):
+2. TRỤC NGÀY LỊCH THỰC TẾ: Trường 'date' bắt buộc ghi ngày dương lịch thực tế định dạng YYYY-MM-DD bắt đầu từ hôm nay ({today_str}). Trường 'day_name' ghi tên thứ ('Thứ Hai'..'Chủ Nhật').
+3. BÓC TÁCH CHI TIẾT TỪNG KHUNG GIỜ SINH HOẠT TRONG NGÀY (CẤM GỘP 1 DÒNG CHUNG CHUNG):
+   Lịch trình mỗi ngày bắt buộc chia thành các thẻ khung giờ độc lập riêng biệt:
+   - Khung Tập luyện / Vận động thể chất (06:30 - 07:30 hoặc 07:00 - 08:00): Ghi rõ tên bài tập cụ thể, số hiệp/reps/thời lượng (VD: Chạy bộ Zone 2 40 phút + 3 hiệp Plank 1 phút, hoặc bài kháng lực Push-up 4x12, Squat 4x12).
+   - Khung Học tập / Làm việc chuyên sâu Deep Work (08:30 - 11:30): Bài học, module, kỹ năng thực hành cụ thể.
+   - Khung Dinh dưỡng IF 16:8 - Tách riêng thành 2 thẻ bữa ăn riêng biệt:
+     * Bữa 1 (12:00 - 12:30): Ghi rõ tên món ăn + định lượng gram/calo cụ thể (VD: 150g ức gà áp chảo, 100g khoai lang luộc, 200g rau xanh hấp ~450 kcal).
+     * Bữa 2 (19:00 - 19:30): Ghi rõ tên món ăn + định lượng gram/calo cụ thể (VD: 150g cá hồi áp chảo/thịt nạc, 1 bát nhỏ gạo lứt, rau luộc ~420 kcal).
+   - Khung Uống nước: Sáng 06:30 - 07:00 (500ml nước ấm chanh) & Chiều 15:30 - 16:00 (500ml nước/trà xanh).
+   - Khung Giấc ngủ phục hồi: 22:15 - 22:30 (Tắt thiết bị, trà hoa cúc, ngủ đúng 22:30).
+4. KHI NGƯỜI DÙNG BÁO BẬN (VD: 'hôm nay bận đi tiệc', 'chiều nay bận họp', 'dời task sang mai'):
    - Đặt is_reschedule_request = True.
    - Nhận diện các task bị ảnh hưởng, tự động dời sang ngày tiếp theo hoặc buổi sáng cuối tuần.
    - Thêm tên các task đã dời vào rescheduled_task_names.
-7. ĐẢM BẢO ĐỦ 7 NGÀY TRONG TUẦN (Thứ Hai, Thứ Ba, Thứ Tư, Thứ Năm, Thứ Sáu, Thứ Bảy, Chủ Nhật):
-   - BẮT BUỘC xếp lịch đầy đủ cho cả 7 ngày trong tuần từ 'Thứ Hai' đến 'Chủ Nhật' theo đúng tần suất của các active goals (tuyệt đối không chỉ sinh mỗi Thứ Hai hoặc bỏ sót ngày cuối tuần).
-   - Thứ Bảy và Chủ Nhật bố trí các buổi thực hành dự án, tổng kết tuần, rèn luyện thể chất hoặc bù task.
-8. Mỗi phần tử trong master_schedule bắt buộc gồm:
-   - date: Ngày trong tuần ('Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy', hoặc 'Chủ Nhật').
+5. Mỗi phần tử trong master_schedule bắt buộc gồm:
+   - date: Ngày dương lịch (YYYY-MM-DD).
+   - day_name: Tên thứ ('Thứ Hai'..'Chủ Nhật').
    - session: 'Sáng', 'Chiều', hoặc 'Tối'.
-   - time_slot: Khung giờ cụ thể không trùng lặp (VD: '08:00 - 10:00').
+   - time_slot: Khung giờ cụ thể không trùng lặp (VD: '06:30 - 07:00', '12:00 - 12:30', '19:00 - 19:30').
    - goal_id, goal_title: ID và Tên mục tiêu tương ứng.
-   - task_detail: Nhiệm vụ chi tiết (nêu rõ Ăn gì / Uống gì / Học gì / Tập gì / Ngủ mấy giờ).
+   - task_detail: Nhiệm vụ chi tiết (nêu rõ bài tập cụ thể, thực đơn ăn gì kèm gram/calo, uống gì, ngủ mấy giờ).
    - energy_level: Nhãn màu ('🔴 Deep Work', '🟡 Shallow Work', hoặc '🟢 Recharge').
    - definition_of_done: Tiêu chí hoàn thành (DoD) cụ thể, đo lường được.
    - resource_url, resource_link: Link tài liệu thực tế chuẩn xác.
    - resource_title: Tên gói tài liệu đi kèm.
    - is_done: Mặc định False.
-9. TÁI CẤU TRÚC ĐỘNG THEO NĂNG LƯỢNG NGÀY (DYNAMIC ENERGY RESCHEDULING):
-   - Nếu người dùng báo mệt mỏi, bận rộn, xin hạ tải hoặc yêu cầu 'Duy trì tối thiểu 30%':
-     * Đặt is_reschedule_request = True.
-     * Tự động trượt các task '🔴 Deep Work' sang ngày tiếp theo (không báo trễ hạn).
-     * Chỉ giữ lại tối đa 3 task nhẹ nhàng ('🟡 Shallow Work' hoặc '🟢 Recharge') để bảo toàn chuỗi streak kỷ luật.
-   - Nếu người dùng yêu cầu 'Xả hơi / Recovery':
-     * Chuyển đổi lịch trình sang các hoạt động hồi phục thể chất & tinh thần (uống nước, nghỉ ngơi, đi bộ, ngủ sớm).
 
 YÊU CẦU CỦA NGƯỜI DÙNG:
 "{user_message}"
@@ -3969,145 +3981,16 @@ YÊU CẦU CỦA NGƯỜI DÙNG:
         is_rescheduled = output.is_reschedule_request
     except Exception as e:
         print(f"Lỗi invoke trong scheduler_chat: {e}")
-        # Fallback tạo lịch mẫu chuẩn 7 ngày (Thứ Hai -> Chủ Nhật) kèm nhãn năng lượng và DoD
-        days = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
-        schedule_dicts = []
-        if active_goals:
-            for day_idx, d in enumerate(days):
-                for idx, g in enumerate(active_goals):
-                    g_title = g.get("title") or g.get("goal_name", "Mục tiêu")
-                    g_id = g.get("id", f"g{idx}")
-                    g_domain = detect_goal_domain(goal_title=g_title, category=g.get("category", ""))
-                    bd = g.get("breakdown") or {}
-                    weekly = bd.get("weekly", [])
-                    tasks_source = []
-                    for w in weekly:
-                        for tk in w.get("tasks", []):
-                            tasks_source.append(tk)
-
-                    if tasks_source:
-                        chosen_task_obj = tasks_source[(day_idx + idx) % len(tasks_source)]
-                        t_detail = chosen_task_obj.get("task", chosen_task_obj.get("detail", f"Thực hiện bài tập cho {g_title}"))
-                        t_energy = chosen_task_obj.get("energy_level") or ("🔴 Deep Work" if idx == 0 else "🟡 Shallow Work")
-                        t_dod = chosen_task_obj.get("definition_of_done") or f"Hoàn thành trọn vẹn nội dung '{t_detail}' và ghi chú tiến độ."
-                    else:
-                        if g_domain == "health":
-                            if day_idx in (0, 2, 4):  # Thứ Hai, Thứ Tư, Thứ Sáu: Kháng lực
-                                t_detail = f"Tập kháng lực toàn thân (Squat, Push-up, Dumbbell Row, Plank) 4 hiệp x 10-12 lần cho {g_title}"
-                                t_energy = "🔴 Deep Work"
-                                t_dod = "Hoàn thành 4 bài tập đúng kỹ thuật, nghỉ giữa hiệp 90 giây và ghi chép mức tạ."
-                            elif day_idx in (1, 3, 5):  # Thứ Ba, Thứ Năm, Thứ Bảy: Cardio
-                                t_detail = f"Cardio Zone 2 (Đi bộ dốc 12% hoặc đạp xe) 40 phút đốt mỡ cho {g_title}"
-                                t_energy = "🟡 Shallow Work"
-                                t_dod = "Duy trì nhịp tim vùng Zone 2 (120-135 bpm) trong 40 phút liên tục."
-                            else:  # Chủ Nhật: Phục hồi
-                                t_detail = f"Giãn cơ tĩnh toàn thân & Lăn bọt Foam Rolling phục hồi cho {g_title}"
-                                t_energy = "🟢 Recharge"
-                                t_dod = "20 phút kéo giãn các nhóm cơ chính, thả lỏng hoàn toàn và ngâm chân nước ấm."
-                        elif g_domain == "language":
-                            t_detail = f"Luyện tập kỹ năng trọng tâm và mở rộng vốn từ vựng cho {g_title}"
-                            t_energy = "🔴 Deep Work" if idx == 0 else "🟡 Shallow Work"
-                            t_dod = f"Giải quyết trọn vẹn 1 chủ đề trọng tâm và ghi chép 15 từ vựng mới."
-                        elif g_domain == "career_finance":
-                            t_detail = f"Thực thi hạng mục công việc và đo lường chỉ số cho {g_title}"
-                            t_energy = "🔴 Deep Work" if idx == 0 else "🟡 Shallow Work"
-                            t_dod = f"Hoàn thành bàn giao kết quả công việc theo đúng tiêu chuẩn KPI."
-                        else:
-                            t_detail = f"Nghiên cứu và thực hành bài tập trọng tâm cho {g_title}"
-                            t_energy = "🔴 Deep Work" if idx == 0 else "🟡 Shallow Work"
-                            t_dod = f"Hoàn thành trọn vẹn bài tập trọng tâm cho {g_title} và ghi chú tiến độ."
-
-                    slot = "08:30 - 11:30" if idx == 0 else ("14:00 - 16:30" if idx == 1 else "20:00 - 21:15")
-                    sess = "Sáng" if idx == 0 else ("Chiều" if idx == 1 else "Tối")
-                    if day_idx in (5, 6):  # Cuối tuần
-                        if idx == 0:
-                            slot = "09:00 - 11:30"
-                            sess = "Sáng"
-                        elif idx == 1:
-                            slot = "14:30 - 17:00"
-                            sess = "Chiều"
-                        else:
-                            slot = "20:00 - 21:15"
-                            sess = "Tối"
-
-                    res_url = "https://cambridgeenglish.org" if g_domain == "language" else ("https://hubermanlab.com" if g_domain == "health" else "https://developer.mozilla.org")
-                    res_title = f"Tài liệu chuẩn mực cho {g_title}"
-
-                    schedule_dicts.append({
-                        "date": d,
-                        "session": sess,
-                        "time_slot": slot,
-                        "goal_id": g_id,
-                        "goal_title": g_title,
-                        "task_detail": t_detail,
-                        "energy_level": t_energy,
-                        "definition_of_done": t_dod,
-                        "resource_link": res_url,
-                        "resource_url": res_url,
-                        "resource_title": res_title,
-                        "is_done": False,
-                    })
-
-                # Bổ sung các slot sinh hoạt đời sống chuẩn (Ăn gì, Uống gì, Tập gì, Ngủ mấy giờ)
-                schedule_dicts.append({
-                    "date": d,
-                    "session": "Sáng",
-                    "time_slot": "06:30 - 07:30",
-                    "goal_id": "life_morning",
-                    "goal_title": "Nhịp Sinh Học & Năng Lượng",
-                    "task_detail": "Uống 500ml nước ấm chanh & Bữa sáng giàu protein (2 trứng luộc, yến mạch, bơ) (Ăn gì & Uống gì)",
-                    "energy_level": "🟢 Recharge",
-                    "definition_of_done": "Bù nước cho não bộ, nạp 25g protein, đón ánh sáng mặt trời 15 phút.",
-                    "resource_link": "https://hubermanlab.com",
-                    "resource_url": "https://hubermanlab.com",
-                    "resource_title": "Huberman Protocol: Đánh thức đồng hồ sinh học",
-                    "is_done": False,
-                })
-                schedule_dicts.append({
-                    "date": d,
-                    "session": "Chiều",
-                    "time_slot": "11:45 - 13:00",
-                    "goal_id": "life_lunch",
-                    "goal_title": "Dinh Dưỡng Phục Hồi",
-                    "task_detail": "Bữa trưa sạch (Ức gà/Cá hấp, khoai lang/cơm gạo lứt, rau xanh) & Power Nap 20 phút (Ăn gì & Uống gì)",
-                    "energy_level": "🟢 Recharge",
-                    "definition_of_done": "Ăn chậm nhai kỹ, không uống nước ngọt, chợp mắt 20 phút thả lỏng não bộ.",
-                    "resource_link": "https://sleepfoundation.org",
-                    "resource_url": "https://sleepfoundation.org",
-                    "resource_title": "Khoa học giấc ngủ ngắn & Năng lượng buổi chiều",
-                    "is_done": False,
-                })
-                schedule_dicts.append({
-                    "date": d,
-                    "session": "Chiều",
-                    "time_slot": "17:15 - 18:15",
-                    "goal_id": "life_fitness",
-                    "goal_title": "Thể Lực & Sức Bền",
-                    "task_detail": "Vận động thể chất (Kháng lực Push/Pull hoặc Cardio dốc Zone 2) & Uống nước bù điện giải (Tập gì & Uống gì)",
-                    "energy_level": "🔴 Deep Work",
-                    "definition_of_done": "Đạt 40 phút vận động nhịp tim Zone 2 hoặc hoàn thành 4 bài kháng lực chuẩn form.",
-                    "resource_link": "https://muscleandstrength.com",
-                    "resource_url": "https://muscleandstrength.com",
-                    "resource_title": "Giáo án vận động thể chất hàng ngày",
-                    "is_done": False,
-                })
-                schedule_dicts.append({
-                    "date": d,
-                    "session": "Tối",
-                    "time_slot": "21:45 - 22:30",
-                    "goal_id": "life_sleep",
-                    "goal_title": "Giấc Ngủ Tái Tạo",
-                    "task_detail": "Uống 1 ly trà hoa cúc ấm, tắt màn hình xanh & Ngủ đúng 22:30 để ngủ sâu 8 tiếng (Uống gì & Ngủ mấy giờ)",
-                    "energy_level": "🟢 Recharge",
-                    "definition_of_done": "Tắt toàn bộ thiết bị trước 22:15, phòng tối hoàn toàn, lên giường ngủ lúc 22:30.",
-                    "resource_link": "https://sleepfoundation.org",
-                    "resource_url": "https://sleepfoundation.org",
-                    "resource_title": "Tối ưu chu kỳ giấc ngủ sâu REM & NREM",
-                    "is_done": False,
-                })
+        # Fallback tạo lịch mẫu chi tiết thực tế 14 ngày bóc tách rõ từng khung giờ (Ăn gì, Tập gì, Uống gì, Ngủ mấy giờ)
+        schedule_dicts = generate_detailed_master_schedule(
+            active_goals=active_goals,
+            start_date_str=get_vietnam_today_str(),
+            num_days=14,
+            username=username,
+        )
         rescheduled_tasks = []
         is_rescheduled = False
-        response_text = "Tôi đã phân rã toàn bộ các mục tiêu Active vào Master Schedule đầy đủ 7 ngày (Thứ Hai đến Chủ Nhật) theo đúng nguyên tắc nhịp sinh học kèm đầy đủ 4 hạng mục đời sống: Ăn gì (thực đơn cụ thể), Uống gì, Tập gì/Học gì, và Ngủ mấy giờ mà không trùng lặp giờ giấc!"
+        response_text = "Tôi đã phân rã toàn bộ các mục tiêu Active vào Master Schedule chi tiết từng ngày theo trục thời gian thực (YYYY-MM-DD), bóc tách riêng từng khung giờ Ăn gì (thực đơn & gram/calo), Tập gì, Uống gì và Ngủ mấy giờ mà không trùng lặp!"
 
     # Loại bỏ triệt để các ký tự markdown ** hoặc __ thô khỏi tất cả các trường
     for item in schedule_dicts:

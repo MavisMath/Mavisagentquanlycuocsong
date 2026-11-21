@@ -57,6 +57,13 @@ __all__ = [
     "init_user_tree",
     "detect_goal_domain",
     "DOMAIN_TERMINOLOGY",
+    "VIETNAM_WEEKDAYS",
+    "get_vietnam_now",
+    "get_vietnam_today",
+    "get_vietnam_today_str",
+    "compute_target_date",
+    "generate_detailed_master_schedule",
+    "ensure_schedule_covers_date",
 ]
 
 LEDGER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "goals_ledger.json")
@@ -237,20 +244,22 @@ DOMAIN_TERMINOLOGY = {
 
 
 def detect_goal_domain(
-    goal_data: Optional[Dict[str, Any]] = None,
+    goal_data: Any = None,
     goal_title: str = "",
     category: str = "",
 ) -> str:
     """
     Tự động nhận diện lĩnh vực chuyên biệt của mục tiêu dựa trên title, goal_name và category.
-    Trả về một trong các nhóm:
-    - 'health': Sức khỏe, Thể chất, Giảm cân, Thể hình, Dinh dưỡng, Chạy bộ.
-    - 'language': Ngoại ngữ, IELTS, TOEIC, HSK, Tiếng Trung, Tiếng Nhật, Tiếng Hàn.
-    - 'tech_study': Lập trình, Kỹ thuật, AI, Data Science, Thuật toán, Software.
-    - 'career_finance': Sự nghiệp, Tài chính, Kinh doanh, Dự án, Doanh số, Khởi nghiệp.
-    - 'general': Mục tiêu phát triển tổng quát khác.
+    Hỗ trợ linh hoạt cả truyền dict hoặc truyền trực tiếp goal_title vào vị trí đầu tiên.
     """
-    g = goal_data or {}
+    if isinstance(goal_data, str):
+        if not goal_title:
+            goal_title = goal_data
+        goal_data = {}
+    elif not isinstance(goal_data, dict):
+        goal_data = {}
+
+    g = goal_data
     t_str = str(goal_title or g.get("title") or g.get("goal_name", "")).strip().lower()
     c_str = str(category or g.get("category", "")).strip().lower()
     combined = f"{t_str} {c_str}"
@@ -559,12 +568,59 @@ def load_user_profile(username: str = "mavis") -> Dict[str, Any]:
     return all_data.get(username, {}).get("user_profile", {})
 
 
+# ==============================================================================
+# TIMEZONE & DATE AXIS UTILITIES (ASIA/HO_CHI_MINH)
+# ==============================================================================
+
+VIETNAM_WEEKDAYS = {
+    0: "Thứ Hai",
+    1: "Thứ Ba",
+    2: "Thứ Tư",
+    3: "Thứ Năm",
+    4: "Thứ Sáu",
+    5: "Thứ Bảy",
+    6: "Chủ Nhật",
+}
+
+
+def get_vietnam_now() -> datetime:
+    """Lấy thời điểm hiện tại theo múi giờ Việt Nam (Asia/Ho_Chi_Minh - UTC+7)."""
+    from datetime import timezone
+    vn_tz = timezone(timedelta(hours=7))
+    return datetime.now(vn_tz)
+
+
+def get_vietnam_today() -> Any:
+    """Lấy ngày hôm nay (date object) theo giờ Việt Nam."""
+    return get_vietnam_now().date()
+
+
+def get_vietnam_today_str() -> str:
+    """Lấy chuỗi ngày hôm nay YYYY-MM-DD theo giờ Việt Nam."""
+    return get_vietnam_today().strftime("%Y-%m-%d")
+
+
+def compute_target_date(start_date_str: str, duration_days: int) -> str:
+    """Tự động tính ngày đích (target_date = start_date + duration_days)."""
+    try:
+        s_dt = datetime.strptime(str(start_date_str).strip()[:10], "%Y-%m-%d").date()
+    except Exception:
+        s_dt = get_vietnam_today()
+    try:
+        d_days = int(duration_days)
+    except Exception:
+        d_days = 90
+    t_dt = s_dt + timedelta(days=d_days)
+    return t_dt.strftime("%Y-%m-%d")
+
+
 def standardize_goal_schema(g: Dict[str, Any]) -> Dict[str, Any]:
     """
     Chuẩn hóa cấu trúc Goal theo Schema CEO 3 Giai đoạn:
     - id, title, category, priority, preferred_time
     - status: 'evaluating' | 'active' | 'completed'
     - breakdown: yearly -> quarterly -> monthly -> weekly kèm resources
+    - start_date (YYYY-MM-DD) và target_date (start_date + duration_days)
     Đồng thời bảo toàn các trường tương thích ngược (goal_id, goal_name, preferred_slots, is_complete).
     """
     if not isinstance(g, dict):
@@ -583,7 +639,7 @@ def standardize_goal_schema(g: Dict[str, Any]) -> Dict[str, Any]:
     clean["category"] = clean.get("category") or "Học tập"
     clean["priority"] = clean.get("priority") or "P2 - High"
 
-    # 3. Khung giờ & Quỹ thời gian
+    # 3. Khung giờ, Quỹ thời gian & Trục ngày thực tế (start_date -> target_date)
     clean["preferred_time"] = clean.get("preferred_time") or clean.get("preferred_slots") or "08:00 - 10:00 Sáng"
     clean["preferred_slots"] = clean["preferred_time"]
     try:
@@ -594,6 +650,27 @@ def standardize_goal_schema(g: Dict[str, Any]) -> Dict[str, Any]:
         clean["duration_days"] = int(clean.get("duration_days", 90))
     except (ValueError, TypeError):
         clean["duration_days"] = 90
+
+    # Trục thời gian thực tế: start_date (mặc định hôm nay giờ VN) & target_date (start_date + duration_days)
+    raw_start = clean.get("start_date")
+    if raw_start:
+        try:
+            datetime.strptime(str(raw_start).strip()[:10], "%Y-%m-%d")
+            clean["start_date"] = str(raw_start).strip()[:10]
+        except Exception:
+            clean["start_date"] = get_vietnam_today_str()
+    else:
+        clean["start_date"] = get_vietnam_today_str()
+
+    raw_target = clean.get("target_date")
+    if raw_target:
+        try:
+            datetime.strptime(str(raw_target).strip()[:10], "%Y-%m-%d")
+            clean["target_date"] = str(raw_target).strip()[:10]
+        except Exception:
+            clean["target_date"] = compute_target_date(clean["start_date"], clean["duration_days"])
+    else:
+        clean["target_date"] = compute_target_date(clean["start_date"], clean["duration_days"])
 
     # 4. Trạng thái: 'evaluating' | 'active' | 'completed' | 'paused'
     st = clean.get("status")
@@ -697,7 +774,16 @@ def update_master_schedule_task_status(
         # Cấu trúc phẳng từng task
         t_title = str(item.get("task_detail", "")).lower()
         if t_title and (task_clean in t_title or t_title in task_clean):
-            if date is None or item.get("date") == date:
+            item_date = str(item.get("date", ""))
+            item_day = str(item.get("day_name", ""))
+            date_match = (
+                date is None
+                or item_date == date
+                or item_day == date
+                or (len(str(date)) >= 10 and str(date) in item_date)
+                or (len(item_date) >= 10 and item_date in str(date))
+            )
+            if date_match:
                 item["is_done"] = is_done
                 matched = True
 
@@ -715,6 +801,272 @@ def update_master_schedule_task_status(
     if matched:
         save_master_schedule(schedule, username=username)
     return matched
+
+
+def generate_detailed_master_schedule(
+    active_goals: List[Dict[str, Any]],
+    start_date_str: Optional[str] = None,
+    num_days: int = 14,
+    username: str = "mavis",
+) -> List[Dict[str, Any]]:
+    """
+    Sinh lịch trình chi tiết theo ngày thực tế (YYYY-MM-DD), bóc tách rõ từng khung giờ sinh hoạt trong ngày:
+    - Khung tập luyện / học tập chuyên sâu: tên bài tập cụ thể, số hiệp/reps/thời lượng (VD: Chạy bộ Zone 2 40p + 3 hiệp Plank 1p)
+    - Khung dinh dưỡng IF 16:8: Tách riêng Bữa 1 (12:00 - 12:30) và Bữa 2 (19:00 - 19:30) ghi rõ tên món + định lượng gram/calo
+    - Khung uống nước sớm & chiều, khung ngủ sâu phục hồi 22:30.
+    - Tuyệt đối không gộp chung 1 dòng!
+    """
+    if not start_date_str:
+        start_date_str = get_vietnam_today_str()
+
+    try:
+        start_dt = datetime.strptime(str(start_date_str).strip()[:10], "%Y-%m-%d").date()
+    except Exception:
+        start_dt = get_vietnam_today()
+
+    clean_goals = [g for g in active_goals if isinstance(g, dict)]
+
+    # Thực đơn Bữa 1 theo thứ (12:00 - 12:30)
+    meal1_plans = {
+        0: "Bữa 1 (12:00 - 12:30): 150g ức gà áp chảo dầu olive, 100g khoai lang luộc, 200g bông cải xanh hấp (~450 kcal, 38g Protein)",
+        1: "Bữa 1 (12:00 - 12:30): 150g nạc thăn bò xào cần tỏi, 1 bát nhỏ cơm gạo lứt (120g), 1 đĩa dưa chuột cà chua bi (~480 kcal, 35g Protein)",
+        2: "Bữa 1 (12:00 - 12:30): 150g ức gà hấp nấm đông cô, 1 bắp ngô ngọt nhỏ (120g), 200g đậu que luộc (~440 kcal, 37g Protein)",
+        3: "Bữa 1 (12:00 - 12:30): 150g tôm xào ớt chuông nấm đùi gà, 100g khoai lang tím nướng, 1 bát canh cải ngọt (~430 kcal, 34g Protein)",
+        4: "Bữa 1 (12:00 - 12:30): 150g phi lê cá basa/cá hồi áp chảo, 1 bát nhỏ cơm gạo lứt, 200g măng tây xào tỏi (~490 kcal, 33g Protein)",
+        5: "Bữa 1 (12:00 - 12:30): 150g ức gà cuộn măng tây đút lò, 1 củ khoai lang luộc 100g, salad xà lách sốt mè rang (~460 kcal, 36g Protein)",
+        6: "Bữa 1 (12:00 - 12:30): 150g nạc lưng heo hấp cuốn bánh tráng rau rừng chấm nước mắm nhạt (~480 kcal, 32g Protein)",
+    }
+
+    # Thực đơn Bữa 2 theo thứ (19:00 - 19:30)
+    meal2_plans = {
+        0: "Bữa 2 (19:00 - 19:30): 150g cá phi lê hấp gừng xì dầu, 200g rau cải luộc chấm trứng dầm, 1 quả táo nhỏ (~420 kcal, 32g Protein)",
+        1: "Bữa 2 (19:00 - 19:30): 150g tôm rim nhạt, canh rong biển thịt nạc đậu hũ non (100g đậu), 1 bát rau củ luộc (~400 kcal, 36g Protein)",
+        2: "Bữa 2 (19:00 - 19:30): 150g ức gà xé phay trộn rau răm dưa chuột hành tây, 1 bắp ngô luộc nhỏ (~390 kcal, 35g Protein)",
+        3: "Bữa 2 (19:00 - 19:30): 150g bò áp chảo măng tây sốt tiêu đen, 200g súp lơ trắng luộc, 1 quả ổi giòn (~410 kcal, 34g Protein)",
+        4: "Bữa 2 (19:00 - 19:30): 150g mực hấp lá ổi, canh mùng tơi nấu cua đồng/thịt băm, 1 đĩa bầu luộc chấm muối vừng (~380 kcal, 31g Protein)",
+        5: "Bữa 2 (19:00 - 19:30): 150g cá chép/cá rô phi giòn sốt cà chua ít dầu, 200g rau muống luộc dầm sấu (~400 kcal, 33g Protein)",
+        6: "Bữa 2 (19:00 - 19:30): 150g ức gà nướng hương thảo, đĩa salad rau mầm dưa chuột cà chua bi dầu olive (~390 kcal, 35g Protein)",
+    }
+
+    # Kế hoạch tập luyện theo thứ
+    workout_plans = {
+        0: ("Kháng lực Upper Body: Push-up 4x12, Dumbbell Shoulder Press 4x10, Bent-over Row 4x12, Plank 3x1p", "🔴 Deep Work", "Hoàn thành 4 bài tập đúng form, ghi chép mức tạ và nghỉ 90s giữa hiệp."),
+        1: ("Chạy bộ Zone 2 40 phút + 3 hiệp Plank 1 phút (duy trì nhịp tim 120-135 bpm)", "🟡 Shallow Work", "Duy trì nhịp tim vùng Zone 2 đốt mỡ tối đa, nhịp thở đều nói chuyện được không hụt hơi."),
+        2: ("Kháng lực Lower Body: Goblet Squat 4x12, Romanian Deadlift 4x10, Walking Lunges 3x12/chân, Glute Bridge 3x15", "🔴 Deep Work", "Đúng kỹ thuật chuẩn, siết chặt cơ mông và đùi sau, không đau lưng dưới."),
+        3: ("Đi bộ máy dốc 12% tốc độ 5.5 km/h Zone 2 trong 45 phút + Cooldown giãn cơ", "🟡 Shallow Work", "Đốt cháy ~350-400 kcal, giữ nhịp tim ổn định và hạ nhiệt bằng 10 phút kéo giãn cơ tĩnh."),
+        4: ("Kháng lực Full Body & Core: Dumbbell Swing 4x15, Push-up 4x12, Lat Pulldown/Row 4x10, Russian Twist 3x20", "🔴 Deep Work", "Nhịp thở liên tục, siết cơ core xuyên suốt bài tập, mồ hôi toát đều."),
+        5: ("Chạy bộ ngoài trời Zone 2 40 phút + 3 hiệp Plank 1 phút (hoặc bơi lội 1.000m)", "🟡 Shallow Work", "Chạy ngoài không gian xanh, kiểm soát tốc độ và hoàn thành đủ cự ly đề ra."),
+        6: ("Phục hồi tích cực: Đi bộ thong thả ngoài trời 5.000 bước & Lăn bọt Foam Roller giãn cơ 25 phút", "🟢 Recharge", "Thả lỏng toàn bộ các nhóm cơ căng mỏi sau tuần tập luyện, ngâm chân nước ấm."),
+    }
+
+    schedule_items = []
+    for day_offset in range(num_days):
+        curr_d = start_dt + timedelta(days=day_offset)
+        d_str = curr_d.strftime("%Y-%m-%d")
+        d_weekday = curr_d.weekday()
+        d_name = VIETNAM_WEEKDAYS[d_weekday]
+
+        # 1. Khung uống nước ấm & đón nắng sớm
+        schedule_items.append({
+            "date": d_str,
+            "day_name": d_name,
+            "session": "Sáng",
+            "time_slot": "06:30 - 07:00",
+            "goal_id": "life_hydration_morning",
+            "goal_title": "Nhịp Sinh Học & Đón Nắng",
+            "task_detail": "Uống 500ml nước ấm chanh muối khoáng & đón ánh sáng mặt trời 15 phút (Đánh thức hormone cortisol)",
+            "energy_level": "🟢 Recharge",
+            "definition_of_done": "Bù nước cho não bộ, đón nắng sớm kích hoạt nhịp sinh học, giữ trạng thái nhịn IF 16:8.",
+            "resource_link": "https://hubermanlab.com",
+            "resource_url": "https://hubermanlab.com",
+            "resource_title": "Huberman Protocol: Đánh thức đồng hồ sinh học",
+            "is_done": False,
+        })
+
+        # 2. Khung Tập Luyện Thể Chất
+        w_detail, w_energy, w_dod = workout_plans.get(d_weekday, workout_plans[0])
+        health_goal = next((g for g in clean_goals if detect_goal_domain(g.get("title") or g.get("goal_name", ""), g.get("category", "")) == "health"), None)
+        h_title = health_goal.get("title") or health_goal.get("goal_name") if health_goal else "Rèn Luyện Thể Lực & Đốt Mỡ"
+        h_id = health_goal.get("id") if health_goal else "life_fitness"
+
+        schedule_items.append({
+            "date": d_str,
+            "day_name": d_name,
+            "session": "Sáng",
+            "time_slot": "07:00 - 08:00",
+            "goal_id": h_id,
+            "goal_title": h_title,
+            "task_detail": f"{w_detail} cho {h_title}",
+            "energy_level": w_energy,
+            "definition_of_done": w_dod,
+            "resource_link": "https://muscleandstrength.com",
+            "resource_url": "https://muscleandstrength.com",
+            "resource_title": "Giáo án vận động thể chất chuẩn",
+            "is_done": False,
+        })
+
+        # 3. Khung Học tập / Công việc Chuyên Sâu (Deep Work P1) nếu có mục tiêu khác
+        other_goals = [g for g in clean_goals if g != health_goal]
+        for og_idx, og in enumerate(other_goals):
+            og_title = og.get("title") or og.get("goal_name", "Mục tiêu phát triển")
+            og_id = og.get("id", f"goal_{og_idx}")
+            og_bd = og.get("breakdown", {})
+            w_tasks = []
+            for wk in og_bd.get("weekly", []):
+                for tk in wk.get("tasks", []):
+                    w_tasks.append(tk)
+
+            if w_tasks:
+                chosen_tk = w_tasks[(day_offset + og_idx) % len(w_tasks)]
+                og_detail = chosen_tk.get("task", chosen_tk.get("detail", f"Deep Work chuyên sâu cho {og_title}"))
+                og_dod = chosen_tk.get("definition_of_done", f"Hoàn thành trọn vẹn nội dung bài học/công việc cho {og_title}.")
+                og_link = chosen_tk.get("link", og.get("resources", [{}])[0].get("url", "https://developer.mozilla.org"))
+            else:
+                og_detail = f"Deep Work tập trung: Nghiên cứu module cốt lõi & làm bài tập thực hành cho {og_title}"
+                og_dod = f"Tập trung 100% không xao nhãng, giải quyết trọn vẹn 1 chủ đề trọng tâm cho {og_title}."
+                og_link = "https://developer.mozilla.org"
+
+            slot_time = "08:30 - 11:00" if og_idx == 0 else "14:30 - 16:30"
+            sess_name = "Sáng" if og_idx == 0 else "Chiều"
+            schedule_items.append({
+                "date": d_str,
+                "day_name": d_name,
+                "session": sess_name,
+                "time_slot": slot_time,
+                "goal_id": og_id,
+                "goal_title": og_title,
+                "task_detail": og_detail,
+                "energy_level": "🔴 Deep Work",
+                "definition_of_done": og_dod,
+                "resource_link": og_link,
+                "resource_url": og_link,
+                "resource_title": f"Tài nguyên chính thức: {og_title}",
+                "is_done": False,
+            })
+
+        # 4. Khung Dinh Dưỡng Bữa 1 (12:00 - 12:30, IF 16:8)
+        schedule_items.append({
+            "date": d_str,
+            "day_name": d_name,
+            "session": "Chiều",
+            "time_slot": "12:00 - 12:30",
+            "goal_id": "life_nutrition_meal1",
+            "goal_title": "Dinh Dưỡng IF 16:8 — Bữa 1",
+            "task_detail": meal1_plans.get(d_weekday, meal1_plans[0]),
+            "energy_level": "🟢 Recharge",
+            "definition_of_done": "Ăn chậm nhai kỹ trong 25-30 phút, mở đầu cửa sổ ăn IF 16:8 đúng 12:00 trưa.",
+            "resource_link": "https://eatthismuch.com",
+            "resource_url": "https://eatthismuch.com",
+            "resource_title": "Thực đơn dinh dưỡng Eat Clean & Calo",
+            "is_done": False,
+        })
+
+        # 5. Khung Bù nước & Hạt ăn nhẹ chiều (15:30 - 16:00)
+        schedule_items.append({
+            "date": d_str,
+            "day_name": d_name,
+            "session": "Chiều",
+            "time_slot": "15:30 - 16:00",
+            "goal_id": "life_hydration_afternoon",
+            "goal_title": "Bù Nước & Tỉnh Táo Chiều",
+            "task_detail": "Uống 500ml nước lọc / trà xanh ấm không đường & bổ sung 15g hạt hạnh nhân/óc chó",
+            "energy_level": "🟢 Recharge",
+            "definition_of_done": "Bù nước cho cơ thể, chống hạ đường huyết, giữ tỉnh táo sảng khoái.",
+            "resource_link": "https://healthline.com",
+            "resource_url": "https://healthline.com",
+            "resource_title": "Cơ chế trao đổi chất & Nhịn ăn gián đoạn",
+            "is_done": False,
+        })
+
+        # 6. Khung Dinh Dưỡng Bữa 2 (19:00 - 19:30, IF 16:8)
+        schedule_items.append({
+            "date": d_str,
+            "day_name": d_name,
+            "session": "Tối",
+            "time_slot": "19:00 - 19:30",
+            "goal_id": "life_nutrition_meal2",
+            "goal_title": "Dinh Dưỡng IF 16:8 — Bữa 2",
+            "task_detail": meal2_plans.get(d_weekday, meal2_plans[0]),
+            "energy_level": "🟢 Recharge",
+            "definition_of_done": "Kết thúc bữa ăn trước 19:30 để đóng cửa sổ ăn IF 16:8 (bắt đầu nhịn 16 tiếng đến 12:00 hôm sau).",
+            "resource_link": "https://eatthismuch.com",
+            "resource_url": "https://eatthismuch.com",
+            "resource_title": "Thực đơn thâm hụt calo bữa tối",
+            "is_done": False,
+        })
+
+        # 7. Khung Giấc Ngủ Tái Tạo (22:15 - 22:30)
+        schedule_items.append({
+            "date": d_str,
+            "day_name": d_name,
+            "session": "Tối",
+            "time_slot": "22:15 - 22:30",
+            "goal_id": "life_sleep",
+            "goal_title": "Giấc Ngủ Tái Tạo Phục Hồi",
+            "task_detail": "Tắt toàn bộ thiết bị điện tử, uống 1 ly trà hoa cúc ấm & Đi ngủ đúng 22:30 để ngủ sâu 8 tiếng",
+            "energy_level": "🟢 Recharge",
+            "definition_of_done": "Tắt màn hình xanh lúc 22:15, lên giường ngủ lúc 22:30 trong phòng tối hoàn toàn, thoáng mát 22-24°C.",
+            "resource_link": "https://sleepfoundation.org",
+            "resource_url": "https://sleepfoundation.org",
+            "resource_title": "Khoa học giấc ngủ sâu & Phục hồi cơ thể",
+            "is_done": False,
+        })
+
+    return schedule_items
+
+
+def ensure_schedule_covers_date(
+    target_date: Any,
+    active_goals: Optional[List[Dict[str, Any]]] = None,
+    username: str = "mavis",
+) -> List[Dict[str, Any]]:
+    """
+    Đảm bảo master_schedule luôn có dữ liệu cho ngày target_date.
+    Nếu ngày đó chưa có lịch, tự động sinh 7 ngày cho tuần đó và nối vào master_schedule trên MongoDB Atlas.
+    """
+    username = (username or "mavis").strip().lower()
+    current_schedule = load_master_schedule(username)
+    if not isinstance(target_date, datetime) and not hasattr(target_date, "strftime"):
+        try:
+            target_date = datetime.strptime(str(target_date)[:10], "%Y-%m-%d").date()
+        except Exception:
+            target_date = get_vietnam_today()
+    elif isinstance(target_date, datetime):
+        target_date = target_date.date()
+
+    target_d_str = target_date.strftime("%Y-%m-%d")
+
+    # Kiểm tra xem ngày này đã có task nào chưa
+    has_date = any(t.get("date") == target_d_str for t in current_schedule if isinstance(t, dict))
+    if has_date:
+        return current_schedule
+
+    # Nếu chưa có, lấy active goals
+    if active_goals is None:
+        all_goals = load_user_goals(username)
+        active_goals = [g for g in all_goals if g.get("status") == "active"]
+        if not active_goals:
+            active_goals = [g for g in all_goals if g.get("status") not in ("paused", "completed")]
+
+    # Bắt đầu sinh từ thứ Hai của tuần chứa target_date
+    monday_of_week = target_date - timedelta(days=target_date.weekday())
+    new_items = generate_detailed_master_schedule(
+        active_goals=active_goals,
+        start_date_str=monday_of_week.strftime("%Y-%m-%d"),
+        num_days=7,
+        username=username,
+    )
+
+    # Lọc bỏ trùng lặp nếu bất kỳ ngày nào trong 7 ngày đó đã tồn tại
+    existing_dates = set(t.get("date") for t in current_schedule if isinstance(t, dict) and t.get("date"))
+    items_to_append = [it for it in new_items if it.get("date") not in existing_dates]
+
+    if items_to_append:
+        merged_schedule = current_schedule + items_to_append
+        save_master_schedule(merged_schedule, username=username)
+        return merged_schedule
+
+    return current_schedule
 
 
 def save_user_goals(goals: List[Dict[str, Any]], username: str = "mavis") -> bool:

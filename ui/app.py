@@ -95,6 +95,12 @@ try:
     calculate_user_streak = getattr(mg, "calculate_user_streak", lambda u="mavis": 1)
     detect_goal_domain = getattr(mg, "detect_goal_domain", lambda *args, **kwargs: "general")
     DOMAIN_TERMINOLOGY = getattr(mg, "DOMAIN_TERMINOLOGY", {})
+    get_vietnam_today = getattr(mg, "get_vietnam_today", lambda: datetime.now().date())
+    get_vietnam_today_str = getattr(mg, "get_vietnam_today_str", lambda: datetime.now().strftime("%Y-%m-%d"))
+    compute_target_date = getattr(mg, "compute_target_date", lambda s, d: "2027-02-19")
+    generate_detailed_master_schedule = getattr(mg, "generate_detailed_master_schedule", lambda *args, **kwargs: [])
+    ensure_schedule_covers_date = getattr(mg, "ensure_schedule_covers_date", lambda *args, **kwargs: [])
+    VIETNAM_WEEKDAYS = getattr(mg, "VIETNAM_WEEKDAYS", {0: "Thứ Hai", 1: "Thứ Ba", 2: "Thứ Tư", 3: "Thứ Năm", 4: "Thứ Sáu", 5: "Thứ Bảy", 6: "Chủ Nhật"})
 except Exception as _goals_import_err:
     import traceback
     st.error(f"⚠️ Cảnh báo nạp module `memory.goals`: {_goals_import_err}")
@@ -654,6 +660,36 @@ if not raw_session_user or not str(raw_session_user).strip():
     raw_session_user = "mavis"
 current_username = str(raw_session_user).strip().lower()
 current_name = st.session_state.get("name") or current_username.capitalize()
+
+# ------------------------------------------------------------------------------
+# TỰ ĐỘNG BẮT MÃ GOOGLE CALENDAR OAUTH TỪ URL QUERY PARAMS
+# ------------------------------------------------------------------------------
+if "code" in st.query_params:
+    auth_code = st.query_params.get("code")
+    if auth_code:
+        default_redir = get_default_redirect_uri()
+        redir_session_key = f"active_gcal_redir_{current_username}"
+        current_redir = st.session_state.get(redir_session_key, default_redir)
+        ok = exchange_code_and_save_token(auth_code, redirect_uri=current_redir, username=current_username)
+        try:
+            st.query_params.clear()
+        except Exception:
+            try:
+                del st.query_params["code"]
+            except Exception:
+                pass
+        if ok:
+            st.session_state[f"gcal_just_connected_{current_username}"] = True
+            st.rerun()
+        else:
+            st.session_state[f"gcal_connect_error_{current_username}"] = "Không thể đổi mã xác thực Google Calendar. Vui lòng kiểm tra lại cấu hình Redirect URI."
+            st.rerun()
+
+if st.session_state.pop(f"gcal_just_connected_{current_username}", False):
+    st.toast("🎉 Đã kết nối Google Calendar thành công vĩnh viễn!")
+if f"gcal_connect_error_{current_username}" in st.session_state:
+    err_c = st.session_state.pop(f"gcal_connect_error_{current_username}")
+    st.error(f"❌ {err_c}")
 
 # Khởi tạo các biến Session State riêng biệt cho từng User
 msg_key = f"messages_{current_username}"
@@ -1360,22 +1396,6 @@ with tab_arch:
     if redir_session_key not in st.session_state:
         st.session_state[redir_session_key] = default_redir
 
-    # Bắt mã authorization code nếu Google OAuth redirect về với query param 'code'
-    if "code" in st.query_params:
-        auth_code = st.query_params.get("code")
-        if auth_code:
-            current_redir = st.session_state.get(redir_session_key, default_redir)
-            ok = exchange_code_and_save_token(auth_code, redirect_uri=current_redir, username=current_username)
-            if ok:
-                st.toast("🎉 Kết nối Google Calendar thành công!")
-                try:
-                    del st.query_params["code"]
-                except Exception:
-                    pass
-                st.rerun()
-            else:
-                st.error("❌ Không thể đổi Authorization Code thành Access Token. Hãy kiểm tra lại Redirect URI.")
-
     cal_connected = is_calendar_connected(current_username)
     with st.container(border=True):
         col_gc_status, col_gc_action = st.columns([0.65, 0.35])
@@ -1868,10 +1888,15 @@ with tab_sched:
         now_vn = datetime.now(vn_tz)
         day_names_vi = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
         today_vi_day = day_names_vi[now_vn.weekday()]
+        today_date_str = now_vn.strftime("%Y-%m-%d")
         now_time = now_vn.time()
         now_str = now_vn.strftime(f"{today_vi_day}, ngày %d/%m/%Y — %H:%M (Giờ VN)")
 
-        today_tasks = [t for t in ms if t.get("date") == today_vi_day]
+        today_tasks = [
+            t for t in ms
+            if t.get("date") == today_date_str
+            or (not str(t.get("date", "")).startswith("202") and t.get("date") == today_vi_day)
+        ]
         active_hero_task = None
         upcoming_hero_task = None
 
@@ -1925,7 +1950,7 @@ with tab_sched:
                         update_master_schedule_task_status(
                             task_identifier=h_detail,
                             is_done=new_h_done,
-                            date=today_vi_day,
+                            date=target_hero_task.get("date") or today_date_str,
                             username=current_username,
                         )
                         target_hero_task["is_done"] = new_h_done
@@ -2066,6 +2091,53 @@ with tab_sched:
             }
 
             # ------------------------------------------------------------------
+            # XÁC ĐỊNH TRỤC THỜI GIAN THỰC (start_date -> target_date)
+            # ------------------------------------------------------------------
+            today_date = get_vietnam_today()
+            active_user_goals = [g for g in user_goals_sched if g.get("status") == "active"]
+            if not active_user_goals:
+                active_user_goals = [g for g in user_goals_sched if g.get("status") not in ("paused", "completed")]
+
+            start_dates = []
+            target_dates = []
+            for g in (active_user_goals or user_goals_sched):
+                sd_str = g.get("start_date")
+                td_str = g.get("target_date")
+                if sd_str:
+                    try:
+                        start_dates.append(datetime.strptime(str(sd_str)[:10], "%Y-%m-%d").date())
+                    except Exception:
+                        pass
+                if td_str:
+                    try:
+                        target_dates.append(datetime.strptime(str(td_str)[:10], "%Y-%m-%d").date())
+                    except Exception:
+                        pass
+
+            base_start_date = min(start_dates) if start_dates else today_date
+            min_date_limit = min(base_start_date, today_date)
+            base_target_date = max(target_dates) if target_dates else (base_start_date + timedelta(days=90))
+            if base_target_date < min_date_limit:
+                base_target_date = min_date_limit + timedelta(days=90)
+
+            # Lưu vết ngày thực tế đang chọn
+            sel_date_key = f"selected_sched_date_{current_username}"
+            if sel_date_key not in st.session_state:
+                st.session_state[sel_date_key] = today_date
+
+            current_picked_date = st.session_state.get(sel_date_key, today_date)
+            if not isinstance(current_picked_date, date):
+                try:
+                    current_picked_date = datetime.strptime(str(current_picked_date)[:10], "%Y-%m-%d").date()
+                except Exception:
+                    current_picked_date = today_date
+
+            if current_picked_date < min_date_limit:
+                current_picked_date = min_date_limit
+            elif current_picked_date > base_target_date:
+                current_picked_date = base_target_date
+
+            # ------------------------------------------------------------------
             # 1. BỘ CHỌN GÓC NHÌN THỜI GIAN & PHẠM VI MỤC TIÊU
             # ------------------------------------------------------------------
             st.markdown("#### 🧭 Góc Nhìn Thời Gian & Lịch Trình Điều Hành:")
@@ -2101,33 +2173,18 @@ with tab_sched:
                     key=f"sched_mode_{current_username}",
                 )
 
-            filtered_schedule = active_schedule
+            # Tự động đảm bảo Master Schedule có dữ liệu cho ngày đang xem
+            full_master_sched = ensure_schedule_covers_date(current_picked_date, active_goals=active_user_goals, username=current_username)
+            filtered_schedule = full_master_sched
+            chosen_g = None
             with col_spec:
                 if mode == "🎯 Xem Lịch Riêng Theo Từng Mục Tiêu":
-                    unique_goals = list(dict.fromkeys(t.get("goal_title", "Mục tiêu") for t in active_schedule if t.get("goal_title")))
+                    unique_goals = list(dict.fromkeys(t.get("goal_title", "Mục tiêu") for t in filtered_schedule if t.get("goal_title")))
                     if unique_goals:
                         chosen_g = st.selectbox("Chọn mục tiêu cụ thể:", options=unique_goals, key=f"sel_ms_goal_{current_username}")
-                        filtered_schedule = [t for t in active_schedule if t.get("goal_title") == chosen_g]
+                        filtered_schedule = [t for t in filtered_schedule if t.get("goal_title") == chosen_g]
                     else:
                         st.info("Chưa có mục tiêu nào trong lịch.")
-
-            # Kiểm tra xem lịch đã đủ 7 ngày chưa và hỗ trợ tạo nhanh 7 ngày
-            unique_sched_days = set(t.get("date") for t in filtered_schedule if t.get("date"))
-            if len(unique_sched_days) < 7 and user_goals_sched:
-                col_btn_gen, col_tip_gen = st.columns([0.45, 0.55])
-                with col_btn_gen:
-                    if st.button("⚡ Tự Động Xếp Đủ Lịch 7 Ngày (Thứ 2 - CN)", key=f"btn_auto_7d_{current_username}", use_container_width=True):
-                        with st.spinner("AI Master Scheduler đang phân bổ đầy đủ 7 ngày theo nhịp sinh học..."):
-                            if scheduler_chat is not None:
-                                res = scheduler_chat(
-                                    user_message="Tự động xếp đủ lịch trình 7 ngày từ Thứ Hai đến Chủ Nhật cho toàn bộ active goals theo đúng nhịp sinh học",
-                                    username=current_username,
-                                )
-                                st.session_state[master_schedule_key] = load_master_schedule(current_username)
-                                st.success("✅ Đã cập nhật đủ lịch trình 7 ngày!")
-                                st.rerun()
-                with col_tip_gen:
-                    st.caption("💡 Lịch hiện có ít hơn 7 ngày. Bấm để AI tự động phân bổ đủ 7 ngày Thứ Hai - Chủ Nhật.")
 
             # Nút xuất lịch ICS & Google Calendar
             c_ics, c_gcal, c_gsync = st.columns(3)
@@ -2166,28 +2223,57 @@ with tab_sched:
 
             if not filtered_schedule:
                 st.info(
-                    "💡 Chưa có lịch trình. Bạn hãy bấm nút **'⚡ Tự Động Xếp Đủ Lịch 7 Ngày'** ở trên hoặc chat với **AI Master Scheduler** ở cột bên phải "
-                    "(ví dụ: *'Hãy gom tất cả active goals để xếp lịch tuần này cho tôi'*) để tạo lịch ngay lập tức!"
+                    "💡 Chưa có lịch trình. Bạn hãy trao đổi với **AI Master Scheduler** ở cột bên phải "
+                    "(ví dụ: *'Hãy phân bổ lịch trình chi tiết cho mục tiêu của tôi'*) để tạo lịch ngay lập tức!"
                 )
             else:
                 # ==============================================================
-                # GÓC NHÌN 1: 📅 THEO NGÀY (DAILY VIEW)
+                # GÓC NHÌN 1: 📅 THEO NGÀY (DAILY VIEW VỚI DATE_INPUT THỜI GIAN THỰC)
                 # ==============================================================
                 if selected_view == "📅 Theo Ngày":
-                    available_days = [d for d in STANDARD_DAYS if any(t.get("date") == d for t in filtered_schedule)]
-                    if not available_days:
-                        available_days = list(dict.fromkeys(t.get("date", "Hôm nay") for t in filtered_schedule)) or STANDARD_DAYS
+                    col_dp1, col_dp2 = st.columns([0.70, 0.30])
+                    with col_dp1:
+                        new_picked_date = st.date_input(
+                            "📅 Chọn ngày thực tế trên lộ trình:",
+                            value=current_picked_date,
+                            min_value=min_date_limit,
+                            max_value=base_target_date,
+                            format="DD/MM/YYYY",
+                            key=f"picker_daily_date_{current_username}",
+                        )
+                        if new_picked_date != current_picked_date:
+                            st.session_state[sel_date_key] = new_picked_date
+                            st.rerun()
+                    with col_dp2:
+                        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                        if st.button("📍 Về Hôm Nay", key=f"btn_back_today_{current_username}", use_container_width=True):
+                            st.session_state[sel_date_key] = today_date
+                            st.rerun()
 
-                    default_day_idx = available_days.index(today_vi_day) if today_vi_day in available_days else 0
+                    # Tính toán thông số ngày
+                    day_offset_num = (new_picked_date - base_start_date).days + 1
+                    total_road_days = (base_target_date - base_start_date).days
+                    if total_road_days <= 0:
+                        total_road_days = 90
+                    day_name_viet = VIETNAM_WEEKDAYS.get(new_picked_date.weekday(), "Thứ Bảy")
+                    date_display_str = new_picked_date.strftime("%d/%m/%Y")
+                    cur_d_iso = new_picked_date.strftime("%Y-%m-%d")
 
-                    sel_day = st.selectbox(
-                        "📅 Chọn ngày xem chi tiết:",
-                        options=available_days,
-                        index=default_day_idx,
-                        key=f"sel_daily_day_{current_username}",
-                    )
+                    if day_offset_num < 1:
+                        banner_title = f"🎯 Chuẩn Bị (Cách ngày bắt đầu {abs(day_offset_num - 1)} ngày) — {day_name_viet}, {date_display_str}"
+                    elif day_offset_num > total_road_days:
+                        banner_title = f"🎯 Đã Về Đích ({day_offset_num}/{total_road_days}) — {day_name_viet}, {date_display_str}"
+                    else:
+                        banner_title = f"🎯 Ngày {day_offset_num}/{total_road_days} — {day_name_viet}, {date_display_str}"
 
-                    day_tasks = [t for t in filtered_schedule if t.get("date") == sel_day]
+                    st.markdown(f"### {banner_title}")
+
+                    # Lọc task theo ngày đang chọn
+                    day_tasks = [
+                        t for t in filtered_schedule
+                        if t.get("date") == cur_d_iso
+                        or (not str(t.get("date", "")).startswith("202") and t.get("date") == day_name_viet)
+                    ]
                     deferred_tasks = []
                     displayed_tasks = day_tasks
 
@@ -2223,6 +2309,9 @@ with tab_sched:
 
                     st.progress(pct_day / 100)
 
+                    if not displayed_tasks:
+                        st.info(f"🌿 Ngày **{day_name_viet}, {date_display_str}** hiện chưa có lịch trình. Bạn có thể nhấn chat với Scheduler để xếp lịch bổ sung.")
+
                     for sess in ["Sáng", "Chiều", "Tối"]:
                         sess_tasks = [t for t in displayed_tasks if t.get("session") == sess]
                         if sess_tasks:
@@ -2248,7 +2337,7 @@ with tab_sched:
                                 if not t_dod:
                                     t_dod = f"Hoàn thành trọn vẹn nội dung '{t_detail}' và ghi chú tiến độ."
 
-                                chk_key = f"chk_day_{current_username}_{sel_day}_{sess}_{idx}_{abs(hash(t_detail)) % 100000}"
+                                chk_key = f"chk_day_{current_username}_{cur_d_iso}_{sess}_{idx}_{abs(hash(t_detail)) % 100000}"
 
                                 with st.container(border=True):
                                     col_chk, col_card = st.columns([0.08, 0.92])
@@ -2258,7 +2347,7 @@ with tab_sched:
                                             update_master_schedule_task_status(
                                                 task_identifier=t_detail,
                                                 is_done=checked,
-                                                date=sel_day,
+                                                date=cur_d_iso,
                                                 username=current_username,
                                             )
                                             task["is_done"] = checked
@@ -2293,11 +2382,31 @@ with tab_sched:
                                 st.markdown(f"- ▫️ ⏰ **{dt_slot}**: {dt_title} `[🎯 {dt_goal}]` &nbsp; `:orange[Đã trượt sang ngày mai]`")
 
                 # ==============================================================
-                # GÓC NHÌN 2: 🗓️ THEO TUẦN (WEEKLY MATRIX VIEW - 3 HÀNG X 7 CỘT)
+                # GÓC NHÌN 2: 🗓️ THEO TUẦN (WEEKLY MATRIX VIEW THEO NGÀY THỰC TẾ)
                 # ==============================================================
                 elif selected_view == "🗓️ Theo Tuần":
-                    total_wk = len(filtered_schedule)
-                    done_wk = sum(1 for t in filtered_schedule if t.get("is_done") is True)
+                    mon_of_week = current_picked_date - timedelta(days=current_picked_date.weekday())
+                    week_dates = [mon_of_week + timedelta(days=i) for i in range(7)]
+
+                    # Header điều hướng tuần
+                    col_nav1, col_nav2, col_nav3 = st.columns([0.25, 0.50, 0.25])
+                    with col_nav1:
+                        if st.button("⬅️ Tuần Trước", key=f"btn_prev_wk_{current_username}", use_container_width=True):
+                            st.session_state[sel_date_key] = max(min_date_limit, current_picked_date - timedelta(days=7))
+                            st.rerun()
+                    with col_nav2:
+                        st.markdown(f"<p style='text-align:center; font-weight:bold; margin-top:5px;'>🗓️ Tuần: {week_dates[0].strftime('%d/%m')} ➔ {week_dates[6].strftime('%d/%m/%Y')}</p>", unsafe_allow_html=True)
+                    with col_nav3:
+                        if st.button("Tuần Sau ➡️", key=f"btn_next_wk_{current_username}", use_container_width=True):
+                            st.session_state[sel_date_key] = min(base_target_date, current_picked_date + timedelta(days=7))
+                            st.rerun()
+
+                    # Lọc toàn bộ task của tuần này
+                    week_iso_dates = set(d.strftime("%Y-%m-%d") for d in week_dates)
+                    week_tasks = [t for t in filtered_schedule if t.get("date") in week_iso_dates]
+
+                    total_wk = len(week_tasks)
+                    done_wk = sum(1 for t in week_tasks if t.get("is_done") is True)
                     pct_wk = int((done_wk / total_wk * 100)) if total_wk > 0 else 0
 
                     c_w1, c_w2, c_w3 = st.columns(3)
@@ -2309,34 +2418,53 @@ with tab_sched:
                         st.metric("⚡ Tiến độ thực thi tuần", f"{pct_wk}%")
 
                     st.progress(pct_wk / 100)
-                    st.caption("💡 Ma trận toàn cảnh 7 ngày chia theo 3 buổi (Sáng / Chiều / Tối) không chồng chéo:")
+                    st.caption("💡 Bấm nút '🔍 Mở ngày' trên từng cột để mở ngay chi tiết lịch ngày hôm đó:")
 
-                    # Header 7 cột cho 7 ngày
+                    # Header 7 cột cho 7 ngày thực tế
                     col_headers = st.columns(7)
-                    for d_idx, d_name in enumerate(STANDARD_DAYS):
-                        d_tasks = [t for t in filtered_schedule if t.get("date") == d_name]
+                    for d_idx, d_obj in enumerate(week_dates):
+                        d_str = d_obj.strftime("%Y-%m-%d")
+                        d_short_date = d_obj.strftime("%d/%m")
+                        d_name = VIETNAM_WEEKDAYS.get(d_obj.weekday(), "")
+                        d_tasks = [
+                            t for t in filtered_schedule
+                            if t.get("date") == d_str
+                            or (not str(t.get("date", "")).startswith("202") and t.get("date") == d_name)
+                        ]
                         d_done = sum(1 for t in d_tasks if t.get("is_done") is True)
                         d_tot = len(d_tasks)
                         with col_headers[d_idx]:
-                            st.markdown(f"**{DAY_SHORT.get(d_name, d_name)}**")
+                            is_today_col = (d_obj == today_date)
+                            badge_style = "color:#ff4b4b;" if is_today_col else ""
+                            st.markdown(f"<span style='{badge_style}'>**{DAY_SHORT.get(d_name, d_name)}**</span> `({d_short_date})`", unsafe_allow_html=True)
                             if d_tot > 0:
                                 st.caption(f"{d_done}/{d_tot} xong")
                             else:
                                 st.caption("Nghỉ")
+                            if st.button("🔍 Mở ngày", key=f"btn_open_wkd_{current_username}_{d_str}", use_container_width=True):
+                                st.session_state[sel_date_key] = d_obj
+                                st.session_state[view_key] = "📅 Theo Ngày"
+                                st.rerun()
 
                     # 3 Hàng: Sáng / Chiều / Tối
                     session_defs = [
-                        ("🌅 Buổi Sáng", "Sáng", "08:00 - 11:30"),
-                        ("☀️ Buổi Chiều", "Chiều", "14:00 - 17:30"),
-                        ("🌙 Buổi Tối", "Tối", "19:30 - 22:00"),
+                        ("🌅 Buổi Sáng", "Sáng", "06:30 - 11:30"),
+                        ("☀️ Buổi Chiều", "Chiều", "12:00 - 18:30"),
+                        ("🌙 Buổi Tối", "Tối", "19:00 - 22:30"),
                     ]
 
                     for sess_title, sess_name, sess_time in session_defs:
                         st.markdown(f"##### {sess_title} ({sess_time}):")
                         cols_sess = st.columns(7)
-                        for d_idx, d_name in enumerate(STANDARD_DAYS):
+                        for d_idx, d_obj in enumerate(week_dates):
+                            d_str = d_obj.strftime("%Y-%m-%d")
+                            d_name = VIETNAM_WEEKDAYS.get(d_obj.weekday(), "")
                             with cols_sess[d_idx]:
-                                cell_tasks = [t for t in filtered_schedule if t.get("date") == d_name and t.get("session") == sess_name]
+                                cell_tasks = [
+                                    t for t in filtered_schedule
+                                    if (t.get("date") == d_str or (not str(t.get("date", "")).startswith("202") and t.get("date") == d_name))
+                                    and t.get("session") == sess_name
+                                ]
                                 if not cell_tasks:
                                     st.caption("▫️ *Trống*")
                                 else:
@@ -2348,7 +2476,7 @@ with tab_sched:
                                         t_dod = tk.get("definition_of_done", "")
                                         t_link = tk.get("resource_url") or tk.get("resource_link", "")
 
-                                        wk_chk_key = f"chk_wk_{current_username}_{d_name}_{sess_name}_{t_idx}_{abs(hash(t_detail)) % 100000}"
+                                        wk_chk_key = f"chk_wk_{current_username}_{d_str}_{sess_name}_{t_idx}_{abs(hash(t_detail)) % 100000}"
 
                                         with st.container(border=True):
                                             c_w_chk, c_w_txt = st.columns([0.22, 0.78])
@@ -2358,7 +2486,7 @@ with tab_sched:
                                                     update_master_schedule_task_status(
                                                         task_identifier=t_detail,
                                                         is_done=new_done,
-                                                        date=d_name,
+                                                        date=d_str,
                                                         username=current_username,
                                                     )
                                                     st.session_state[master_schedule_key] = load_master_schedule(current_username)
@@ -2380,7 +2508,7 @@ with tab_sched:
                                                     st.link_button("📦 Tài liệu", url=t_link, use_container_width=True)
 
                 # ==============================================================
-                # GÓC NHÌN 3: 📆 THEO THÁNG (MONTHLY 4-WEEK GRID VIEW)
+                # GÓC NHÌN 3: 📆 THEO THÁNG (MONTHLY GRID THEO NGÀY THỰC TẾ)
                 # ==============================================================
                 elif selected_view == "📆 Theo Tháng":
                     tot_mth = len(filtered_schedule)
@@ -2397,64 +2525,49 @@ with tab_sched:
 
                     st.progress(pct_mth / 100)
 
-                    # Trích xuất mục tiêu tháng từ Giai đoạn 1 nếu có
-                    monthly_targets = []
-                    for g in user_goals_sched:
-                        bd = g.get("breakdown", {})
-                        for m_item in bd.get("monthly", []):
-                            m_title = m_item.get("month", m_item.get("title", ""))
-                            m_focus = m_item.get("focus", m_item.get("objective", ""))
-                            if m_focus:
-                                monthly_targets.append(f"🎯 **{g.get('title', 'Mục tiêu')}**: {m_focus}")
-
-                    if monthly_targets:
-                        with st.expander("🎯 **Mục Tiêu Trọng Tâm Tháng Này (Đồng bộ từ Giai đoạn 1):**", expanded=True):
-                            for mt in monthly_targets:
-                                st.markdown(f"- {mt}")
-
-                    # Bộ chọn tuần chi tiết trong tháng
-                    sel_week_mth = st.radio(
-                        "Chọn tuần trong tháng:",
-                        options=["Toàn Bộ Tháng (4 Tuần)", "Tuần 1: Khởi Động & Nền Tảng", "Tuần 2: Tăng Tốc & Kỷ Luật", "Tuần 3: Chuyên Sâu & Bứt Phá", "Tuần 4: Về Đích & Tinh Chỉnh"],
-                        horizontal=True,
-                        key=f"sel_mth_wk_{current_username}",
-                    )
-
-                    week_ranges = []
-                    if sel_week_mth == "Toàn Bộ Tháng (4 Tuần)":
-                        week_ranges = [
-                            ("Tuần 1: Khởi Động & Nền Tảng", 1),
-                            ("Tuần 2: Tăng Tốc & Kỷ Luật", 2),
-                            ("Tuần 3: Chuyên Sâu & Bứt Phá", 3),
-                            ("Tuần 4: Về Đích & Tinh Chỉnh", 4),
-                        ]
-                    else:
-                        w_num = 1 if "Tuần 1" in sel_week_mth else (2 if "Tuần 2" in sel_week_mth else (3 if "Tuần 3" in sel_week_mth else 4))
-                        week_ranges = [(sel_week_mth, w_num)]
-
-                    for w_label, w_idx in week_ranges:
-                        st.markdown(f"#### 🗓️ {w_label}")
+                    # Hiển thị 4 tuần liên tiếp bắt đầu từ tuần của base_start_date
+                    mth_mon = base_start_date - timedelta(days=base_start_date.weekday())
+                    for w_idx in range(4):
+                        w_start = mth_mon + timedelta(days=w_idx * 7)
+                        w_end = w_start + timedelta(days=6)
+                        st.markdown(f"#### 🗓️ Tuần {w_idx+1}: {w_start.strftime('%d/%m')} ➔ {w_end.strftime('%d/%m/%Y')}")
                         cols_m_days = st.columns(7)
-                        for d_idx, d_name in enumerate(STANDARD_DAYS):
-                            day_tasks = [t for t in filtered_schedule if t.get("date") == d_name]
+                        for d_idx in range(7):
+                            curr_m_date = w_start + timedelta(days=d_idx)
+                            m_str = curr_m_date.strftime("%Y-%m-%d")
+                            m_short = curr_m_date.strftime("%d/%m")
+                            m_name = VIETNAM_WEEKDAYS.get(curr_m_date.weekday(), "")
+
+                            day_tasks = [
+                                t for t in filtered_schedule
+                                if t.get("date") == m_str
+                                or (not str(t.get("date", "")).startswith("202") and t.get("date") == m_name)
+                            ]
                             d_done = sum(1 for t in day_tasks if t.get("is_done") is True)
                             d_tot = len(day_tasks)
                             with cols_m_days[d_idx]:
                                 with st.container(border=True):
-                                    st.markdown(f"**{DAY_SHORT.get(d_name, d_name)}**")
+                                    is_curr_day = (curr_m_date == today_date)
+                                    badge_lbl = f"<span style='color:#ff4b4b;'>**{DAY_SHORT.get(m_name, m_name)}**</span> `({m_short})`" if is_curr_day else f"**{DAY_SHORT.get(m_name, m_name)}** `({m_short})`"
+                                    st.markdown(badge_lbl, unsafe_allow_html=True)
                                     badge_color = ":green" if (d_tot > 0 and d_done == d_tot) else (":orange" if d_done > 0 else ":gray")
-                                    st.caption(f"{badge_color}[**{d_done}/{d_tot} task**]")
+                                    st.caption(f"{badge_color}[**{d_done}/{d_tot} xong**]")
+
+                                    if st.button("🔍 Xem", key=f"btn_mth_open_{current_username}_{w_idx}_{d_idx}_{m_str}", use_container_width=True):
+                                        st.session_state[sel_date_key] = curr_m_date
+                                        st.session_state[view_key] = "📅 Theo Ngày"
+                                        st.rerun()
 
                                     if day_tasks:
-                                        for t_idx, tk in enumerate(day_tasks):
+                                        for t_idx, tk in enumerate(day_tasks[:2]):
                                             t_detail = tk.get("task_detail", "Nhiệm vụ")
                                             t_energy = tk.get("energy_level", "🔴")
                                             e_icon = "🔴" if "deep" in str(t_energy).lower() or "🔴" in str(t_energy) else ("🟡" if "shallow" in str(t_energy).lower() or "🟡" in str(t_energy) else "🟢")
                                             t_done = bool(tk.get("is_done", False))
-                                            m_chk_key = f"chk_mth_{current_username}_{w_idx}_{d_name}_{t_idx}_{abs(hash(t_detail)) % 100000}"
+                                            m_chk_key = f"chk_mth_{current_username}_{w_idx}_{m_str}_{t_idx}_{abs(hash(t_detail)) % 100000}"
 
                                             new_m_done = st.checkbox(
-                                                f"{e_icon} {t_detail[:28]}...",
+                                                f"{e_icon} {t_detail[:22]}...",
                                                 value=t_done,
                                                 key=m_chk_key,
                                             )
@@ -2462,7 +2575,7 @@ with tab_sched:
                                                 update_master_schedule_task_status(
                                                     task_identifier=t_detail,
                                                     is_done=new_m_done,
-                                                    date=d_name,
+                                                    date=m_str,
                                                     username=current_username,
                                                 )
                                                 st.session_state[master_schedule_key] = load_master_schedule(current_username)

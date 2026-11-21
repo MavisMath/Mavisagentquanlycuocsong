@@ -190,27 +190,40 @@ def get_oauth_authorization_url(redirect_uri: Optional[str] = None) -> Tuple[Opt
 def exchange_code_and_save_token(code: str, redirect_uri: Optional[str] = None, username: str = "mavis") -> bool:
     """
     Đổi authorization code lấy Access Token / Refresh Token và lưu bền vững vào MongoDB Atlas.
+    Tự động thử các candidate redirect URIs hợp lệ để tránh lỗi redirect_uri_mismatch.
     """
-    if not redirect_uri:
-        redirect_uri = get_default_redirect_uri()
-
     client_config = get_google_client_config()
     if not client_config or not GOOGLE_CALENDAR_SDK_AVAILABLE:
         return False
 
-    try:
-        flow = Flow.from_client_config(
-            client_config,
-            scopes=SCOPES,
-            redirect_uri=redirect_uri,
-        )
-        flow.fetch_token(code=code)
-        creds = flow.credentials
-        token_data = json.loads(creds.to_json())
-        return save_user_calendar_token(username, token_data)
-    except Exception as e:
-        print(f"Lỗi khi đổi authorization code Google: {e}")
-        return False
+    candidates = []
+    if redirect_uri and redirect_uri.strip():
+        candidates.append(redirect_uri.strip())
+    def_uri = get_default_redirect_uri()
+    if def_uri and def_uri not in candidates:
+        candidates.append(def_uri)
+    for c in ["http://localhost:8501", "http://localhost:8501/", "http://127.0.0.1:8501", "http://127.0.0.1:8501/"]:
+        if c not in candidates:
+            candidates.append(c)
+
+    last_error = None
+    for cand_uri in candidates:
+        try:
+            flow = Flow.from_client_config(
+                client_config,
+                scopes=SCOPES,
+                redirect_uri=cand_uri,
+            )
+            flow.fetch_token(code=code)
+            creds = flow.credentials
+            token_data = json.loads(creds.to_json())
+            return save_user_calendar_token(username, token_data)
+        except Exception as e:
+            last_error = e
+            continue
+
+    print(f"Lỗi khi đổi authorization code Google với các candidates {candidates}: {last_error}")
+    return False
 
 
 def save_user_calendar_token(username: str, token_data: Dict[str, Any]) -> bool:
@@ -379,15 +392,26 @@ def get_busy_events_text_summary(username: str, days: int = 7) -> str:
 
 def _convert_task_to_datetime_range(date_str: str, time_slot_str: str) -> Tuple[datetime, datetime]:
     """
-    Chuyển đổi chuỗi ngày ('Thứ Hai'..) và time_slot ('08:00 - 10:00') sang cặp datetime chuẩn (Asia/Ho_Chi_Minh).
+    Chuyển đổi chuỗi ngày ('YYYY-MM-DD' hoặc 'Thứ Hai'..) và time_slot ('08:00 - 10:00') sang cặp datetime chuẩn (Asia/Ho_Chi_Minh).
     """
     now_vn = datetime.now(VN_TIMEZONE)
-    target_weekday = VIETNAM_WEEKDAY_MAP.get(str(date_str).strip().lower(), 0)
-    current_weekday = now_vn.weekday()
+    target_date = None
 
-    # Tính toán ngày rơi vào tuần hiện tại (bắt đầu từ Thứ Hai)
-    monday_current_week = now_vn - timedelta(days=current_weekday)
-    target_date = monday_current_week + timedelta(days=target_weekday)
+    # 1. Thử phân tích định dạng ngày thực tế YYYY-MM-DD
+    clean_str = str(date_str).strip()
+    if len(clean_str) >= 10:
+        try:
+            parsed_d = datetime.strptime(clean_str[:10], "%Y-%m-%d").date()
+            target_date = datetime(parsed_d.year, parsed_d.month, parsed_d.day, tzinfo=VN_TIMEZONE)
+        except Exception:
+            pass
+
+    # 2. Nếu là tên thứ ('Thứ Hai'..), tính ngày trong tuần hiện tại
+    if target_date is None:
+        target_weekday = VIETNAM_WEEKDAY_MAP.get(clean_str.lower(), 0)
+        current_weekday = now_vn.weekday()
+        monday_current_week = now_vn - timedelta(days=current_weekday)
+        target_date = monday_current_week + timedelta(days=target_weekday)
 
     # Phân tích chuỗi time_slot
     start_hour, start_min = 8, 0
