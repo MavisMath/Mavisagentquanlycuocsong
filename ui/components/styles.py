@@ -304,23 +304,26 @@ def inject_custom_css():
             min-width: 300px;
         }
         .mascot-avatar-container {
-            width: 82px;
-            height: 82px;
-            min-width: 82px;
+            width: 88px;
+            height: 88px;
+            min-width: 88px;
             display: flex;
             align-items: center;
             justify-content: center;
             border-radius: 50%;
-            background: linear-gradient(135deg, #EBF8FF 0%, #D8F3FE 100%);
-            border: 3px solid #BAE3FF;
-            border-bottom: 4px solid #99D5FF;
+            background: linear-gradient(135deg, #FFF9FA 0%, #FFF0F5 100%);
+            border: 3px solid #FFE0EB;
+            border-bottom: 4px solid #FFB8D2;
             overflow: hidden;
-            box-shadow: 0 4px 10px rgba(28, 176, 246, 0.15);
-            animation: mascotFloat 3s ease-in-out infinite;
+            box-shadow: 0 4px 12px rgba(255, 138, 163, 0.2);
+            animation: float 3.5s ease-in-out infinite;
         }
-        @keyframes mascotFloat {
+        @keyframes float {
             0%, 100% { transform: translateY(0px); }
-            50% { transform: translateY(-4px); }
+            50% { transform: translateY(-5px); }
+        }
+        .mascot-img-floating {
+            animation: float 3.5s ease-in-out infinite;
         }
         .mascot-speech-bubble {
             position: relative;

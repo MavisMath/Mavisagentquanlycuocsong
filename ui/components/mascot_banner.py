@@ -2,9 +2,10 @@
 ui/components/mascot_banner.py - Dynamic Duolingo-style Mascot Banner for Mavis AI Executive & Life Coach.
 
 Displays at the top of the main dashboard:
-1. Mavis Mascot container (from assets/mascot/ with smart fallback to SVG/emoji).
+1. Mavis Mascot container (from assets/mascot/ with 4 expressions: welcome, thinking, celebrate, remind).
 2. Dynamic speech bubble with encouraging executive coach dialogue based on streak, completed tasks, and upcoming deadlines.
 3. Daily progress bar (% tasks done today) + Duolingo-style 3D Flame Streak and Diamond XP badges.
+4. CSS @keyframes float for smooth floating effect + st.balloons() trigger (once per day) upon 100% completion.
 """
 
 import os
@@ -75,8 +76,8 @@ DEFAULT_MAVIS_SVG = """
 def _load_mascot_media(mood: str = "default") -> str:
     """
     Tìm và đọc ảnh linh vật từ thư mục assets/mascot/.
-    Hỗ trợ các định dạng .png, .jpg, .jpeg, .svg, .webp, .gif.
-    Nếu không tìm thấy file phù hợp, trả về SVG linh vật Duolingo sắc nét.
+    Hỗ trợ 4 biểu cảm chính: welcome.png, thinking.png, celebrate.png, remind.png.
+    Fallback sang SVG nếu không tìm thấy file.
     """
     possible_dirs = [
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "assets", "mascot"),
@@ -92,62 +93,62 @@ def _load_mascot_media(mood: str = "default") -> str:
 
     if target_dir:
         try:
-            files = os.listdir(target_dir)
-            valid_exts = (".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif")
-            media_files = [f for f in files if f.lower().endswith(valid_exts)]
+            # Ưu tiên đúng 4 file biểu cảm Mavis theo yêu cầu
+            mood_file_map = {
+                "celebrate": ["celebrate.png", "celebrate.svg", "celebrate.webp"],
+                "fire": ["celebrate.png", "celebrate.svg"],
+                "streak": ["celebrate.png", "celebrate.svg"],
+                "remind": ["remind.png", "remind.svg", "remind.webp"],
+                "focus": ["remind.png", "remind.svg"],
+                "thinking": ["thinking.png", "thinking.svg", "thinking.webp"],
+                "welcome": ["welcome.png", "welcome.svg", "welcome.webp"],
+                "ready": ["welcome.png", "welcome.svg"],
+                "happy": ["welcome.png", "welcome.svg"],
+                "default": ["welcome.png", "welcome.svg"],
+            }
 
-            if media_files:
-                selected_file = None
+            candidates = mood_file_map.get(mood, ["welcome.png", "mavis.svg"])
+            selected_file = None
+            for cand in candidates:
+                cand_path = os.path.join(target_dir, cand)
+                if os.path.exists(cand_path):
+                    selected_file = cand
+                    break
 
-                # Ưu tiên tìm file theo mood (celebrate, fire, focus, ready...)
-                mood_patterns = {
-                    "celebrate": ["celebrate", "happy", "win", "cheer"],
-                    "fire": ["fire", "streak", "flame"],
-                    "focus": ["focus", "work", "clock"],
-                    "ready": ["ready", "run", "start"],
-                }
-                patterns = mood_patterns.get(mood, [])
-                for pat in patterns:
-                    for mf in media_files:
-                        if pat in mf.lower():
-                            selected_file = mf
-                            break
-                    if selected_file:
-                        break
-
-                # Nếu chưa tìm thấy, lấy file mavis.* hoặc mascot.* hoặc file đầu tiên
-                if not selected_file:
-                    for mf in media_files:
-                        name_lower = mf.lower()
-                        if "mavis" in name_lower or "mascot" in name_lower:
-                            selected_file = mf
-                            break
-
-                if not selected_file and media_files:
+            # Fallback nếu không có file chỉ định, tìm bất kỳ file hợp lệ nào
+            if not selected_file:
+                files = os.listdir(target_dir)
+                valid_exts = (".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif")
+                media_files = [f for f in files if f.lower().endswith(valid_exts)]
+                if media_files:
                     selected_file = media_files[0]
 
-                if selected_file:
-                    file_path = os.path.join(target_dir, selected_file)
-                    ext = os.path.splitext(selected_file)[1].lower()
+            if selected_file:
+                file_path = os.path.join(target_dir, selected_file)
+                ext = os.path.splitext(selected_file)[1].lower()
 
-                    if ext == ".svg":
-                        with open(file_path, "r", encoding="utf-8") as fp:
-                            svg_content = fp.read()
-                            if "<svg" in svg_content:
-                                return svg_content
+                if ext == ".svg":
+                    with open(file_path, "r", encoding="utf-8") as fp:
+                        svg_content = fp.read()
+                        if "<svg" in svg_content:
+                            return svg_content
 
-                    mime_map = {
-                        ".png": "image/png",
-                        ".jpg": "image/jpeg",
-                        ".jpeg": "image/jpeg",
-                        ".webp": "image/webp",
-                        ".gif": "image/gif",
-                        ".svg": "image/svg+xml",
-                    }
-                    mime_type = mime_map.get(ext, "image/png")
-                    with open(file_path, "rb") as fp:
-                        b64_data = base64.b64encode(fp.read()).decode("utf-8")
-                    return f'<img src="data:{mime_type};base64,{b64_data}" alt="Mavis Mascot" style="width:100%; height:100%; object-fit:contain;" />'
+                mime_map = {
+                    ".png": "image/png",
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".webp": "image/webp",
+                    ".gif": "image/gif",
+                    ".svg": "image/svg+xml",
+                }
+                mime_type = mime_map.get(ext, "image/png")
+                with open(file_path, "rb") as fp:
+                    b64_data = base64.b64encode(fp.read()).decode("utf-8")
+                return (
+                    f'<img src="data:{mime_type};base64,{b64_data}" alt="Mavis Mascot" '
+                    'class="mascot-img-floating" style="width:100%; height:100%; object-fit:contain; '
+                    'filter: drop-shadow(0 4px 6px rgba(0,0,0,0.08));" />'
+                )
         except Exception:
             pass
 
@@ -157,6 +158,7 @@ def _load_mascot_media(mood: str = "default") -> str:
 def render_mascot_banner(current_username: str, current_name: str):
     """
     Render Mascot Banner phong cách Duolingo ở đầu màn hình chính (Tổng Hành Dinh).
+    Bật st.balloons() đúng 1 lần/ngày khi hoàn thành 100% nhiệm vụ hôm nay.
     """
     # 1. Tính toán Streak người dùng
     try:
@@ -213,7 +215,7 @@ def render_mascot_banner(current_username: str, current_name: str):
             elif not upcoming_task:
                 upcoming_task = t
 
-    # 4. Xác định thông điệp động viên & Trạng thái linh vật
+    # 4. Xác định thông điệp động viên & Trạng thái biểu cảm linh vật
     if total_tasks > 0 and completed_tasks == total_tasks:
         mood = "celebrate"
         bubble_title = "HUY HOÀNG HÔM NAY! 👑"
@@ -221,8 +223,18 @@ def render_mascot_banner(current_username: str, current_name: str):
             f"Xuất sắc <b>{current_name}</b>! Bạn đã hoàn thành trọn vẹn 100% nhiệm vụ hôm nay. "
             "Hãy nghỉ ngơi, nạp năng lượng xứng đáng cho ngày mai nhé!"
         )
+
+        # Bật st.balloons() đúng 1 lần/ngày khi hoàn thành 100% task
+        balloons_flag_key = f"balloons_shown_{today_iso}_{current_username}"
+        if not st.session_state.get(balloons_flag_key, False):
+            try:
+                st.balloons()
+            except Exception:
+                pass
+            st.session_state[balloons_flag_key] = True
+
     elif upcoming_task:
-        mood = "focus"
+        mood = "remind"
         t_name = str(upcoming_task.get("title") or upcoming_task.get("task_name") or "Nhiệm vụ tiếp theo").strip()
         t_slot = str(upcoming_task.get("time_slot") or "sắp tới").strip()
         bubble_title = "CHUẨN BỊ VÀO GUỒNG! ⏰"
@@ -231,39 +243,55 @@ def render_mascot_banner(current_username: str, current_name: str):
             f"Tập trung cao độ cùng Mavis để bảo vệ nhịp sinh học nhé!"
         )
     elif streak >= 3:
-        mood = "fire"
+        mood = "celebrate"
         bubble_title = "NGỌN LỬA KỶ LUẬT! 🔥"
         bubble_msg = (
             f"Tuyệt đỉnh <b>{current_name}</b>! Chuỗi <b>{streak} ngày liên tiếp</b> đang rực sáng. "
             "Tiếp tục giữ vững kỷ luật của một Executive thực thụ nào!"
         )
     elif completed_tasks > 0:
-        mood = "happy"
+        mood = "welcome"
         bubble_title = "TIẾP TỤC BỨT PHÁ! ⚡"
         bubble_msg = (
             f"Đã giải quyết xong <b>{completed_tasks}/{total_tasks} việc</b> ({percent}%). "
             "Chỉ còn vài bước nữa là cán đích ngày hôm nay!"
         )
     elif total_tasks > 0:
-        mood = "ready"
+        mood = "welcome"
         bubble_title = "SẴN SÀNG CHINH PHỤC! 🚀"
         bubble_msg = (
             f"Chào <b>{current_name}</b>! Bạn có <b>{total_tasks} nhiệm vụ</b> hôm nay. "
             "Hãy hoàn thành task đầu tiên để bật ngọn lửa streak nhé!"
         )
     else:
-        mood = "default"
+        mood = "thinking"
         bubble_title = "CHÀO MỪNG TRỞ LẠI! ✨"
         bubble_msg = (
             f"Chào <b>{current_name}</b>! Bạn chưa có nhiệm vụ nào trong lịch hôm nay. "
             "Hãy sang <b>Giai đoạn 1</b> hoặc trò chuyện cùng <b>CEO Coach</b> để lên kế hoạch nhé!"
         )
 
-    # 5. Lấy hình ảnh / SVG linh vật
+    # 5. Lấy hình ảnh / SVG linh vật tương ứng biểu cảm
     mascot_media_html = _load_mascot_media(mood)
 
-    # 6. Render Giao diện HTML Duolingo
+    # 6. Render Giao diện HTML Duolingo với hiệu ứng float nhẹ
     banner_html = f"""
+    <style>
+    @keyframes float {{
+        0%, 100% {{
+            transform: translateY(0px);
+        }}
+        50% {{
+            transform: translateY(-5px);
+        }}
+    }}
+    .mascot-avatar-container {{
+        animation: float 3.5s ease-in-out infinite !important;
+    }}
+    .mascot-img-floating {{
+        animation: float 3.5s ease-in-out infinite !important;
+    }}
+    </style>
     <div class="mavis-mascot-banner">
         <div class="mascot-left-section">
             <div class="mascot-avatar-container">
