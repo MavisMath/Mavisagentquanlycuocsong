@@ -286,3 +286,8 @@ def render_tab_retrospective(current_username: str, current_name: str):
                         st.session_state[retro_logs_key] = load_retrospective_logs(current_username)
                         st.session_state[goals_key] = load_user_goals(current_username)
                         st.rerun()
+
+    st.markdown("---")
+    with st.expander("🧠 Xem & Quản Lý Bộ Nhớ Thích Nghi Trọn Đời (Adaptive Memory)", expanded=False):
+        from ui.components.tab_adaptive_memory import render_tab_adaptive_memory
+        render_tab_adaptive_memory(current_username, current_name)

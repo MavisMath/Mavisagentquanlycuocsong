@@ -10,6 +10,7 @@ from ui.components.tab_ceo import render_tab_ceo
 from ui.components.tab_architect import render_tab_architect
 from ui.components.tab_scheduler import render_tab_scheduler
 from ui.components.tab_retrospective import render_tab_retrospective
+from ui.components.tab_adaptive_memory import render_tab_adaptive_memory
 from ui.components.helpers import (
     safe_dict,
     safe_list,
@@ -51,6 +52,7 @@ __all__ = [
     "render_tab_architect",
     "render_tab_scheduler",
     "render_tab_retrospective",
+    "render_tab_adaptive_memory",
     "safe_dict",
     "safe_list",
     "shorten_task_name",

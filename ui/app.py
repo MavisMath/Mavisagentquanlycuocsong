@@ -62,6 +62,7 @@ from ui.components import (
     render_tab_architect,
     render_tab_scheduler,
     render_tab_retrospective,
+    render_tab_adaptive_memory,
     get_authenticator,
     get_default_redirect_uri,
     exchange_code_and_save_token,
@@ -380,12 +381,13 @@ with st.container():
                 st.toast("↪️ Đã làm lại thao tác!")
                 st.rerun()
 
-# 4 Tab Chuyên biệt theo Chu trình Điều hành Mavis CEO
-tab_ceo, tab_arch, tab_sched, tab_retro = st.tabs([
+# 5 Tab Chuyên biệt theo Chu trình Điều hành Mavis CEO
+tab_ceo, tab_arch, tab_sched, tab_retro, tab_adaptive = st.tabs([
     "🎙️ Tổng Hành Dinh (CEO Coach)",
     "📐 Giai đoạn 1: Thiết Lập Mục Tiêu",
     "📅 Giai đoạn 2: Thực Thi & Lịch Trình",
     "📊 Giai đoạn 3: Tổng Kết & Cải Thiện",
+    "🧠 Bộ Nhớ Thích Nghi",
 ])
 
 with tab_ceo:
@@ -399,3 +401,6 @@ with tab_sched:
 
 with tab_retro:
     render_tab_retrospective(current_username, current_name)
+
+with tab_adaptive:
+    render_tab_adaptive_memory(current_username, current_name)

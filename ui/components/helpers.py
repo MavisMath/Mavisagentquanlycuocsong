@@ -40,6 +40,7 @@ try:
     CATEGORY_LABELS = getattr(mg, "CATEGORY_LABELS", {})
     load_historical_insights = getattr(mg, "load_historical_insights")
     save_historical_insights = getattr(mg, "save_historical_insights")
+    append_insight = getattr(mg, "append_insight", None)
     load_user_profile = getattr(mg, "load_user_profile")
     save_user_profile = getattr(mg, "save_user_profile")
     load_user_goal_profile = getattr(mg, "load_user_goal_profile")
