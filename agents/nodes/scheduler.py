@@ -699,17 +699,28 @@ YÊU CẦU CỦA NGƯỜI DÙNG:
 
     if not is_rescheduled:
         existing_covered_dates = set(t.get("date") for t in schedule_dicts if t.get("date"))
-        if len(existing_covered_dates) < 7:
+        all_details_check = " ".join(str(t.get("task_detail", "")) for t in schedule_dicts).lower()
+        has_routine = (
+            ("ăn" in all_details_check or "bữa" in all_details_check)
+            and ("ngủ" in all_details_check or "22:30" in all_details_check)
+            and ("uống" in all_details_check or "nước" in all_details_check)
+        )
+        if len(existing_covered_dates) < 7 or not has_routine:
             try:
                 supp_tasks = generate_detailed_master_schedule(
                     active_goals=active_goals,
                     start_date_str=today_str,
-                    num_days=7,
+                    num_days=max(7, len(existing_covered_dates)),
                     username=username,
                 )
+                existing_keys = set((str(t.get("date")), str(t.get("time_slot"))) for t in schedule_dicts)
                 for st_item in supp_tasks:
-                    if st_item.get("date") not in existing_covered_dates:
-                        schedule_dicts.append(st_item)
+                    key = (str(st_item.get("date")), str(st_item.get("time_slot")))
+                    if key not in existing_keys:
+                        # Nếu thiếu ngày hoàn toàn, hoặc là task nhịp sinh học (ăn/uống/ngủ/tập) chưa có trong khung giờ đó
+                        if st_item.get("date") not in existing_covered_dates or not has_routine:
+                            schedule_dicts.append(st_item)
+                            existing_keys.add(key)
             except Exception as _e_supp:
                 print(f"Lỗi bổ sung ngày vào master_schedule: {_e_supp}")
 
