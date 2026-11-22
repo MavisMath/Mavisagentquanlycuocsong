@@ -5,6 +5,7 @@ ui/components package - Modularized Streamlit UI Components for Mavis Executive 
 from ui.components.styles import inject_custom_css
 from ui.components.auth import render_auth_screen
 from ui.components.sidebar import render_sidebar
+from ui.components.mascot_banner import render_mascot_banner
 from ui.components.tab_ceo import render_tab_ceo
 from ui.components.tab_architect import render_tab_architect
 from ui.components.tab_scheduler import render_tab_scheduler
@@ -45,6 +46,7 @@ __all__ = [
     "inject_custom_css",
     "render_auth_screen",
     "render_sidebar",
+    "render_mascot_banner",
     "render_tab_ceo",
     "render_tab_architect",
     "render_tab_scheduler",

@@ -3,6 +3,7 @@ ui/components/tab_ceo.py - Tab 1: Tổng Hành Dinh Chiến Lược (CEO Coach).
 """
 
 import streamlit as st
+from ui.components.mascot_banner import render_mascot_banner
 from ui.components.helpers import (
     safe_dict,
     safe_list,
@@ -16,6 +17,9 @@ def render_tab_ceo(current_username: str, current_name: str):
     """Hiển thị Giao diện Tab 1: Tổng Hành Dinh Chiến Lược (CEO Coach)."""
     goals_key = f"goals_{current_username}"
     chat_ceo_key = f"chat_ceo_{current_username}"
+
+    # Linh vật Mavis & Thanh tiến trình ngày phong cách Duolingo ở đầu màn hình chính
+    render_mascot_banner(current_username, current_name)
 
     st.markdown("### 🎙️ Tổng Hành Dinh Chiến Lược (CEO Coach)")
     st.caption("Thẩm định độ khả thi • Tính toán quỹ thời gian • Bảo vệ nhịp sinh học năng lượng đỉnh cao")

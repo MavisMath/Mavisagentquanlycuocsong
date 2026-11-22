@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <defs>
+    <!-- Body Gradient -->
+    <linearGradient id="bodyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2CD4FF"/>
+      <stop offset="50%" stop-color="#1CB0F6"/>
+      <stop offset="100%" stop-color="#0E8ED8"/>
+    </linearGradient>
+    <!-- Belly Gradient -->
+    <linearGradient id="bellyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#E8F7FF"/>
+    </linearGradient>
+    <!-- Beak Gradient -->
+    <linearGradient id="beakGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFD43B"/>
+      <stop offset="100%" stop-color="#FF9600"/>
+    </linearGradient>
+    <!-- Headphone Gradient -->
+    <linearGradient id="phoneGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6EE721"/>
+      <stop offset="100%" stop-color="#4CAF08"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Shadow below mascot -->
+  <ellipse cx="60" cy="112" rx="36" ry="6" fill="#000000" opacity="0.08"/>
+
+  <!-- Left Wing -->
+  <path d="M 22 56 C 12 62, 10 76, 18 84 C 26 90, 32 82, 30 70 Z" fill="#0E8ED8"/>
+
+  <!-- Right Wing (Waving friendly) -->
+  <path d="M 98 56 C 112 50, 116 66, 106 78 C 98 84, 90 76, 92 64 Z" fill="#0E8ED8"/>
+
+  <!-- Main Body (Cute round owl/coach) -->
+  <ellipse cx="60" cy="62" rx="42" ry="44" fill="url(#bodyGrad)"/>
+
+  <!-- Owl Feather Tufts / Ears -->
+  <polygon points="30,28 42,16 46,32" fill="#0E8ED8"/>
+  <polygon points="90,28 78,16 74,32" fill="#0E8ED8"/>
+
+  <!-- Belly Patch -->
+  <ellipse cx="60" cy="74" rx="28" ry="28" fill="url(#bellyGrad)"/>
+
+  <!-- Cheeks Blush -->
+  <ellipse cx="32" cy="66" rx="8" ry="5" fill="#FF8CA3" opacity="0.6"/>
+  <ellipse cx="88" cy="66" rx="8" ry="5" fill="#FF8CA3" opacity="0.6"/>
+
+  <!-- Left Eye Outer White -->
+  <ellipse cx="44" cy="50" rx="14" ry="16" fill="#FFFFFF"/>
+  <ellipse cx="44" cy="50" rx="14" ry="16" fill="none" stroke="#E5E5E5" stroke-width="1"/>
+  <!-- Left Pupil & Iris -->
+  <ellipse cx="46" cy="50" rx="8" ry="10" fill="#1C3854"/>
+  <circle cx="48" cy="46" r="3.5" fill="#FFFFFF"/>
+  <circle cx="44" cy="54" r="1.5" fill="#2CD4FF"/>
+
+  <!-- Right Eye Outer White -->
+  <ellipse cx="76" cy="50" rx="14" ry="16" fill="#FFFFFF"/>
+  <ellipse cx="76" cy="50" rx="14" ry="16" fill="none" stroke="#E5E5E5" stroke-width="1"/>
+  <!-- Right Pupil & Iris -->
+  <ellipse cx="74" cy="50" rx="8" ry="10" fill="#1C3854"/>
+  <circle cx="72" cy="46" r="3.5" fill="#FFFFFF"/>
+  <circle cx="76" cy="54" r="1.5" fill="#2CD4FF"/>
+
+  <!-- Cute Beak -->
+  <path d="M 54 58 Q 60 55 66 58 Q 60 72 54 58 Z" fill="url(#beakGrad)"/>
+
+  <!-- Coach Headphones Headband -->
+  <path d="M 24 50 A 40 42 0 0 1 96 50" fill="none" stroke="#D1D5DB" stroke-width="5" stroke-linecap="round"/>
+  <!-- Headphone Left Ear Cup -->
+  <rect x="18" y="44" width="8" height="18" rx="4" fill="url(#phoneGrad)"/>
+  <!-- Headphone Right Ear Cup -->
+  <rect x="94" y="44" width="8" height="18" rx="4" fill="url(#phoneGrad)"/>
+
+  <!-- Little Executive Coach Necktie -->
+  <polygon points="56,76 64,76 62,82 58,82" fill="#FFC800"/>
+  <polygon points="57,82 63,82 65,96 60,100 55,96" fill="#FF9600"/>
+  <circle cx="60" cy="80" r="1.5" fill="#FFFFFF"/>
+
+  <!-- Feet -->
+  <ellipse cx="48" cy="104" rx="7" ry="4" fill="#FF9600"/>
+  <ellipse cx="72" cy="104" rx="7" ry="4" fill="#FF9600"/>
+</svg>

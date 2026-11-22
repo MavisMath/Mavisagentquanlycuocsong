@@ -280,6 +280,162 @@ def inject_custom_css():
             border-radius: 12px !important;
             background-color: #58CC02 !important;
         }
+
+        /* 12. DUOLINGO MASCOT BANNER */
+        .mavis-mascot-banner {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            background-color: #FFFFFF;
+            border: 2px solid #E5E5E5;
+            border-bottom: 4px solid #E5E5E5;
+            border-radius: 20px;
+            padding: 16px 22px;
+            margin-bottom: 1.25rem;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.03);
+            gap: 16px;
+        }
+        .mascot-left-section {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex: 1 1 420px;
+            min-width: 300px;
+        }
+        .mascot-avatar-container {
+            width: 82px;
+            height: 82px;
+            min-width: 82px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #EBF8FF 0%, #D8F3FE 100%);
+            border: 3px solid #BAE3FF;
+            border-bottom: 4px solid #99D5FF;
+            overflow: hidden;
+            box-shadow: 0 4px 10px rgba(28, 176, 246, 0.15);
+            animation: mascotFloat 3s ease-in-out infinite;
+        }
+        @keyframes mascotFloat {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-4px); }
+        }
+        .mascot-speech-bubble {
+            position: relative;
+            background-color: #FFFDF7;
+            border: 2px solid #E5E5E5;
+            border-bottom: 4px solid #D5D5D5;
+            border-radius: 18px;
+            padding: 12px 18px;
+            color: #3C3C3C;
+            flex: 1;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
+        }
+        .bubble-arrow {
+            position: absolute;
+            left: -12px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 0;
+            height: 0;
+            border-top: 8px solid transparent;
+            border-bottom: 8px solid transparent;
+            border-right: 12px solid #E5E5E5;
+        }
+        .bubble-arrow::after {
+            content: '';
+            position: absolute;
+            left: 2px;
+            top: -7px;
+            width: 0;
+            height: 0;
+            border-top: 7px solid transparent;
+            border-bottom: 7px solid transparent;
+            border-right: 11px solid #FFFDF7;
+        }
+        .bubble-title {
+            font-size: 0.8rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: #1CB0F6;
+            margin-bottom: 3px;
+        }
+        .bubble-message {
+            font-size: 0.95rem;
+            font-weight: 700;
+            line-height: 1.4;
+            color: #3C3C3C;
+        }
+        .mascot-right-section {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            flex: 1 1 360px;
+            min-width: 280px;
+        }
+        .mascot-badges-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .badge-streak {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background-color: #FFF4E5;
+            border: 2px solid #FFD8A8;
+            border-bottom: 4px solid #FFA94D;
+            border-radius: 14px;
+            padding: 6px 14px;
+            color: #D9480F;
+            font-weight: 800;
+        }
+        .badge-xp {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background-color: #EBF8FF;
+            border: 2px solid #BAE3FF;
+            border-bottom: 4px solid #74C0FC;
+            border-radius: 14px;
+            padding: 6px 14px;
+            color: #1971C2;
+            font-weight: 800;
+        }
+        .mascot-progress-container {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .progress-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.86rem;
+            font-weight: 800;
+            color: #4B4B4B;
+        }
+        .progress-percent {
+            color: #58CC02;
+            font-weight: 900;
+        }
+        .progress-track {
+            height: 16px;
+            background-color: #E5E5E5;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 2px solid #D5D5D5;
+            position: relative;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(180deg, #68D912 0%, #58CC02 100%);
+            border-radius: 8px;
+            transition: width 0.4s ease;
+            box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.4), inset 0 -2px 0 rgba(0, 0, 0, 0.15);
+        }
         </style>
         """,
         unsafe_allow_html=True,

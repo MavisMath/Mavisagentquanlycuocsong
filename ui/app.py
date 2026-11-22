@@ -59,6 +59,7 @@ from ui.components import (
     inject_custom_css,
     render_auth_screen,
     render_sidebar,
+    render_mascot_banner,
     render_tab_ceo,
     render_tab_architect,
     render_tab_scheduler,
