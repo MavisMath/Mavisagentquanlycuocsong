@@ -54,6 +54,8 @@ except Exception:
 # NẠP CÁC COMPONENT GIAO DIỆN & TIỆN ÍCH UI
 # ==========================================
 from ui.components import (
+    safe_dict,
+    safe_list,
     inject_custom_css,
     render_auth_screen,
     render_sidebar,
