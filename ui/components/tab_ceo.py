@@ -10,6 +10,11 @@ from ui.components.helpers import (
     load_user_goals,
     save_user_goals,
     ceo_coach_chat,
+    push_undo_state,
+    load_master_schedule,
+    save_master_schedule,
+    generate_detailed_master_schedule,
+    get_vietnam_today_str,
 )
 
 
@@ -111,13 +116,50 @@ def render_tab_ceo(current_username: str, current_name: str):
         if active_goals:
             for idx, ag in enumerate(active_goals, 1):
                 ag_dict = safe_dict(ag)
+                gid = ag_dict.get("id") or ag_dict.get("goal_id", f"act_{idx}")
                 a_title = ag_dict.get("title") or ag_dict.get("goal_name", f"Mục tiêu {idx}")
                 a_cat = ag_dict.get("category", "Sự nghiệp")
                 a_h = ag_dict.get("daily_hours", 1.5)
                 a_prio = ag_dict.get("priority", "P2 - High")
-                st.markdown(
-                    f"- 🚀 **{a_title}** `({a_cat})` — `{a_h}h/ngày` | Ưu tiên: `{a_prio}` — 🟢 *Active*"
-                )
+
+                with st.container(border=True):
+                    col_info, col_btn = st.columns([0.62, 0.38], vertical_alignment="center")
+                    with col_info:
+                        st.markdown(f"🚀 **{a_title}** `({a_cat})` — 🟢 *Active*")
+                        st.caption(f"⏱️ `{a_h}h/ngày` | Mức ưu tiên: `{a_prio}`")
+                    with col_btn:
+                        if st.button("📅 Phân rã & Xếp lịch ngay", key=f"btn_sched_goal_{gid}_{idx}", use_container_width=True, help="Tự động gọi Scheduler phân rã mục tiêu này vào Master Schedule"):
+                            push_undo_state(current_username)
+                            cur_sched = load_master_schedule(current_username)
+                            new_tasks = generate_detailed_master_schedule(
+                                active_goals=[ag_dict],
+                                start_date_str=get_vietnam_today_str(),
+                                num_days=14,
+                                username=current_username,
+                            )
+                            existing_sigs = set(
+                                (t.get("date"), t.get("time_slot"), str(t.get("title") or t.get("task_name")).strip().lower())
+                                for t in cur_sched if isinstance(t, dict)
+                            )
+                            added_tasks = [
+                                nt for nt in new_tasks
+                                if (nt.get("date"), nt.get("time_slot"), str(nt.get("title") or nt.get("task_name")).strip().lower()) not in existing_sigs
+                            ]
+                            updated_sched = cur_sched + added_tasks
+                            save_master_schedule(updated_sched, username=current_username)
+                            st.session_state[f"master_schedule_{current_username}"] = updated_sched
+
+                            # Ghi nhận thông báo vào chat scheduler
+                            sched_chat_key = f"chat_sched_{current_username}"
+                            if sched_chat_key not in st.session_state:
+                                st.session_state[sched_chat_key] = []
+                            st.session_state[sched_chat_key].append({
+                                "role": "assistant",
+                                "content": f"📅 **Đã xếp lịch tự động:** Mục tiêu '**{a_title}**' đã được phân rã thành **{len(added_tasks)} nhiệm vụ** cụ thể trong 14 ngày tới trên Master Schedule! Mời bạn sang Tab **Giai đoạn 2** để xem thời khóa biểu!"
+                            })
+
+                            st.toast(f"✅ Đã phân rã và xếp lịch cho '{a_title}'!")
+                            st.rerun()
         else:
             st.caption("Chưa có mục tiêu Active nào. Khi mục tiêu được thẩm định khả thi, hãy bấm '✅ Đồng ý' ở trên.")
 

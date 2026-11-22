@@ -962,7 +962,7 @@ def render_tab_scheduler(current_username: str, current_name: str):
                                 "focus": "Gia tăng độ khó của bài tập Deep Work, chuyển dần sang giải quyết bài toán phức tạp và thực hành chuyên sâu.",
                                 "target": "Vượt qua ngưỡng cản tâm lý (Plateau), tăng 40% khối lượng thực hành thực tế.",
                                 "progress": min(100, int(q_pct * 1.0)) if q_pct > 0 else 0,
-                                "resources": "Tài liệu chuyên sâu, đề thi thử / dự án thực chiến, công cụ đo lường KPI.",
+                                "resources": "Tài liệu chuyên sâu, dự án / bài tập thực chiến, công cụ đo lường KPI.",
                             },
                             {
                                 "phase_num": 3,
@@ -970,7 +970,7 @@ def render_tab_scheduler(current_username: str, current_name: str):
                                 "focus": "Tổng ôn, mô phỏng áp lực thực tế, đóng gói kết quả đầu ra và kiểm thử tiêu chuẩn hoàn thành DoD.",
                                 "target": "Chạm mốc mục tiêu đầu ra đã cam kết với CEO Coach (VD: IELTS 7.5, Giảm 15kg, Hoàn thành dự án).",
                                 "progress": min(100, int(q_pct * 0.7)) if q_pct > 0 else 0,
-                                "resources": "Bộ đề thi chuẩn quốc tế / Hệ thống đánh giá cuối kỳ / Báo cáo nghiệm thu.",
+                                "resources": "Hệ thống đánh giá cuối kỳ, tiêu chuẩn DoD / Báo cáo nghiệm thu hoàn thành.",
                             },
                         ]
 

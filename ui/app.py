@@ -300,12 +300,20 @@ if chat_arch_key not in st.session_state:
 
 chat_sched_key = f"chat_sched_{current_username}"
 if chat_sched_key not in st.session_state:
+    user_goals_sched_init = safe_list(st.session_state.get(goals_key) or load_user_goals(current_username))
+    active_goals_sched_init = [g for g in user_goals_sched_init if safe_dict(g).get("status") == "active"]
+    if active_goals_sched_init:
+        active_names = ", ".join([f"**{g.get('title') or g.get('goal_name')}**" for g in active_goals_sched_init[:2]])
+        sched_intro_msg = f"Tôi tự động gom các mục tiêu đang kích hoạt ({active_names}) để xếp lịch không trùng lặp, tối ưu năng lượng sinh học theo từng khung giờ thực tế.\n\n"
+    else:
+        sched_intro_msg = "Tôi gom toàn bộ các mục tiêu Active để xếp lịch không trùng lặp (Sáng Deep Work tập trung, Chiều thực thi bứt phá, Tối phục hồi nhẹ nhàng).\n\n"
+
     st.session_state[chat_sched_key] = [
         {
             "role": "assistant",
             "content": (
                 f"Chào **{current_name}**! Tôi là **AI Master Scheduler** (Chuyên trách Giai đoạn 2).\n\n"
-                "Tôi gom toàn bộ các mục tiêu Active để xếp lịch không trùng lặp (Sáng học nặng, Chiều thực hành, Tối ôn tập nhẹ).\n\n"
+                f"{sched_intro_msg}"
                 "👉 Nếu bạn có việc bận đột xuất hoặc muốn dời task, hãy nhắn cho tôi ngay nhé!"
             ),
         }

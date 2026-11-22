@@ -146,11 +146,16 @@ def render_sidebar(current_username: str, current_name: str, authenticator: Any 
 
         if energy == "high":
             st.success("🟢 **NĂNG LƯỢNG ĐỈNH CAO (HIGH)**")
+            if active_goals_sidebar:
+                focus_titles = [f"**{g.get('title') or g.get('goal_name')}**" for g in active_goals_sidebar[:2] if (g.get('title') or g.get('goal_name'))]
+                priority_text = f"Tập trung Deep Work bứt phá: {', '.join(focus_titles)}"
+            else:
+                priority_text = "Tối ưu hóa các tác vụ nhận thức cao, tư duy chiến lược và quyết định quan trọng"
             st.markdown(
-                """
+                f"""
                 * **Khung giờ vàng:** 08:00 - 10:00 Sáng
-                * **Trạng thái:** Tối ưu tải nhận thức cao
-                * **Ưu tiên:** Giải đề thi, tư duy logic, nghiên cứu thuật toán
+                * **Trạng thái:** Tối ưu tải nhận thức cao & năng lượng đỉnh
+                * **Ưu tiên:** {priority_text}
                 """
             )
         else:
@@ -159,7 +164,7 @@ def render_sidebar(current_username: str, current_name: str, authenticator: Any 
                 """
                 * **Khung giờ:** Buổi chiều (sau 14:00) hoặc phát hiện quá tải
                 * **Trạng thái:** Cần nghỉ ngơi hoặc tác vụ nhẹ
-                * **Hành động:** Pomodoro 15 phút, review tài liệu nhẹ
+                * **Hành động:** Pomodoro 15 phút, rà soát tài liệu, tái tạo năng lượng
                 """
             )
 
@@ -184,7 +189,11 @@ def render_sidebar(current_username: str, current_name: str, authenticator: Any 
         st.subheader("📅 Lịch trình dự kiến")
         current_plan = st.session_state.get(plan_key, [])
         if not current_plan:
-            st.info("Chưa có task nào được lập. Hãy chat yêu cầu ôn tập để Coach tự động phân rã vào giờ vàng!")
+            if active_goals_sidebar:
+                first_g_title = active_goals_sidebar[0].get("title") or active_goals_sidebar[0].get("goal_name") or "mục tiêu"
+                st.info(f"Chưa có task nào được lập cho **{first_g_title}**. Hãy bấm nút **'📅 Phân rã & Xếp lịch ngay'** ở Tổng Hành Dinh để Coach tự động lên lịch vào giờ vàng!")
+            else:
+                st.info("Chưa có task nào được lập. Hãy kích hoạt mục tiêu ở Giai đoạn 1 hoặc chat cùng CEO Coach để tự động phân rã lịch trình!")
         else:
             for idx, task in enumerate(current_plan, 1):
                 is_deferred = task.get("status") == "deferred_to_tomorrow"
@@ -282,16 +291,55 @@ def render_sidebar(current_username: str, current_name: str, authenticator: Any 
         st.subheader(f"🎯 Mục Tiêu Của {current_name}")
         categorized_goals = load_categorized_goals(username=current_username)
 
-        tabs = st.tabs(["💼 Sự Nghiệp", "🤝 Mối Quan Hệ", "🧘 Sức Khỏe", "✨ Sắc Vóc"])
-        category_keys = ["career", "relationships", "health", "beauty"]
+        # Đồng bộ danh sách Active Goals với cây mục tiêu ở Sidebar
+        active_goals_all = [g for g in user_goals_sidebar if g.get("status") in ["active", "in_progress"]]
 
-        for tab, cat_key in zip(tabs, category_keys):
+        # Nhóm 1: Sự Nghiệp
+        career_goals = categorized_goals.get("career", [])
+        if isinstance(career_goals, dict):
+            career_goals = career_goals.get("children", [])
+        career_goals = list(career_goals)
+
+        # Nhóm 2: Mối Quan Hệ
+        rel_goals = categorized_goals.get("relationships", [])
+        if isinstance(rel_goals, dict):
+            rel_goals = rel_goals.get("children", [])
+        rel_goals = list(rel_goals)
+
+        # Nhóm 3: Sức Khỏe & Sắc Vóc (Gộp health + beauty)
+        health_goals = categorized_goals.get("health", [])
+        if isinstance(health_goals, dict):
+            health_goals = health_goals.get("children", [])
+        beauty_goals = categorized_goals.get("beauty", [])
+        if isinstance(beauty_goals, dict):
+            beauty_goals = beauty_goals.get("children", [])
+        health_beauty_goals = list(health_goals) + list(beauty_goals)
+
+        # Tự động đồng bộ các mục tiêu Active từ user_goals_sidebar nếu chưa có trong cây
+        for ag in active_goals_all:
+            ag_cat = str(ag.get("category", "")).lower()
+            ag_title = str(ag.get("title") or ag.get("goal_name", "")).strip().lower()
+            if any(str(g.get("title") or g.get("goal_name", "")).strip().lower() == ag_title for g in (career_goals + rel_goals + health_beauty_goals)):
+                continue
+            if any(k in ag_cat for k in ["sự nghiệp", "career", "học tập", "công việc"]):
+                career_goals.append(ag)
+            elif any(k in ag_cat for k in ["mối quan hệ", "relationship", "gia đình", "bạn bè"]):
+                rel_goals.append(ag)
+            else:
+                health_beauty_goals.append(ag)
+
+        tab_data = [
+            ("💼 Sự Nghiệp", career_goals),
+            ("🤝 Mối Quan Hệ", rel_goals),
+            ("🧘 Sức Khỏe & Sắc Vóc", health_beauty_goals),
+        ]
+
+        tabs = st.tabs(["💼 Sự Nghiệp", "🤝 Mối Quan Hệ", "🧘 Sức Khỏe & Sắc Vóc"])
+
+        for tab, (t_name, goals_in_cat) in zip(tabs, tab_data):
             with tab:
-                goals_in_cat = categorized_goals.get(cat_key, [])
-                if isinstance(goals_in_cat, dict):
-                    goals_in_cat = goals_in_cat.get("children", [])
                 if not goals_in_cat:
-                    st.caption("Chưa có mục tiêu trong Root Node này.")
+                    st.caption("Chưa có mục tiêu trong Nhóm mục tiêu này.")
                 else:
                     for g in goals_in_cat:
                         if not isinstance(g, dict):

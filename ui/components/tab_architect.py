@@ -9,6 +9,10 @@ from ui.components.helpers import (
     load_user_goals,
     save_user_goals,
     load_master_schedule,
+    save_master_schedule,
+    push_undo_state,
+    generate_detailed_master_schedule,
+    get_vietnam_today_str,
     update_user_goal_status,
     update_user_goal_details,
     delete_user_goal,
@@ -254,6 +258,30 @@ def render_tab_architect(current_username: str, current_name: str):
                                     }
                                 st.toast(f"Đã xóa vĩnh viễn mục tiêu '{g_title}'!")
                                 st.rerun()
+
+                    if g_status == "active":
+                        if st.button("📅 Phân rã & Xếp lịch ngay", key=f"btn_arch_sched_{gid}_{i}", use_container_width=True, help="Tự động gọi Scheduler phân rã mục tiêu này vào Master Schedule"):
+                            push_undo_state(current_username)
+                            cur_sched = load_master_schedule(current_username)
+                            new_tasks = generate_detailed_master_schedule(
+                                active_goals=[g],
+                                start_date_str=get_vietnam_today_str(),
+                                num_days=14,
+                                username=current_username,
+                            )
+                            existing_sigs = set(
+                                (t.get("date"), t.get("time_slot"), str(t.get("title") or t.get("task_name")).strip().lower())
+                                for t in cur_sched if isinstance(t, dict)
+                            )
+                            added_tasks = [
+                                nt for nt in new_tasks
+                                if (nt.get("date"), nt.get("time_slot"), str(nt.get("title") or nt.get("task_name")).strip().lower()) not in existing_sigs
+                            ]
+                            updated_sched = cur_sched + added_tasks
+                            save_master_schedule(updated_sched, username=current_username)
+                            st.session_state[master_schedule_key] = updated_sched
+                            st.toast(f"✅ Đã phân rã và xếp lịch cho '{g_title}'!")
+                            st.rerun()
 
             selected_goal = next(
                 (g for g in user_goals if str(g.get("id")) == current_sel_id),
