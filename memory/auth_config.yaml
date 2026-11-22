@@ -1,6 +1,0 @@
-cookie:
-  expiry_days: 30.0
-  key: mavis_secret_signature_key_2026
-  name: mavis_auth_cookie
-credentials:
-  usernames: {}

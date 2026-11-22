@@ -37,17 +37,24 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Tự động đồng bộ hóa secrets từ Streamlit Cloud vào biến môi trường hệ thống
+# Đồng bộ có chọn lọc các biến môi trường cần thiết từ st.secrets (tránh leak toàn bộ secrets vào os.environ)
 try:
     if hasattr(st, "secrets"):
-        for _k, _v in st.secrets.items():
-            if isinstance(_v, str):
-                os.environ[_k] = _v
-                if _k == "GEMINI_API_KEY" and "GOOGLE_API_KEY" not in os.environ:
-                    os.environ["GOOGLE_API_KEY"] = _v
-                if _k in ["MONGO_URI", "MONGODB_URI"]:
-                    os.environ["MONGO_URI"] = _v
-                    os.environ["MONGODB_URI"] = _v
+        _allowed_env_keys = ["GEMINI_API_KEY", "GOOGLE_API_KEY", "MONGO_URI", "MONGODB_URI", "TAVILY_API_KEY"]
+        for _key in _allowed_env_keys:
+            if _key in st.secrets and isinstance(st.secrets[_key], str):
+                os.environ[_key] = st.secrets[_key]
+
+        # Đảm bảo fallback tương thích chéo nếu chỉ có 1 trong các key tương đương
+        if "GEMINI_API_KEY" in os.environ and "GOOGLE_API_KEY" not in os.environ:
+            os.environ["GOOGLE_API_KEY"] = os.environ["GEMINI_API_KEY"]
+        elif "GOOGLE_API_KEY" in os.environ and "GEMINI_API_KEY" not in os.environ:
+            os.environ["GEMINI_API_KEY"] = os.environ["GOOGLE_API_KEY"]
+
+        if "MONGO_URI" in os.environ and "MONGODB_URI" not in os.environ:
+            os.environ["MONGODB_URI"] = os.environ["MONGO_URI"]
+        elif "MONGODB_URI" in os.environ and "MONGO_URI" not in os.environ:
+            os.environ["MONGO_URI"] = os.environ["MONGODB_URI"]
 except Exception:
     pass
 

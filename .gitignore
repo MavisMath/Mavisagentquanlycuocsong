@@ -26,6 +26,8 @@ ENV/
 
 # Temporary Memory & Vector Database (Tránh đẩy rác & dữ liệu tạm lên server)
 memory/knowledge_base/
+memory/auth_config.yaml
+memory/goals_ledger.json
 *.sqlite3
 *.sqlite3-journal
 .chroma/
