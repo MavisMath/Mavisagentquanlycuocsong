@@ -985,6 +985,11 @@ if retro_logs_key not in st.session_state:
 
 # Lấy instance MavisAgentWrapper qua @st.cache_resource
 mavis_agent = get_mavis_agent()
+if mavis_agent and hasattr(mavis_agent, "ensure_user_state_loaded"):
+    try:
+        mavis_agent.ensure_user_state_loaded(current_username)
+    except Exception as _load_state_err:
+        pass
 
 
 # ==========================================
@@ -2239,11 +2244,13 @@ with tab_sched:
                     st.session_state[sel_date_key] = today_date
 
                 current_picked_date = st.session_state.get(sel_date_key, today_date)
-                if not isinstance(current_picked_date, date):
+                if not isinstance(current_picked_date, (date, datetime)):
                     try:
                         current_picked_date = datetime.strptime(str(current_picked_date)[:10], "%Y-%m-%d").date()
                     except Exception:
                         current_picked_date = today_date
+                elif isinstance(current_picked_date, datetime):
+                    current_picked_date = current_picked_date.date()
 
                 if current_picked_date < min_date_limit:
                     current_picked_date = min_date_limit

@@ -131,6 +131,57 @@ class MavisAgentWrapper:
     def __init__(self, graph):
         self.graph = graph
 
+    def _load_initial_user_state(self, username: str) -> Dict[str, Any]:
+        """Tải dữ liệu trạng thái bền vững (profile, goals, resources, roadmap) từ MongoDB/ledger."""
+        username = (username or "mavis").strip().lower()
+        restored = {}
+        try:
+            from memory.mongodb import db_get_user_state, is_mongodb_available
+            if is_mongodb_available():
+                db_st = db_get_user_state(username)
+                if db_st and isinstance(db_st, dict):
+                    restored["profile"] = db_st.get("profile") or db_st.get("goal_profile") or {}
+                    restored["goals"] = db_st.get("goals") or []
+                    restored["resources"] = db_st.get("resources") or []
+                    restored["roadmap"] = db_st.get("roadmap") or {}
+                    restored["schedule"] = db_st.get("master_schedule") or []
+                    restored["user_profile"] = db_st.get("user_profile") or {}
+        except Exception as e:
+            print(f"Lỗi nạp user state từ MongoDB cho '{username}': {e}")
+
+        # Fallback từ memory.goals nếu MongoDB chưa có hoặc thiếu
+        try:
+            from memory.goals import load_user_goals, load_user_goal_profile, load_user_resources, load_user_roadmap
+            if not restored.get("goals"):
+                restored["goals"] = load_user_goals(username)
+            if not restored.get("profile"):
+                restored["profile"] = load_user_goal_profile(username)
+            if not restored.get("resources"):
+                restored["resources"] = load_user_resources(username)
+            if not restored.get("roadmap"):
+                restored["roadmap"] = load_user_roadmap(username)
+        except Exception:
+            pass
+
+        restored["username"] = username
+        restored["user_id"] = username
+        return restored
+
+    def ensure_user_state_loaded(self, username: str) -> bool:
+        """Khôi phục trạng thái từ DB vào checkpointer RAM của LangGraph nếu checkpointer rỗng."""
+        user = (username or "mavis").strip().lower()
+        config = {"configurable": {"thread_id": user}}
+        try:
+            curr = self.graph.get_state(config)
+            if not bool(curr and curr.values):
+                restored = self._load_initial_user_state(user)
+                if restored:
+                    self.graph.update_state(config, restored)
+                    return True
+        except Exception as e:
+            print(f"Lỗi ensure_user_state_loaded cho '{user}': {e}")
+        return False
+
     def _prepare_call(self, state, config):
         config = dict(config or {})
         configurable = dict(config.get("configurable", {}))
@@ -154,6 +205,25 @@ class MavisAgentWrapper:
         if "thread_id" not in configurable or not configurable["thread_id"]:
             configurable["thread_id"] = user
         config["configurable"] = configurable
+
+        # 3. Tự động nạp lại trạng thái người dùng nếu checkpointer trên RAM đang rỗng (sau restart container)
+        try:
+            curr_state = self.graph.get_state(config)
+            is_empty = not bool(curr_state and curr_state.values)
+        except Exception:
+            is_empty = True
+
+        if is_empty:
+            restored = self._load_initial_user_state(user)
+            try:
+                self.graph.update_state(config, restored)
+            except Exception as _upd_err:
+                print(f"Cảnh báo update_state vào checkpointer cho '{user}': {_upd_err}")
+            if isinstance(state, dict):
+                for k, v in restored.items():
+                    if k not in state or not state[k]:
+                        state[k] = v
+
         return state, config
 
     def invoke(self, state, config=None, **kwargs):
