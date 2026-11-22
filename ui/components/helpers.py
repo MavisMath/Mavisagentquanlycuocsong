@@ -51,6 +51,7 @@ try:
     save_user_resources = getattr(mg, "save_user_resources")
     load_user_roadmap = getattr(mg, "load_user_roadmap")
     save_user_roadmap = getattr(mg, "save_user_roadmap")
+    classify_goal_category = getattr(mg, "classify_goal_category", None)
     load_categorized_goals = getattr(mg, "load_categorized_goals")
     save_categorized_goals = getattr(mg, "save_categorized_goals")
     load_master_schedule = getattr(mg, "load_master_schedule")

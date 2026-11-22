@@ -1,11 +1,13 @@
 """
 ui/components/sidebar.py - Sidebar Control Center for Mavis AI Executive & Life Coach.
 
-Sidebar tinh gọn, chỉ giữ lại:
+Bảng điều khiển Sidebar đọc trực tiếp từ `user_goals`:
 1. Thông tin user & Đăng xuất (User Info & Logout).
 2. Khung giờ năng lượng hiện tại (Current Bio-Energy Slot).
 3. Tóm tắt task hôm nay (Today's Tasks Summary).
-4. Nút Reset All với xác nhận 2 lần an toàn (Popover + Checkbox).
+4. Phân loại mục tiêu trực tiếp từ user_goals (3 tab: Sự Nghiệp, Mối Quan Hệ, Sức Khỏe & Sắc Vóc).
+5. Nút Reset All với xác nhận 2 lần an toàn (Popover + Checkbox).
+6. Trạng thái kết nối Cloud Database (MongoDB).
 """
 
 from typing import Any
@@ -16,7 +18,12 @@ from ui.components.helpers import (
     safe_list,
     load_user_goals,
     load_master_schedule,
+    save_master_schedule,
     load_retrospective_logs,
+    classify_goal_category,
+    push_undo_state,
+    generate_detailed_master_schedule,
+    get_vietnam_today_str,
     is_mongodb_available,
     get_mongo_connection_error,
     get_mongo_uri,
@@ -28,8 +35,10 @@ from ui.components.helpers import (
 def render_sidebar(current_username: str, current_name: str, authenticator: Any = None):
     """
     Hiển thị Bảng Điều Khiển Tinh Gọn bên trái (Sidebar Control Center).
-    Chỉ giữ lại: Thông tin user, Khung giờ năng lượng hiện tại, Tóm tắt task hôm nay,
-    và nút Reset All có xác nhận 2 lần an toàn.
+    Đọc trực tiếp từ user_goals và tự động gom nhóm theo category/domain:
+    - 💼 Sự Nghiệp
+    - 🤝 Mối Quan Hệ
+    - 🧘 Sức Khỏe & Sắc Vóc (Gộp Sức khỏe và Sắc vóc)
     """
     goals_key = f"goals_{current_username}"
     resources_key = f"resources_{current_username}"
@@ -93,7 +102,7 @@ def render_sidebar(current_username: str, current_name: str, authenticator: Any 
         st.subheader("🔋 Khung Giờ Năng Lượng")
         energy = st.session_state.get(energy_key, "high")
 
-        # Đọc danh sách mục tiêu Active để đề xuất ưu tiên động
+        # Đọc trực tiếp từ user_goals (đồng bộ 100% với màn hình chính)
         user_goals_sidebar = safe_list(st.session_state.get(goals_key) or load_user_goals(current_username))
         active_goals_sidebar = [g for g in user_goals_sidebar if g.get("status") in ["active", "in_progress"]]
 
@@ -178,7 +187,107 @@ def render_sidebar(current_username: str, current_name: str, authenticator: Any 
         st.markdown("---")
 
         # ==========================================
-        # 4. NÚT RESET ALL VỚI XÁC NHẬN 2 LẦN (POPOVER + CHECKBOX)
+        # 4. MỤC TIÊU PHÂN LOẠI (ĐỌC TRỰC TIẾP TỪ USER_GOALS)
+        # ==========================================
+        st.subheader(f"🎯 Mục Tiêu Của {current_name}")
+
+        career_goals = []
+        rel_goals = []
+        health_beauty_goals = []
+
+        # Tự động gom nhóm theo category / domain không phân biệt hoa thường
+        for g in user_goals_sidebar:
+            if not isinstance(g, dict):
+                continue
+            target_group = classify_goal_category(g) if classify_goal_category else "career"
+            if target_group == "career":
+                career_goals.append(g)
+            elif target_group == "relationships":
+                rel_goals.append(g)
+            else:
+                health_beauty_goals.append(g)
+
+        tab_career, tab_rel, tab_health = st.tabs([
+            f"💼 Sự Nghiệp ({len(career_goals)})",
+            f"🤝 Mối Quan Hệ ({len(rel_goals)})",
+            f"🧘 Sức Khỏe & Sắc Vóc ({len(health_beauty_goals)})",
+        ])
+
+        tab_data = [
+            (tab_career, career_goals, "Sự Nghiệp"),
+            (tab_rel, rel_goals, "Mối Quan Hệ"),
+            (tab_health, health_beauty_goals, "Sức Khỏe & Sắc Vóc"),
+        ]
+
+        for tab, goals_in_cat, cat_name in tab_data:
+            with tab:
+                if not goals_in_cat:
+                    st.caption(f"Chưa có mục tiêu trong nhóm {cat_name}.")
+                else:
+                    for g_idx, g in enumerate(goals_in_cat):
+                        g_title = g.get("title") or g.get("goal_name", "Mục tiêu")
+                        g_st = g.get("status", "active")
+                        g_hours = g.get("daily_hours", 1.5)
+                        g_time = g.get("preferred_time") or g.get("preferred_slots") or "Linh hoạt"
+                        g_prio = g.get("priority", "Trung bình")
+                        g_id = g.get("id") or g.get("goal_id", f"goal_{g_idx}")
+
+                        if g_st in ["active", "in_progress"]:
+                            status_badge = "🟢"
+                            status_label = "Đang chạy"
+                        elif g_st == "paused":
+                            status_badge = "⏸️"
+                            status_label = "Tạm dừng"
+                        elif g_st == "completed":
+                            status_badge = "✅"
+                            status_label = "Hoàn thành"
+                        else:
+                            status_badge = "📋"
+                            status_label = "Đang thẩm định"
+
+                        with st.expander(f"{status_badge} {g_title}", expanded=(g_st in ["active", "in_progress"])):
+                            st.caption(f"Trạng thái: `{status_label}` | Ưu tiên: `{g_prio}`")
+                            st.caption(f"⏱️ Quỹ giờ: **{g_hours}h/ngày** • `{g_time}`")
+                            if g.get("deadline"):
+                                st.caption(f"📅 Hạn chót: **{g.get('deadline')}**")
+
+                            # Nút 1-Click Phân rã & Xếp lịch ngay
+                            if g_st in ["active", "in_progress"]:
+                                btn_key = f"btn_sb_sched_{g_id}_{g_idx}_{current_username}"
+                                if st.button("📅 Phân rã & Xếp lịch ngay", key=btn_key, use_container_width=True, type="secondary"):
+                                    push_undo_state(current_username)
+                                    ag_dict = dict(g)
+                                    supp_sched = generate_detailed_master_schedule(
+                                        active_goals=[ag_dict],
+                                        start_date_str=get_vietnam_today_str(),
+                                        num_days=14,
+                                        username=current_username,
+                                    )
+                                    current_ms = list(st.session_state.get(master_schedule_key) or load_master_schedule(current_username))
+                                    existing_keys = set((str(t.get("date")), str(t.get("time_slot"))) for t in current_ms)
+                                    added_count = 0
+                                    for st_item in supp_sched:
+                                        key = (str(st_item.get("date")), str(st_item.get("time_slot")))
+                                        if key not in existing_keys:
+                                            current_ms.append(st_item)
+                                            existing_keys.add(key)
+                                            added_count += 1
+                                    save_master_schedule(current_ms, username=current_username)
+                                    st.session_state[master_schedule_key] = current_ms
+                                    st.toast(f"✅ Đã phân rã và nạp {added_count} task của '{g_title}' vào Master Schedule!", icon="📅")
+                                    st.rerun()
+
+                            leaf_nodes = g.get("leaf_nodes") or g.get("milestones", [])
+                            if leaf_nodes:
+                                st.markdown("**🌿 Cột mốc trọng tâm:**")
+                                for idx, leaf in enumerate(leaf_nodes[:3], 1):
+                                    m_title = leaf.get("title") or leaf.get("milestone", f"Cột mốc {idx}")
+                                    st.markdown(f"- • {m_title}")
+
+        st.markdown("---")
+
+        # ==========================================
+        # 5. NÚT RESET ALL VỚI XÁC NHẬN 2 LẦN (POPOVER + CHECKBOX)
         # ==========================================
         with st.popover("🔄 Làm mới phiên (Reset All)", use_container_width=True):
             st.markdown("#### ⚠️ Xác nhận làm mới phiên làm việc")
@@ -252,7 +361,7 @@ def render_sidebar(current_username: str, current_name: str, authenticator: Any 
         st.markdown("---")
 
         # ==========================================
-        # 5. TRẠNG THÁI KẾT NỐI DATABASE
+        # 6. TRẠNG THÁI KẾT NỐI DATABASE
         # ==========================================
         if is_mongodb_available():
             st.caption("🟢 **Đã kết nối Cloud DB (MongoDB)**")

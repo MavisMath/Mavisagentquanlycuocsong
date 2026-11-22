@@ -30,6 +30,7 @@ __all__ = [
     "save_user_resources",
     "load_user_roadmap",
     "save_user_roadmap",
+    "classify_goal_category",
     "load_categorized_goals",
     "save_categorized_goals",
     "load_master_schedule",
@@ -1645,12 +1646,70 @@ def calculate_user_streak(username: str = "mavis") -> int:
     return streak
 
 
+def classify_goal_category(goal: Dict[str, Any]) -> str:
+    """
+    Phân loại mục tiêu vào một trong 3 nhóm chính:
+    - 'career': Sự nghiệp, Học tập, Công việc, Tài chính
+    - 'relationships': Mối quan hệ, Gia đình, Bạn bè, Tình cảm
+    - 'health_beauty': Sức khỏe, Sắc vóc, Thể chất, Dinh dưỡng, Nhịp sinh học
+
+    So khớp không phân biệt hoa thường theo trường 'category' hoặc 'domain'.
+    Gộp 'Sức khỏe' và 'Sắc vóc' hợp lý.
+    """
+    if not isinstance(goal, dict):
+        return "career"
+
+    cat = str(goal.get("category") or "").strip().lower()
+    domain = str(goal.get("domain") or "").strip().lower()
+    combined_field = f"{cat} {domain}".strip()
+
+    title = str(goal.get("title") or goal.get("goal_name") or "").strip().lower()
+
+    # 1. Nhóm Sức Khỏe & Sắc Vóc (Health & Beauty)
+    health_beauty_keywords = [
+        "sức khỏe", "sức khoẻ", "health", "sắc vóc", "sắc đẹp", "sac voc", "suc khoe",
+        "làm đẹp", "beauty", "thể chất", "thể thao", "fitness", "gym", "cardio",
+        "chạy bộ", "running", "yoga", "dinh dưỡng", "nutrition", "ăn uống",
+        "nhịp sinh học", "biorhythm", "giảm cân", "tăng cơ", "skincare", "vóc dáng",
+        "giấc ngủ", "sleep", "uống nước", "hydration", "intermittent fasting", "if 16:8",
+        "sức khỏe & sắc vóc", "sức khỏe và sắc vóc", "thể dục", "bơi lội"
+    ]
+    if any(k in combined_field for k in health_beauty_keywords) or any(k in title for k in [
+        "chạy bộ", "gym", "tập luyện", "giảm cân", "if 16:8", "dinh dưỡng", "yoga", "cardio", "skincare", "thể thao"
+    ]):
+        return "health_beauty"
+
+    # 2. Nhóm Mối Quan Hệ (Relationships)
+    rel_keywords = [
+        "mối quan hệ", "moi quan he", "relationship", "relationships", "gia đình", "gia dinh",
+        "family", "bạn bè", "ban be", "friend", "friends", "xã hội", "social",
+        "tình cảm", "tinh cam", "con cái", "cha mẹ", "vợ chồng", "kết nối", "networking",
+        "giao tiếp", "hẹn hò"
+    ]
+    if any(k in combined_field for k in rel_keywords) or any(k in title for k in [
+        "gia đình", "bạn bè", "con cái", "người thân", "kết nối bạn bè", "hẹn hò", "bố mẹ", "vợ chồng"
+    ]):
+        return "relationships"
+
+    # 3. Mặc định: Sự Nghiệp & Học Tập (Career, Study, Work, Finance)
+    return "career"
+
+
 def load_categorized_goals(username: str = "mavis") -> Dict[str, Any]:
     """
-    Truy xuất vào đúng nhánh dữ liệu của tài khoản đó từ memory/goals_ledger.json (Phase 8 Multi-Tenant).
-    Ví dụ: data.get(username, {})
+    Truy xuất danh mục mục tiêu của username.
+    Đọc trực tiếp từ load_user_goals(username) và tự động gom nhóm theo trường category/domain
+    (so khớp không phân biệt hoa thường, gộp Sức khỏe và Sắc vóc), kết hợp dữ liệu Tree.
+    Đảm bảo cứ có mục tiêu Active trong user_goals là hiển thị đúng ngay lập tức.
     """
     username = (username or DEFAULT_USER).strip().lower()
+
+    result = {
+        "career": [],
+        "relationships": [],
+        "health": [],
+        "beauty": [],
+    }
 
     if os.path.exists(LEDGER_PATH):
         try:
@@ -1658,12 +1717,10 @@ def load_categorized_goals(username: str = "mavis") -> Dict[str, Any]:
                 data = json.load(f)
 
             if isinstance(data, dict):
-                # Truy xuất đúng nhánh dữ liệu của username (Phase 8)
                 user_branch = data.get(username, {})
                 if not user_branch and username == DEFAULT_USER and any(k in data for k in ROOT_NODES):
                     user_branch = data
 
-                result = {}
                 for root in ROOT_NODES:
                     node = user_branch.get(root, {})
                     children = node.get("children", []) if isinstance(node, dict) else (node if isinstance(node, list) else [])
@@ -1673,32 +1730,46 @@ def load_categorized_goals(username: str = "mavis") -> Dict[str, Any]:
                                 g["milestones"] = g["leaf_nodes"]
                             elif "milestones" in g and "leaf_nodes" not in g:
                                 g["leaf_nodes"] = g["milestones"]
-                    result[root] = children
-
-                # Aliases tương thích ngược
-                result["study_work"] = result.get("career", [])
-                result["finance"] = result.get("career", [])
-                result["family"] = result.get("relationships", [])
-                result["daily_routine"] = result.get("health", [])
-                result["health_beauty"] = result.get("health", []) + result.get("beauty", [])
-                return result
+                    result[root] = list(children)
         except Exception as e:
             print(f"Lỗi khi đọc file {LEDGER_PATH}: {e}")
 
-    # Fallback qua load_tree_goals
-    tree = load_tree_goals(username=username)
-    result = {}
-    for root in ROOT_NODES:
-        node = tree.get(root, {})
-        children = node.get("children", []) if isinstance(node, dict) else (node if isinstance(node, list) else [])
-        result[root] = children
+    # Đồng bộ trực tiếp từ load_user_goals (MongoDB & goals_ledger.json)
+    try:
+        user_goals = load_user_goals(username=username)
+        for g in user_goals:
+            if not isinstance(g, dict):
+                continue
+            g_id = g.get("id") or g.get("goal_id")
+            g_title = str(g.get("title") or g.get("goal_name") or "").strip().lower()
 
-    result["study_work"] = result["career"]
-    result["finance"] = result["career"]
-    result["family"] = result["relationships"]
-    result["daily_routine"] = result["health"]
-    result["health_beauty"] = result["health"] + result["beauty"]
+            grp = classify_goal_category(g)
+            cat_lower = str(g.get("category") or g.get("domain") or "").lower()
 
+            if grp == "health_beauty":
+                target_root = "beauty" if any(k in cat_lower for k in ["sắc vóc", "beauty", "làm đẹp", "skincare", "vóc dáng"]) else "health"
+            elif grp == "relationships":
+                target_root = "relationships"
+            else:
+                target_root = "career"
+
+            target_list = result.setdefault(target_root, [])
+            is_already_there = any(
+                (g_id and (x.get("id") == g_id or x.get("goal_id") == g_id))
+                or str(x.get("title") or x.get("goal_name") or "").strip().lower() == g_title
+                for x in target_list if isinstance(x, dict)
+            )
+            if not is_already_there:
+                target_list.append(g)
+    except Exception as _e_sync:
+        print(f"Lỗi đồng bộ user_goals vào load_categorized_goals: {_e_sync}")
+
+    # Aliases tương thích ngược
+    result["study_work"] = result.get("career", [])
+    result["finance"] = result.get("career", [])
+    result["family"] = result.get("relationships", [])
+    result["daily_routine"] = result.get("health", [])
+    result["health_beauty"] = result.get("health", []) + result.get("beauty", [])
     return result
 
 

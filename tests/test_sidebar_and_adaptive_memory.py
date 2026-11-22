@@ -63,10 +63,114 @@ class TestSidebarAndAdaptiveMemory(unittest.TestCase):
         # 2. Bảo đảm có mặt các tiêu đề chuẩn
         self.assertTrue(any("Năng Lượng" in s for s in subheader_outputs), f"Thiếu mục Năng Lượng trong {subheader_outputs}")
         self.assertTrue(any("Task Hôm Nay" in s for s in subheader_outputs), f"Thiếu mục Task Hôm Nay trong {subheader_outputs}")
+        self.assertTrue(any("Mục Tiêu" in s for s in subheader_outputs), f"Thiếu mục Mục Tiêu trong {subheader_outputs}")
 
         # 3. Bảo đảm nút Reset All dùng popover và có checkbox xác nhận
         self.assertTrue(mock_pop.called, "Nút Reset All phải dùng st.popover để có 2 bước xác nhận")
         self.assertTrue(mock_chk.called, "Popover Reset All phải có checkbox xác nhận 2 lần")
+
+    def test_classify_goal_category_case_insensitivity_and_health_beauty_merge(self):
+        """Bảo đảm classify_goal_category gom đúng Sức khỏe & Sắc vóc không phân biệt hoa thường."""
+        from memory.goals import classify_goal_category
+
+        cases = [
+            ({"category": "Sức khỏe"}, "health_beauty"),
+            ({"category": "Sức Khỏe"}, "health_beauty"),
+            ({"category": "sức khoẻ"}, "health_beauty"),
+            ({"category": "Sắc Vóc"}, "health_beauty"),
+            ({"domain": "beauty"}, "health_beauty"),
+            ({"category": "Health"}, "health_beauty"),
+            ({"category": "Học tập & Sự nghiệp"}, "career"),
+            ({"category": "Sự nghiệp"}, "career"),
+            ({"domain": "Tài chính"}, "career"),
+            ({"category": "Mối quan hệ"}, "relationships"),
+            ({"category": "Gia đình"}, "relationships"),
+            ({"title": "Chạy bộ 5km mỗi sáng"}, "health_beauty"),
+        ]
+        for goal_dict, expected_grp in cases:
+            res = classify_goal_category(goal_dict)
+            self.assertEqual(res, expected_grp, f"Lỗi phân loại {goal_dict}: nhận {res}, kỳ vọng {expected_grp}")
+
+    def test_sidebar_reads_directly_from_user_goals_and_shows_health_goal(self):
+        """Kiểm tra Sidebar đọc trực tiếp user_goals và hiển thị ngay mục tiêu 'Sức khỏe'."""
+        sample_goals = [
+            {
+                "id": "g_health_1",
+                "title": "Chạy bộ 5km & Ăn uống IF 16:8",
+                "category": "Sức khỏe",
+                "status": "active",
+                "daily_hours": 1.0,
+                "preferred_time": "06:30 - 07:30",
+            },
+            {
+                "id": "g_career_1",
+                "title": "Chinh phục IELTS 7.5",
+                "category": "Học tập",
+                "status": "active",
+                "daily_hours": 2.0,
+                "preferred_time": "08:30 - 10:30",
+            },
+        ]
+
+        tabs_created = []
+        def mock_tabs(tab_names):
+            tabs_created.append(list(tab_names))
+            return [MagicMock(), MagicMock(), MagicMock()]
+
+        mock_sidebar_ctx = MagicMock()
+        mock_sidebar_ctx.__enter__.return_value = None
+        mock_sidebar_ctx.__exit__.return_value = None
+
+        mock_popover_ctx = MagicMock()
+        mock_popover_ctx.__enter__.return_value = None
+        mock_popover_ctx.__exit__.return_value = None
+
+        with patch("streamlit.sidebar", mock_sidebar_ctx), \
+             patch("streamlit.markdown"), \
+             patch("streamlit.subheader"), \
+             patch("streamlit.caption"), \
+             patch("streamlit.success"), \
+             patch("streamlit.warning"), \
+             patch("streamlit.info"), \
+             patch("streamlit.tabs", side_effect=mock_tabs), \
+             patch("streamlit.expander", return_value=MagicMock()), \
+             patch("streamlit.popover", return_value=mock_popover_ctx), \
+             patch("streamlit.checkbox", return_value=False), \
+             patch("streamlit.button", return_value=False), \
+             patch("ui.components.sidebar.load_master_schedule", return_value=[]), \
+             patch("ui.components.sidebar.load_user_goals", return_value=sample_goals):
+
+            render_sidebar(self.username, self.name)
+
+        self.assertTrue(len(tabs_created) > 0, "Sidebar phải render các tab mục tiêu")
+        tab_titles = " ".join(tabs_created[0])
+        self.assertIn("Sự Nghiệp", tab_titles)
+        self.assertIn("Mối Quan Hệ", tab_titles)
+        self.assertIn("Sức Khỏe & Sắc Vóc", tab_titles)
+        # Số lượng đếm trong tab title: Sự nghiệp (1), Sức khỏe & Sắc vóc (1)
+        self.assertIn("Sự Nghiệp (1)", tab_titles)
+        self.assertIn("Sức Khỏe & Sắc Vóc (1)", tab_titles)
+
+    def test_load_categorized_goals_syncs_with_user_goals(self):
+        """Bảo đảm memory/goals.py load_categorized_goals tự động đồng bộ từ load_user_goals."""
+        from memory.goals import load_categorized_goals
+
+        test_user = "test_user_sync_cat"
+        mock_user_goals = [
+            {
+                "id": "mock_g_health",
+                "title": "Chạy bộ sáng",
+                "category": "Sức Khỏe",
+                "status": "active",
+            }
+        ]
+
+        with patch("memory.goals.load_user_goals", return_value=mock_user_goals):
+            cat_result = load_categorized_goals(username=test_user)
+            self.assertIn("health", cat_result)
+            self.assertIn("health_beauty", cat_result)
+            titles = [g.get("title") for g in cat_result["health_beauty"]]
+            self.assertIn("Chạy bộ sáng", titles)
 
     def test_adaptive_memory_renders_natural_vietnamese(self):
         """Kiểm tra Bộ Nhớ Thích Nghi hiển thị chuẩn 100% tiếng Việt tự nhiên."""
