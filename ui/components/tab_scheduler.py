@@ -781,7 +781,7 @@ def render_tab_scheduler(current_username: str, current_name: str):
                             active_slots = standard_slots
 
                         for slot_idx, slot in enumerate(active_slots):
-                            st.markdown("<hr style='margin: 4px 0; border: none; border-top: 1px dashed #334155;'/>", unsafe_allow_html=True)
+                            st.markdown("<hr style='margin: 4px 0; border: none; border-top: 1px dashed #E5E5E5;'/>", unsafe_allow_html=True)
                             row_cols = st.columns([0.16, 0.12, 0.12, 0.12, 0.12, 0.12, 0.12, 0.12])
                             with row_cols[0]:
                                 st.markdown(f"<div style='font-size:0.83rem; font-weight:bold; margin-top:6px;'>⏰ <code>{slot}</code></div>", unsafe_allow_html=True)

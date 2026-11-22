@@ -305,9 +305,9 @@ with st.container():
     with col_hdr_text:
         st.markdown(
             f"""
-            <div style="background-color: #0e1117; padding: 0.3rem 0.5rem; border-radius: 6px;">
-                <div style="font-size: 1.55rem; font-weight: 700; color: #f8fafc; margin-bottom: 2px;">🤖 Mavis AI Executive & Life Coach</div>
-                <div style="font-size: 0.85rem; color: #94a3b8;"><b>Không gian làm việc:</b> <code>{current_name}</code> (<code>@{current_username}</code>) | Mô hình CEO điều phối 3 giai đoạn khép kín • Tối ưu nhịp sinh học • Đồng bộ Cloud MongoDB</div>
+            <div style="background-color: #FFFFFF; border: 2px solid #E5E5E5; border-bottom: 4px solid #E5E5E5; padding: 0.65rem 1.1rem; border-radius: 18px; margin-bottom: 0.5rem; box-shadow: 0 2px 6px rgba(0,0,0,0.02);">
+                <div style="font-size: 1.55rem; font-weight: 800; color: #3C3C3C; margin-bottom: 2px;">⚡ Mavis AI Executive & Life Coach</div>
+                <div style="font-size: 0.88rem; color: #777777; font-weight: 600;"><b>Không gian làm việc:</b> <code style="color: #1CB0F6; font-weight: 800; background: #EBF8FF; padding: 2px 8px; border-radius: 8px; border: 1px solid #BAE3FF;">{current_name}</code> (<code>@{current_username}</code>) | Mô hình CEO điều phối 3 giai đoạn khép kín • Tối ưu nhịp sinh học • Đồng bộ Cloud MongoDB</div>
             </div>
             """,
             unsafe_allow_html=True,
