@@ -200,12 +200,12 @@ def render_sidebar(current_username: str, current_name: str, authenticator: Any 
             if not isinstance(g, dict):
                 continue
             target_group = classify_goal_category(g) if classify_goal_category else "career"
-            if target_group == "career":
-                career_goals.append(g)
+            if target_group == "health_beauty":
+                health_beauty_goals.append(g)
             elif target_group == "relationships":
                 rel_goals.append(g)
             else:
-                health_beauty_goals.append(g)
+                career_goals.append(g)
 
         tab_career, tab_rel, tab_health = st.tabs([
             f"💼 Sự Nghiệp ({len(career_goals)})",

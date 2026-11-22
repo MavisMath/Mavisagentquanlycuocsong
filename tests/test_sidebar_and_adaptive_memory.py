@@ -86,6 +86,12 @@ class TestSidebarAndAdaptiveMemory(unittest.TestCase):
             ({"category": "Mối quan hệ"}, "relationships"),
             ({"category": "Gia đình"}, "relationships"),
             ({"title": "Chạy bộ 5km mỗi sáng"}, "health_beauty"),
+            ({"title": "Giảm 15kg trong 90 ngày"}, "health_beauty"),
+            ({"title": "Giảm 15kg trong 90 ngày", "category": "Học tập"}, "health_beauty"),
+            ({"title": "Giảm 15kg trong 90 ngày", "category": "Sự nghiệp"}, "health_beauty"),
+            ({"title": "Giảm 5kg đón Tết"}, "health_beauty"),
+            ({"title": "Giảm mỡ bụng & siết eo", "category": "career"}, "health_beauty"),
+            ({"title": "Gia đình sum vầy", "category": "Học tập"}, "relationships"),
         ]
         for goal_dict, expected_grp in cases:
             res = classify_goal_category(goal_dict)

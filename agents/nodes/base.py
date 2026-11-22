@@ -70,6 +70,7 @@ try:
         append_retrospective_log,
         get_user_state_full,
         detect_goal_domain,
+        classify_goal_category,
         DOMAIN_TERMINOLOGY,
         get_vietnam_today_str,
         compute_target_date,
@@ -114,6 +115,7 @@ except Exception:
     append_retrospective_log = getattr(_mg, "append_retrospective_log", lambda *args, **kwargs: True)
     get_user_state_full = getattr(_mg, "get_user_state_full", lambda *args, **kwargs: {})
     detect_goal_domain = getattr(_mg, "detect_goal_domain", lambda *args, **kwargs: "general")
+    classify_goal_category = getattr(_mg, "classify_goal_category", lambda *args, **kwargs: "career")
     DOMAIN_TERMINOLOGY = getattr(_mg, "DOMAIN_TERMINOLOGY", {})
     get_vietnam_today_str = getattr(_mg, "get_vietnam_today_str", lambda: "2026-11-21")
     compute_target_date = getattr(_mg, "compute_target_date", lambda s, d: "2027-02-19")

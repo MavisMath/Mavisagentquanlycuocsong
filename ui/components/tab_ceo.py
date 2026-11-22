@@ -9,6 +9,7 @@ from ui.components.helpers import (
     safe_list,
     load_user_goals,
     save_user_goals,
+    classify_goal_category,
     ceo_coach_chat,
     push_undo_state,
     load_master_schedule,
@@ -73,7 +74,15 @@ def render_tab_ceo(current_username: str, current_name: str):
                 eg_dict = safe_dict(eg)
                 gid = eg_dict.get("id") or eg_dict.get("goal_id", f"eval_{idx}")
                 g_title = eg_dict.get("title") or eg_dict.get("goal_name", f"Mục tiêu {idx}")
-                cat = eg_dict.get("category", "Học tập")
+                cat = eg_dict.get("category")
+                if not cat or str(cat).strip().lower() in ["học tập", "sự nghiệp", "career"]:
+                    c_grp = classify_goal_category(eg_dict) if classify_goal_category else "career"
+                    if c_grp == "health_beauty":
+                        cat = "Sức khỏe & Sắc vóc"
+                    elif c_grp == "relationships":
+                        cat = "Mối quan hệ"
+                    else:
+                        cat = cat or "Học tập"
                 daily_h = eg_dict.get("daily_hours", 1.5)
                 dur_days = eg_dict.get("duration_days", 90)
                 pref_t = eg_dict.get("preferred_time") or eg_dict.get("preferred_slots", "08:00 - 10:00 Sáng")
@@ -118,7 +127,15 @@ def render_tab_ceo(current_username: str, current_name: str):
                 ag_dict = safe_dict(ag)
                 gid = ag_dict.get("id") or ag_dict.get("goal_id", f"act_{idx}")
                 a_title = ag_dict.get("title") or ag_dict.get("goal_name", f"Mục tiêu {idx}")
-                a_cat = ag_dict.get("category", "Sự nghiệp")
+                a_cat = ag_dict.get("category")
+                if not a_cat or str(a_cat).strip().lower() in ["học tập", "sự nghiệp", "career"]:
+                    c_grp = classify_goal_category(ag_dict) if classify_goal_category else "career"
+                    if c_grp == "health_beauty":
+                        a_cat = "Sức khỏe & Sắc vóc"
+                    elif c_grp == "relationships":
+                        a_cat = "Mối quan hệ"
+                    else:
+                        a_cat = a_cat or "Sự nghiệp"
                 a_h = ag_dict.get("daily_hours", 1.5)
                 a_prio = ag_dict.get("priority", "P2 - High")
 

@@ -319,6 +319,84 @@ def detect_goal_domain(
     return "general"
 
 
+def classify_goal_category(goal: Any) -> str:
+    """
+    Phân loại mục tiêu vào một trong 3 nhóm chính:
+    - 'career': Sự nghiệp, Học tập, Công việc, Tài chính, Ngoại ngữ, Công nghệ
+    - 'relationships': Mối quan hệ, Gia đình, Bạn bè, Tình cảm, Xã hội
+    - 'health_beauty': Sức khỏe, Sắc vóc, Thể chất, Dinh dưỡng, Nhịp sinh học, Làm đẹp, Giảm cân
+
+    So khớp không phân biệt hoa thường theo trường 'category', 'domain', 'title', 'strategy_summary', 'breakdown'.
+    Đặc biệt nhận diện chuẩn xác các mục tiêu cân nặng (vd: 'Giảm 15kg trong 90 ngày', '5kg', 'calo',
+    'giảm mỡ', 'thể thao', 'gym') kể cả khi trường category bị gán mặc định thành 'Học tập' / 'Sự nghiệp'.
+    """
+    if isinstance(goal, str):
+        goal = {"title": goal}
+    elif not isinstance(goal, dict):
+        return "career"
+
+    cat = str(goal.get("category") or "").strip().lower()
+    domain = str(goal.get("domain") or "").strip().lower()
+    title = str(goal.get("title") or goal.get("goal_name") or "").strip().lower()
+    strategy = str(goal.get("strategy_summary") or "").strip().lower()
+
+    yearly = ""
+    bd = goal.get("breakdown")
+    if isinstance(bd, dict):
+        yearly = str(bd.get("yearly") or "").strip().lower()
+
+    combined_field = f"{cat} {domain}".strip()
+    all_text = f"{title} {combined_field} {strategy} {yearly}".strip()
+
+    # 1. Nhóm Sức Khỏe & Sắc Vóc (Health & Beauty) - Ưu tiên nhận diện thể chất, cân nặng, vóc dáng
+    # Regex bắt các chỉ số thể chất / số đo cân nặng: ví dụ "15kg", "5 kg", "15 kilo", "5 cân", "giảm 15", "giảm 5"
+    has_weight_pattern = bool(
+        re.search(r"\b\d+\s*(kg|kilo|cân|gam|g)\b", all_text)
+        or re.search(r"giảm\s+\d+", all_text)
+        or re.search(r"tăng\s+\d+\s*(kg|cân|kilo)", all_text)
+    )
+
+    health_beauty_keywords = [
+        # Thể lực, vóc dáng, cân nặng
+        "giảm cân", "giam can", "tăng cân", "tang can", "giảm mỡ", "giam mo", "giảm béo", "giam beo",
+        "tăng cơ", "tang co", "siết cơ", "siet co", "đốt mỡ", "dot mo", "mỡ thừa", "mo thua",
+        "cân nặng", "can nang", "vóc dáng", "voc dang", "về dáng", "body", "thể hình",
+        "vòng eo", "eo thon", "bụng phẳng", "bụng", "bắp tay", "săn chắc", "thâm hụt", "tham hut",
+        "calo", "calorie", "calories", "tdee", "bmr",
+        # Vận động, thể thao, bài tập
+        "sức khỏe", "sức khoẻ", "health", "suc khoe", "thể chất", "the chat", "thể thao", "the thao",
+        "thể dục", "the duc", "vận động", "van dong", "fitness", "gym", "cardio", "workout",
+        "kháng lực", "khang luc", "chạy bộ", "chay bo", "chạy", "running", "marathon", "đi bộ", "di bo",
+        "bước chân", "bơi lội", "boi loi", "bơi", "đạp xe", "dap xe", "yoga", "pilates",
+        "calisthenics", "aerobic", "hiit", "squat", "plank", "deadlift", "tập luyện", "tap luyen",
+        "giãn cơ", "gian co", "stretching",
+        # Dinh dưỡng & Nhịp sinh học
+        "dinh dưỡng", "dinh duong", "nutrition", "ăn uống", "an uong", "thực đơn", "thuc don",
+        "eat clean", "keto", "intermittent fasting", "nhịn ăn gián đoạn", "nhin an", "fasting",
+        "if 16:8", "16:8", "16/8", "nhịp sinh học", "nhip sinh hoc", "biorhythm", "giấc ngủ", "giac ngu",
+        "sleep", "ngủ đủ", "ngủ sớm", "uống nước", "uong nuoc", "hydration", "nước lọc", "detox", "meal prep",
+        # Sắc đẹp & Làm đẹp & Skincare
+        "sắc vóc", "sắc đẹp", "sac voc", "sac dep", "làm đẹp", "lam dep", "beauty", "skincare",
+        "chăm sóc da", "cham soc da", "da mặt", "trị mụn", "tri mun", "dưỡng da", "duong da",
+        "mỹ phẩm", "kem chống nắng", "sức khỏe & sắc vóc", "sức khỏe và sắc vóc"
+    ]
+
+    if has_weight_pattern or any(k in all_text for k in health_beauty_keywords):
+        return "health_beauty"
+
+    # 2. Nhóm Mối Quan Hệ (Relationships)
+    rel_keywords = [
+        "mối quan hệ", "moi quan he", "relationship", "relationships", "gia đình", "gia dinh",
+        "family", "bạn bè", "ban be", "friend", "friends", "xã hội", "social",
+        "tình cảm", "tinh cam", "con cái", "cha mẹ", "vợ chồng", "kết nối", "networking",
+        "giao tiếp", "hẹn hò", "dating", "người thân", "nguoi than", "bố mẹ", "người yêu"
+    ]
+    if any(k in all_text for k in rel_keywords):
+        return "relationships"
+
+    # 3. Mặc định: Sự Nghiệp & Học Tập (Career, Study, Work, Finance, Tech, Language)
+    return "career"
+
 
 def get_blank_tree() -> Dict[str, Any]:
     """Tạo cấu trúc Tree trắng với 4 Root Nodes và Hồ sơ Hành vi Thích nghi (Phase 10 Adaptive Memory) hoàn toàn trống rỗng cho user mới."""
@@ -638,7 +716,22 @@ def standardize_goal_schema(g: Dict[str, Any]) -> Dict[str, Any]:
     clean["goal_name"] = title
 
     # 2. Phân loại & Mức ưu tiên
-    clean["category"] = clean.get("category") or "Học tập"
+    raw_cat = clean.get("category")
+    detected_grp = classify_goal_category(clean)
+    if not raw_cat or str(raw_cat).strip().lower() in ["học tập", "sự nghiệp", "career", "general"]:
+        if detected_grp == "health_beauty":
+            clean["category"] = "Sức khỏe & Sắc vóc"
+        elif detected_grp == "relationships":
+            clean["category"] = "Mối quan hệ"
+        else:
+            clean["category"] = raw_cat or "Học tập"
+    elif detected_grp == "health_beauty" and str(raw_cat).strip().lower() not in ["sức khỏe", "sức khoẻ", "sức khỏe & sắc vóc", "sắc vóc", "health", "beauty"]:
+        clean["category"] = "Sức khỏe & Sắc vóc"
+    elif detected_grp == "relationships" and str(raw_cat).strip().lower() not in ["mối quan hệ", "gia đình", "bạn bè", "relationships", "family"]:
+        clean["category"] = "Mối quan hệ"
+    else:
+        clean["category"] = raw_cat
+
     clean["priority"] = clean.get("priority") or "P2 - High"
 
     # 3. Khung giờ, Quỹ thời gian & Trục ngày thực tế (start_date -> target_date)
@@ -1644,55 +1737,6 @@ def calculate_user_streak(username: str = "mavis") -> int:
         else:
             break
     return streak
-
-
-def classify_goal_category(goal: Dict[str, Any]) -> str:
-    """
-    Phân loại mục tiêu vào một trong 3 nhóm chính:
-    - 'career': Sự nghiệp, Học tập, Công việc, Tài chính
-    - 'relationships': Mối quan hệ, Gia đình, Bạn bè, Tình cảm
-    - 'health_beauty': Sức khỏe, Sắc vóc, Thể chất, Dinh dưỡng, Nhịp sinh học
-
-    So khớp không phân biệt hoa thường theo trường 'category' hoặc 'domain'.
-    Gộp 'Sức khỏe' và 'Sắc vóc' hợp lý.
-    """
-    if not isinstance(goal, dict):
-        return "career"
-
-    cat = str(goal.get("category") or "").strip().lower()
-    domain = str(goal.get("domain") or "").strip().lower()
-    combined_field = f"{cat} {domain}".strip()
-
-    title = str(goal.get("title") or goal.get("goal_name") or "").strip().lower()
-
-    # 1. Nhóm Sức Khỏe & Sắc Vóc (Health & Beauty)
-    health_beauty_keywords = [
-        "sức khỏe", "sức khoẻ", "health", "sắc vóc", "sắc đẹp", "sac voc", "suc khoe",
-        "làm đẹp", "beauty", "thể chất", "thể thao", "fitness", "gym", "cardio",
-        "chạy bộ", "running", "yoga", "dinh dưỡng", "nutrition", "ăn uống",
-        "nhịp sinh học", "biorhythm", "giảm cân", "tăng cơ", "skincare", "vóc dáng",
-        "giấc ngủ", "sleep", "uống nước", "hydration", "intermittent fasting", "if 16:8",
-        "sức khỏe & sắc vóc", "sức khỏe và sắc vóc", "thể dục", "bơi lội"
-    ]
-    if any(k in combined_field for k in health_beauty_keywords) or any(k in title for k in [
-        "chạy bộ", "gym", "tập luyện", "giảm cân", "if 16:8", "dinh dưỡng", "yoga", "cardio", "skincare", "thể thao"
-    ]):
-        return "health_beauty"
-
-    # 2. Nhóm Mối Quan Hệ (Relationships)
-    rel_keywords = [
-        "mối quan hệ", "moi quan he", "relationship", "relationships", "gia đình", "gia dinh",
-        "family", "bạn bè", "ban be", "friend", "friends", "xã hội", "social",
-        "tình cảm", "tinh cam", "con cái", "cha mẹ", "vợ chồng", "kết nối", "networking",
-        "giao tiếp", "hẹn hò"
-    ]
-    if any(k in combined_field for k in rel_keywords) or any(k in title for k in [
-        "gia đình", "bạn bè", "con cái", "người thân", "kết nối bạn bè", "hẹn hò", "bố mẹ", "vợ chồng"
-    ]):
-        return "relationships"
-
-    # 3. Mặc định: Sự Nghiệp & Học Tập (Career, Study, Work, Finance)
-    return "career"
 
 
 def load_categorized_goals(username: str = "mavis") -> Dict[str, Any]:

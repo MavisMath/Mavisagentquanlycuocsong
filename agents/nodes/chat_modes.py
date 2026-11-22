@@ -22,6 +22,7 @@ from agents.nodes.base import (
     get_goals_summary_text,
     get_vietnam_today_str,
     compute_target_date,
+    classify_goal_category,
 )
 
 
@@ -524,12 +525,23 @@ Tin nhắn hiện tại của người dùng: "{user_message}"
             goal_id = f"goal_{uuid.uuid4().hex[:6]}"
         goal_dur = int(analysis.duration_days or 90)
         goal_start = get_vietnam_today_str()
+
+        # Tự động nhận diện category chính xác dựa trên tiêu đề và phân tích
+        detected_cat = analysis.category or "Học tập"
+        cat_grp = classify_goal_category({"title": analysis.detected_goal_title, "category": detected_cat})
+        if cat_grp == "health_beauty":
+            resolved_cat = "Sức khỏe & Sắc vóc"
+        elif cat_grp == "relationships":
+            resolved_cat = "Mối quan hệ"
+        else:
+            resolved_cat = detected_cat
+
         new_goal_record = {
             "id": goal_id,
             "goal_id": goal_id,
             "title": analysis.detected_goal_title,
             "goal_name": analysis.detected_goal_title,
-            "category": analysis.category or "Học tập",
+            "category": resolved_cat,
             "priority": analysis.priority or "P2 - High",
             "preferred_time": analysis.preferred_time or "08:00 - 10:00 Sáng",
             "preferred_slots": analysis.preferred_time or "08:00 - 10:00 Sáng",
