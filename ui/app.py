@@ -22,9 +22,7 @@ for p in [PROJECT_ROOT, CWD, CURRENT_DIR]:
 
 import streamlit as st
 
-# ==========================================
-# CẤU HÌNH GIAO DIỆN STREAMLIT (Bắt buộc chạy trước mọi lệnh st.* khác)
-# ==========================================
+# Cấu hình giao diện Streamlit (Bắt buộc chạy ngay sau import streamlit, trước mọi lệnh st.*)
 st.set_page_config(
     page_title="Mavis AI Executive Life Coach - SaaS",
     page_icon="⚡",

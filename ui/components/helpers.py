@@ -15,22 +15,20 @@ from typing import List, Dict, Any, Optional
 import streamlit as st
 
 # ==========================================
-# 1. NẠP AN TOÀN MODULE MEMORY.MONGODB
+# 1. NẠP MODULE MEMORY.MONGODB
 # ==========================================
 try:
     import memory.mongodb as mm
-    is_mongodb_available = getattr(mm, "is_mongodb_available", lambda: False)
-    db_update_user_state = getattr(mm, "db_update_user_state", lambda *args, **kwargs: False)
-    get_mongo_connection_error = getattr(mm, "get_mongo_connection_error", lambda: None)
-    get_mongo_uri = getattr(mm, "get_mongo_uri", lambda: None)
+    is_mongodb_available = getattr(mm, "is_mongodb_available")
+    db_update_user_state = getattr(mm, "db_update_user_state")
+    get_mongo_connection_error = getattr(mm, "get_mongo_connection_error")
+    get_mongo_uri = getattr(mm, "get_mongo_uri")
 except Exception as _mongo_import_err:
-    is_mongodb_available = lambda: False
-    db_update_user_state = lambda *args, **kwargs: False
-    get_mongo_connection_error = lambda: str(_mongo_import_err)
-    get_mongo_uri = lambda: None
+    st.error(f"🚨 Lỗi nghiêm trọng: Không thể nạp module `memory.mongodb`: {_mongo_import_err}")
+    st.stop()
 
 # ==========================================
-# 2. NẠP AN TOÀN MODULE MEMORY.GOALS
+# 2. NẠP MODULE MEMORY.GOALS
 # ==========================================
 try:
     import memory.goals as mg
@@ -79,18 +77,19 @@ try:
         {0: "Thứ Hai", 1: "Thứ Ba", 2: "Thứ Tư", 3: "Thứ Năm", 4: "Thứ Sáu", 5: "Thứ Bảy", 6: "Chủ Nhật"},
     )
 except Exception as _goals_import_err:
-    raise RuntimeError(f"Không thể nạp memory.goals: {_goals_import_err}")
+    st.error(f"🚨 Lỗi nghiêm trọng: Không thể nạp module `memory.goals`: {_goals_import_err}")
+    st.stop()
 
 # ==========================================
-# 3. NẠP AN TOÀN MODULE MEMORY.AUTH
+# 3. NẠP MODULE MEMORY.AUTH
 # ==========================================
 try:
     import memory.auth as ma
-    get_authenticator = getattr(ma, "get_authenticator", None)
-    register_user = getattr(ma, "register_user", None)
-except Exception:
-    get_authenticator = None
-    register_user = None
+    get_authenticator = getattr(ma, "get_authenticator")
+    register_user = getattr(ma, "register_user")
+except Exception as _auth_import_err:
+    st.error(f"🚨 Lỗi nghiêm trọng: Không thể nạp module `memory.auth`: {_auth_import_err}")
+    st.stop()
 
 # ==========================================
 # 4. LAZY-LOAD CÁC CHATBOT VÀ GRAPH QUA CACHE RESOURCE
