@@ -288,6 +288,8 @@ def render_tab_retrospective(current_username: str, current_name: str):
                         st.rerun()
 
     st.markdown("---")
-    with st.expander("🧠 Xem & Quản Lý Bộ Nhớ Thích Nghi Trọn Đời (Adaptive Memory)", expanded=False):
-        from ui.components.tab_adaptive_memory import render_tab_adaptive_memory
-        render_tab_adaptive_memory(current_username, current_name)
+    with st.expander("🧠 Bộ Nhớ Thích Nghi Trọn Đời (Adaptive Memory)", expanded=False):
+        st.info(
+            "💡 Toàn bộ các phương pháp hiệu quả cao, bài học cần tránh và quy luật năng suất được AI tự động đúc kết "
+            "sau mỗi phiên hồi cứu. Bạn có thể xem chi tiết, quản lý và chủ động đóng góp thêm tại Tab **'🧠 Bộ Nhớ Thích Nghi'**."
+        )

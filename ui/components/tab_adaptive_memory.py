@@ -14,7 +14,7 @@ from ui.components.helpers import (
 )
 
 
-def render_tab_adaptive_memory(current_username: str, current_name: str):
+def render_tab_adaptive_memory(current_username: str, current_name: str, key_suffix: str = ""):
     """
     Hiển thị giao diện Bộ Nhớ Thích Nghi (Adaptive Memory) chuyên nghiệp,
     100% tiếng Việt tự nhiên, trực quan theo phong cách Duolingo.
@@ -57,7 +57,7 @@ def render_tab_adaptive_memory(current_username: str, current_name: str):
                     with c_txt:
                         st.markdown(f"• <span style='color:#e11d48; font-weight:500;'>{item}</span>", unsafe_allow_html=True)
                     with c_del:
-                        if st.button("🗑️", key=f"del_failed_{idx}_{current_username}", help="Xóa bài học này"):
+                        if st.button("🗑️", key=f"del_failed_{idx}_{current_username}{key_suffix}", help="Xóa bài học này"):
                             failed.pop(idx)
                             insights["failed_methods"] = failed
                             save_historical_insights(insights, username=current_username)
@@ -79,7 +79,7 @@ def render_tab_adaptive_memory(current_username: str, current_name: str):
                     with c_txt:
                         st.markdown(f"• <span style='color:#16a34a; font-weight:500;'>{item}</span>", unsafe_allow_html=True)
                     with c_del:
-                        if st.button("🗑️", key=f"del_eff_{idx}_{current_username}", help="Xóa phương pháp này"):
+                        if st.button("🗑️", key=f"del_eff_{idx}_{current_username}{key_suffix}", help="Xóa phương pháp này"):
                             effective.pop(idx)
                             insights["effective_methods"] = effective
                             save_historical_insights(insights, username=current_username)
@@ -101,7 +101,7 @@ def render_tab_adaptive_memory(current_username: str, current_name: str):
                     with c_txt:
                         st.markdown(f"• <span style='color:#0284c7; font-weight:500;'>{item}</span>", unsafe_allow_html=True)
                     with c_del:
-                        if st.button("🗑️", key=f"del_patt_{idx}_{current_username}", help="Xóa quy luật này"):
+                        if st.button("🗑️", key=f"del_patt_{idx}_{current_username}{key_suffix}", help="Xóa quy luật này"):
                             patterns.pop(idx)
                             insights["productivity_patterns"] = patterns
                             save_historical_insights(insights, username=current_username)
@@ -115,7 +115,7 @@ def render_tab_adaptive_memory(current_username: str, current_name: str):
     # Mục thêm ghi nhận kinh nghiệm chủ động
     with st.expander("➕ Đóng Góp Thêm Kinh Nghiệm / Quy Luật Cá Nhân", expanded=False):
         st.caption("Bạn có thể chủ động huấn luyện thêm cho AI về những kinh nghiệm, sở thích hoặc thói quen cá nhân:")
-        with st.form(key=f"form_add_insight_{current_username}"):
+        with st.form(key=f"form_add_insight_{current_username}{key_suffix}"):
             cat_choice = st.selectbox(
                 "Chọn nhóm kinh nghiệm:",
                 [
@@ -123,10 +123,12 @@ def render_tab_adaptive_memory(current_username: str, current_name: str):
                     "🛑 Phương pháp chưa phù hợp / Cần tránh lặp lại",
                     "⏰ Quy luật năng suất & Nhịp sinh học cá nhân",
                 ],
+                key=f"sel_insight_cat_{current_username}{key_suffix}",
             )
             content_input = st.text_input(
                 "Nội dung bài học hoặc quy luật:",
                 placeholder="VD: Không học bài khó sau 21:00; Ôn từ vựng lúc 06:30 sáng nhớ lâu nhất; Chạy bộ chiều giúp giải tỏa stress...",
+                key=f"txt_insight_content_{current_username}{key_suffix}",
             )
             submit_btn = st.form_submit_button("💾 Lưu Vào Bộ Nhớ Thích Nghi", type="primary")
 
