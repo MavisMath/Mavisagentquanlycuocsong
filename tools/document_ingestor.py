@@ -15,36 +15,36 @@ except Exception:
 # Tắt telemetry Chroma để tránh cảnh báo
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
-# Đảm bảo hnswlib tương thích với chromadb trên Windows/Python 3.15
-try:
-    import hnswlib
-    _orig_init_index = hnswlib.Index.init_index
-    def _patched_init_index(self, max_elements, M=16, ef_construction=200, random_seed=100, allow_replace_deleted=False, **kwargs):
-        return _orig_init_index(self, max_elements, M=M, ef_construction=ef_construction, random_seed=random_seed, allow_replace_deleted=allow_replace_deleted)
-    hnswlib.Index.init_index = _patched_init_index
-    if not hasattr(hnswlib.Index, "file_handle_count"):
-        hnswlib.Index.file_handle_count = 0
-    if not hasattr(hnswlib.Index, "open_file_handles"):
-        hnswlib.Index.open_file_handles = lambda self: None
-    if not hasattr(hnswlib.Index, "close_file_handles"):
-        hnswlib.Index.close_file_handles = lambda self: None
-except Exception:
-    pass
-
-try:
-    import posthog
-    posthog.capture = lambda *args, **kwargs: None
-except Exception:
-    pass
-
 # Quản lý lazy-load ChromaDB để tránh ngốn RAM lúc khởi động Streamlit
 _chroma_cache: Dict[str, Any] = {"chromadb": None, "Settings": None, "checked": False}
 
 def get_chroma_components():
-    """Lazy-import ChromaDB và Settings chỉ khi cần dùng để tiết kiệm bộ nhớ RAM."""
+    """Lazy-import ChromaDB và Settings chỉ khi cần dùng trong hàm để tiết kiệm bộ nhớ RAM."""
     if not _chroma_cache["checked"]:
         _chroma_cache["checked"] = True
         try:
+            # Đảm bảo hnswlib tương thích với chromadb trên Windows/Python 3.15
+            try:
+                import hnswlib
+                _orig_init_index = hnswlib.Index.init_index
+                def _patched_init_index(self, max_elements, M=16, ef_construction=200, random_seed=100, allow_replace_deleted=False, **kwargs):
+                    return _orig_init_index(self, max_elements, M=M, ef_construction=ef_construction, random_seed=random_seed, allow_replace_deleted=allow_replace_deleted)
+                hnswlib.Index.init_index = _patched_init_index
+                if not hasattr(hnswlib.Index, "file_handle_count"):
+                    hnswlib.Index.file_handle_count = 0
+                if not hasattr(hnswlib.Index, "open_file_handles"):
+                    hnswlib.Index.open_file_handles = lambda self: None
+                if not hasattr(hnswlib.Index, "close_file_handles"):
+                    hnswlib.Index.close_file_handles = lambda self: None
+            except Exception:
+                pass
+
+            try:
+                import posthog
+                posthog.capture = lambda *args, **kwargs: None
+            except Exception:
+                pass
+
             import chromadb
             from chromadb.config import Settings
             _chroma_cache["chromadb"] = chromadb

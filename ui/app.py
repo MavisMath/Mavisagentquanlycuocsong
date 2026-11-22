@@ -71,11 +71,59 @@ from ui.components import (
     load_user_roadmap,
     load_master_schedule,
     load_retrospective_logs,
-    get_mavis_agent,
     apply_undo,
     apply_redo,
     OPENING_GREETING,
 )
+
+# ==========================================
+# LAZY-LOAD AGENT & GRAPH QUA @st.cache_resource
+# ==========================================
+@st.cache_resource
+def get_mavis_agent():
+    """
+    Lazy-load và khởi tạo MavisAgentWrapper từ agents.graph duy nhất 1 lần qua @st.cache_resource.
+    Tránh import và khởi tạo nặng nề ở top-level lúc khởi động Streamlit.
+    """
+    try:
+        from agents.graph import build_graph
+        return build_graph()
+    except Exception:
+        class FallbackAgent:
+            def invoke(self, state, config=None):
+                return {
+                    "messages": [
+                        {
+                            "role": "assistant",
+                            "content": "⚠️ Hệ thống đang đồng bộ cấu hình trên Cloud. Vui lòng kiểm tra lại API Key hoặc liên hệ Quản trị viên."
+                        }
+                    ]
+                }
+        return FallbackAgent()
+
+
+@st.cache_resource
+def get_brain_modules():
+    """
+    Lazy-load các module chatbot từ agents.brain qua @st.cache_resource chỉ khi người dùng chat.
+    """
+    try:
+        import agents.brain as ab
+        return {
+            "chat_node": getattr(ab, "chat_node", None),
+            "ceo_coach_chat": getattr(ab, "ceo_coach_chat", None),
+            "architect_chat": getattr(ab, "architect_chat", None),
+            "scheduler_chat": getattr(ab, "scheduler_chat", None),
+            "retrospective_chat": getattr(ab, "retrospective_chat", None),
+        }
+    except Exception:
+        return {
+            "chat_node": None,
+            "ceo_coach_chat": None,
+            "architect_chat": None,
+            "scheduler_chat": None,
+            "retrospective_chat": None,
+        }
 
 # Nhúng Custom CSS giao diện Executive
 inject_custom_css()
