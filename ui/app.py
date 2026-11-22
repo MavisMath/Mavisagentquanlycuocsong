@@ -27,6 +27,16 @@ for p in [PROJECT_ROOT, CWD, CURRENT_DIR]:
 
 import streamlit as st
 
+# ==========================================
+# CẤU HÌNH GIAO DIỆN STREAMLIT (Bắt buộc chạy trước mọi lệnh st.* khác và trước khi import memory/agents)
+# ==========================================
+st.set_page_config(
+    page_title="Mavis AI Executive Life Coach - SaaS",
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
 # Tự động đồng bộ hóa secrets từ Streamlit Cloud vào biến môi trường hệ thống
 try:
     if hasattr(st, "secrets"):
@@ -52,96 +62,60 @@ try:
     get_mongo_uri = getattr(mm, "get_mongo_uri", lambda: None)
 except Exception as _mongo_import_err:
     import traceback
-    st.error(f"⚠️ Cảnh báo nạp module `memory.mongodb`: {_mongo_import_err}")
+    st.error(f"❌ Không thể nạp module `memory.mongodb`: {_mongo_import_err}")
     with st.expander("Chi tiết kỹ thuật lỗi nạp memory.mongodb"):
         st.code(traceback.format_exc())
-    def is_mongodb_available(): return False
-    def db_update_user_state(*args, **kwargs): return False
-    def get_mongo_connection_error(): return str(_mongo_import_err)
-    def get_mongo_uri(): return None
+    st.stop()
 
 # 2. Nạp an toàn module memory.goals
 try:
     import memory.goals as mg
 
-    load_goals = getattr(mg, "load_goals", lambda *args, **kwargs: [])
-    save_goals = getattr(mg, "save_goals", lambda *args, **kwargs: True)
-    add_goal = getattr(mg, "add_goal", lambda *args, **kwargs: True)
-    update_goal = getattr(mg, "update_goal", lambda *args, **kwargs: True)
+    load_goals = getattr(mg, "load_goals")
+    save_goals = getattr(mg, "save_goals")
+    add_goal = getattr(mg, "add_goal")
+    update_goal = getattr(mg, "update_goal")
     CATEGORY_LABELS = getattr(mg, "CATEGORY_LABELS", {})
-    load_historical_insights = getattr(mg, "load_historical_insights", lambda *args, **kwargs: {})
-    save_historical_insights = getattr(mg, "save_historical_insights", lambda *args, **kwargs: True)
-    load_user_profile = getattr(mg, "load_user_profile", lambda *args, **kwargs: {})
-    save_user_profile = getattr(mg, "save_user_profile", lambda *args, **kwargs: True)
-    load_user_goal_profile = getattr(mg, "load_user_goal_profile", lambda *args, **kwargs: {})
-    save_user_goal_profile = getattr(mg, "save_user_goal_profile", lambda *args, **kwargs: True)
-    load_user_goals = getattr(mg, "load_user_goals", lambda *args, **kwargs: [])
-    save_user_goals = getattr(mg, "save_user_goals", lambda *args, **kwargs: True)
-    load_user_resources = getattr(mg, "load_user_resources", lambda *args, **kwargs: [])
-    save_user_resources = getattr(mg, "save_user_resources", lambda *args, **kwargs: True)
-    load_user_roadmap = getattr(mg, "load_user_roadmap", lambda *args, **kwargs: {})
-    save_user_roadmap = getattr(mg, "save_user_roadmap", lambda *args, **kwargs: True)
-    load_categorized_goals = getattr(mg, "load_categorized_goals", lambda *args, **kwargs: {})
-    save_categorized_goals = getattr(mg, "save_categorized_goals", lambda *args, **kwargs: True)
-    load_master_schedule = getattr(mg, "load_master_schedule", lambda *args, **kwargs: [])
-    save_master_schedule = getattr(mg, "save_master_schedule", lambda *args, **kwargs: True)
-    update_master_schedule_task_status = getattr(mg, "update_master_schedule_task_status", lambda *args, **kwargs: True)
-    defer_master_schedule_task_to_tomorrow = getattr(mg, "defer_master_schedule_task_to_tomorrow", lambda *args, **kwargs: (False, None))
-    load_retrospective_logs = getattr(mg, "load_retrospective_logs", lambda *args, **kwargs: [])
-    save_retrospective_logs = getattr(mg, "save_retrospective_logs", lambda *args, **kwargs: True)
-    append_retrospective_log = getattr(mg, "append_retrospective_log", lambda *args, **kwargs: True)
-    get_user_state_full = getattr(mg, "get_user_state_full", lambda *args, **kwargs: {})
-    update_user_goal_status = getattr(mg, "update_user_goal_status", lambda *args, **kwargs: True)
-    update_user_goal_details = getattr(mg, "update_user_goal_details", lambda *args, **kwargs: True)
-    delete_user_goal = getattr(mg, "delete_user_goal", lambda *args, **kwargs: True)
-    calculate_user_streak = getattr(mg, "calculate_user_streak", lambda u="mavis": 1)
-    detect_goal_domain = getattr(mg, "detect_goal_domain", lambda *args, **kwargs: "general")
+    load_historical_insights = getattr(mg, "load_historical_insights")
+    save_historical_insights = getattr(mg, "save_historical_insights")
+    load_user_profile = getattr(mg, "load_user_profile")
+    save_user_profile = getattr(mg, "save_user_profile")
+    load_user_goal_profile = getattr(mg, "load_user_goal_profile")
+    save_user_goal_profile = getattr(mg, "save_user_goal_profile")
+    load_user_goals = getattr(mg, "load_user_goals")
+    save_user_goals = getattr(mg, "save_user_goals")
+    load_user_resources = getattr(mg, "load_user_resources")
+    save_user_resources = getattr(mg, "save_user_resources")
+    load_user_roadmap = getattr(mg, "load_user_roadmap")
+    save_user_roadmap = getattr(mg, "save_user_roadmap")
+    load_categorized_goals = getattr(mg, "load_categorized_goals")
+    save_categorized_goals = getattr(mg, "save_categorized_goals")
+    load_master_schedule = getattr(mg, "load_master_schedule")
+    save_master_schedule = getattr(mg, "save_master_schedule")
+    update_master_schedule_task_status = getattr(mg, "update_master_schedule_task_status")
+    defer_master_schedule_task_to_tomorrow = getattr(mg, "defer_master_schedule_task_to_tomorrow")
+    load_retrospective_logs = getattr(mg, "load_retrospective_logs")
+    save_retrospective_logs = getattr(mg, "save_retrospective_logs")
+    append_retrospective_log = getattr(mg, "append_retrospective_log")
+    get_user_state_full = getattr(mg, "get_user_state_full")
+    update_user_goal_status = getattr(mg, "update_user_goal_status")
+    update_user_goal_details = getattr(mg, "update_user_goal_details")
+    delete_user_goal = getattr(mg, "delete_user_goal")
+    calculate_user_streak = getattr(mg, "calculate_user_streak")
+    detect_goal_domain = getattr(mg, "detect_goal_domain")
     DOMAIN_TERMINOLOGY = getattr(mg, "DOMAIN_TERMINOLOGY", {})
-    get_vietnam_today = getattr(mg, "get_vietnam_today", lambda: datetime.now().date())
-    get_vietnam_today_str = getattr(mg, "get_vietnam_today_str", lambda: datetime.now().strftime("%Y-%m-%d"))
-    compute_target_date = getattr(mg, "compute_target_date", lambda s, d: "2027-02-19")
-    generate_detailed_master_schedule = getattr(mg, "generate_detailed_master_schedule", lambda *args, **kwargs: [])
-    ensure_schedule_covers_date = getattr(mg, "ensure_schedule_covers_date", lambda *args, **kwargs: [])
+    get_vietnam_today = getattr(mg, "get_vietnam_today")
+    get_vietnam_today_str = getattr(mg, "get_vietnam_today_str")
+    compute_target_date = getattr(mg, "compute_target_date")
+    generate_detailed_master_schedule = getattr(mg, "generate_detailed_master_schedule")
+    ensure_schedule_covers_date = getattr(mg, "ensure_schedule_covers_date")
     VIETNAM_WEEKDAYS = getattr(mg, "VIETNAM_WEEKDAYS", {0: "Thứ Hai", 1: "Thứ Ba", 2: "Thứ Tư", 3: "Thứ Năm", 4: "Thứ Sáu", 5: "Thứ Bảy", 6: "Chủ Nhật"})
 except Exception as _goals_import_err:
     import traceback
-    st.error(f"⚠️ Cảnh báo nạp module `memory.goals`: {_goals_import_err}")
+    st.error(f"❌ Không thể nạp module `memory.goals`: {_goals_import_err}")
     with st.expander("Chi tiết kỹ thuật lỗi nạp memory.goals"):
         st.code(traceback.format_exc())
-
-    def load_goals(*args, **kwargs): return []
-    def save_goals(*args, **kwargs): return True
-    def add_goal(*args, **kwargs): return True
-    def update_goal(*args, **kwargs): return True
-    CATEGORY_LABELS = {}
-    def load_historical_insights(*args, **kwargs): return {}
-    def save_historical_insights(*args, **kwargs): return True
-    def load_user_profile(*args, **kwargs): return {}
-    def save_user_profile(*args, **kwargs): return True
-    def load_user_goal_profile(*args, **kwargs): return {}
-    def save_user_goal_profile(*args, **kwargs): return True
-    def load_user_goals(*args, **kwargs): return []
-    def save_user_goals(*args, **kwargs): return True
-    def load_user_resources(*args, **kwargs): return []
-    def save_user_resources(*args, **kwargs): return True
-    def load_user_roadmap(*args, **kwargs): return {}
-    def save_user_roadmap(*args, **kwargs): return True
-    def load_categorized_goals(*args, **kwargs): return {}
-    def save_categorized_goals(*args, **kwargs): return True
-    def load_master_schedule(*args, **kwargs): return []
-    def save_master_schedule(*args, **kwargs): return True
-    def update_master_schedule_task_status(*args, **kwargs): return True
-    def defer_master_schedule_task_to_tomorrow(*args, **kwargs): return False, None
-    def load_retrospective_logs(*args, **kwargs): return []
-    def save_retrospective_logs(*args, **kwargs): return True
-    def append_retrospective_log(*args, **kwargs): return True
-    def get_user_state_full(*args, **kwargs): return {}
-    def update_user_goal_status(*args, **kwargs): return True
-    def update_user_goal_details(*args, **kwargs): return True
-    def delete_user_goal(*args, **kwargs): return True
-    def calculate_user_streak(*args, **kwargs): return 1
-    def detect_goal_domain(*args, **kwargs): return "general"
-    DOMAIN_TERMINOLOGY = {}
+    st.stop()
 
 # 3. Nạp an toàn module memory.auth
 try:
@@ -573,15 +547,8 @@ def load_categorized_goals(username: str = "mavis") -> Dict[str, Any]:
         return {}
 
 # ==========================================
-# 1. CẤU HÌNH GIAO DIỆN STREAMLIT
+# 1. CẤU HÌNH GIAO DIỆN & CUSTOM CSS
 # ==========================================
-st.set_page_config(
-    page_title="Mavis AI Executive Life Coach - SaaS",
-    page_icon="⚡",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
 # Custom CSS để giao diện trông hiện đại, mang phong cách Executive
 st.markdown(
     """
