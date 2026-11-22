@@ -4003,6 +4003,52 @@ YÊU CẦU CỦA NGƯỜI DÙNG:
         is_rescheduled = False
         response_text = "Tôi đã phân rã toàn bộ các mục tiêu Active vào Master Schedule chi tiết từng ngày theo trục thời gian thực (YYYY-MM-DD), bóc tách riêng từng khung giờ Ăn gì (thực đơn & gram/calo), Tập gì, Uống gì và Ngủ mấy giờ mà không trùng lặp!"
 
+    # Nếu không phải là yêu cầu dời lịch và số ngày sinh ra < 7, tự động bổ sung cho đủ 7 ngày liên tiếp từ hôm nay
+    if not is_rescheduled:
+        existing_covered_dates = set(t.get("date") for t in schedule_dicts if t.get("date"))
+        if len(existing_covered_dates) < 7:
+            try:
+                supp_tasks = generate_detailed_master_schedule(
+                    active_goals=active_goals,
+                    start_date_str=today_str,
+                    num_days=7,
+                    username=username,
+                )
+                for st_item in supp_tasks:
+                    if st_item.get("date") not in existing_covered_dates:
+                        schedule_dicts.append(st_item)
+            except Exception as _e_supp:
+                print(f"Lỗi bổ sung ngày vào master_schedule: {_e_supp}")
+
+    # Đảm bảo mọi task đều có day_name chính xác tương ứng với date thực tế
+    for item in schedule_dicts:
+        if not item.get("day_name") and item.get("date"):
+            try:
+                dt_tmp = datetime.strptime(str(item["date"])[:10], "%Y-%m-%d")
+                item["day_name"] = VIETNAM_WEEKDAYS.get(dt_tmp.weekday(), "")
+            except Exception:
+                pass
+
+        # Điền tài nguyên chuẩn 1-Click cho các task đời sống nếu LLM để trống
+        if not item.get("resource_url") and not item.get("resource_link"):
+            td_lower = str(item.get("task_detail", "")).lower()
+            if "nước" in td_lower or "nắng" in td_lower:
+                item["resource_url"] = "https://hubermanlab.com"
+                item["resource_link"] = "https://hubermanlab.com"
+                item["resource_title"] = item.get("resource_title") or "Huberman Protocol: Tối ưu nhịp sinh học"
+            elif "ngủ" in td_lower:
+                item["resource_url"] = "https://sleepfoundation.org"
+                item["resource_link"] = "https://sleepfoundation.org"
+                item["resource_title"] = item.get("resource_title") or "Sleep Protocol: Tối ưu giấc ngủ sâu"
+            elif "ăn" in td_lower or "bữa" in td_lower:
+                item["resource_url"] = "https://eatthismuch.com"
+                item["resource_link"] = "https://eatthismuch.com"
+                item["resource_title"] = item.get("resource_title") or "Macro Nutrition Guide"
+            elif any(w in td_lower for w in ["tập", "chạy", "squat", "push-up", "cardio", "kháng lực"]):
+                item["resource_url"] = "https://muscleandstrength.com"
+                item["resource_link"] = "https://muscleandstrength.com"
+                item["resource_title"] = item.get("resource_title") or "Giáo án thể lực chuẩn"
+
     # Loại bỏ triệt để các ký tự markdown ** hoặc __ thô khỏi tất cả các trường
     for item in schedule_dicts:
         if "task_detail" in item and item["task_detail"]:

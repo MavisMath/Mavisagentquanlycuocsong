@@ -1,5 +1,6 @@
 import unittest
 import uuid
+from datetime import datetime
 from memory.goals import (
     load_master_schedule,
     save_master_schedule,
@@ -8,6 +9,7 @@ from memory.goals import (
     delete_user_goal,
     detect_goal_domain,
     DOMAIN_TERMINOLOGY,
+    VIETNAM_WEEKDAYS,
 )
 from agents.brain import (
     ceo_coach_chat,
@@ -285,7 +287,19 @@ class TestArchitectAndImports(unittest.TestCase):
         sched = res["master_schedule"]
         self.assertTrue(len(sched) >= 7, f"Lịch trình phải có ít nhất 7 task cho 7 ngày, thực tế: {len(sched)}")
 
-        found_days = set(t.get("date") for t in sched)
+        found_days = set()
+        for t in sched:
+            if t.get("day_name"):
+                found_days.add(t.get("day_name"))
+            d_val = t.get("date")
+            if d_val:
+                found_days.add(d_val)
+                try:
+                    dt_obj = datetime.strptime(str(d_val)[:10], "%Y-%m-%d")
+                    found_days.add(VIETNAM_WEEKDAYS.get(dt_obj.weekday(), ""))
+                except Exception:
+                    pass
+
         expected_days = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
         for ed in expected_days:
             self.assertIn(ed, found_days, f"Thiếu ngày {ed} trong master_schedule: {found_days}")
@@ -297,6 +311,8 @@ class TestArchitectAndImports(unittest.TestCase):
         self.assertIn("definition_of_done", first_t)
         self.assertTrue(len(first_t["definition_of_done"]) > 0)
         self.assertTrue(bool(first_t.get("resource_url") or first_t.get("resource_link")))
+        has_any_resource = any(bool(t.get("resource_url") or t.get("resource_link")) for t in sched)
+        self.assertTrue(has_any_resource, "Lịch trình phải có task đi kèm tài nguyên/link thực tế")
 
         # Kiểm tra sự hiện diện của các hạng mục đời sống: Ăn gì, Uống gì, Tập gì/Học gì, Ngủ mấy giờ
         all_details = " ".join(t.get("task_detail", "") for t in sched).lower()
