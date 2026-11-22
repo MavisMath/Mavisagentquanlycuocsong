@@ -37,15 +37,31 @@ try:
 except Exception:
     pass
 
-# Import an toàn ChromaDB với fallback
-try:
-    import chromadb
-    from chromadb.config import Settings
-    CHROMA_AVAILABLE = True
-except Exception:
-    chromadb = None
-    Settings = None
-    CHROMA_AVAILABLE = False
+# Quản lý lazy-load ChromaDB để tránh ngốn RAM lúc khởi động Streamlit
+_chroma_cache: Dict[str, Any] = {"chromadb": None, "Settings": None, "checked": False}
+
+def get_chroma_components():
+    """Lazy-import ChromaDB và Settings chỉ khi cần dùng để tiết kiệm bộ nhớ RAM."""
+    if not _chroma_cache["checked"]:
+        _chroma_cache["checked"] = True
+        try:
+            import chromadb
+            from chromadb.config import Settings
+            _chroma_cache["chromadb"] = chromadb
+            _chroma_cache["Settings"] = Settings
+        except Exception:
+            _chroma_cache["chromadb"] = None
+            _chroma_cache["Settings"] = None
+    return _chroma_cache["chromadb"], _chroma_cache["Settings"]
+
+def is_chroma_available() -> bool:
+    c_mod, _ = get_chroma_components()
+    return c_mod is not None
+
+def __getattr__(name: str) -> Any:
+    if name == "CHROMA_AVAILABLE":
+        return is_chroma_available()
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 # Import an toàn Document Loaders với fallback
 try:
@@ -72,14 +88,7 @@ os.makedirs(KNOWLEDGE_BASE_DIR, exist_ok=True)
 DEFAULT_COLLECTION = "mavis_knowledge"
 
 
-_BaseEmbedding = (
-    chromadb.EmbeddingFunction
-    if (CHROMA_AVAILABLE and chromadb is not None and hasattr(chromadb, "EmbeddingFunction"))
-    else object
-)
-
-
-class MavisEmbeddingFunction(_BaseEmbedding):
+class MavisEmbeddingFunction:
     """
     Embedding Function đa tầng cho Mavis Knowledge Base:
     - Tầng 1: Sử dụng Google Generative AI Embeddings nếu có API Key.
@@ -128,15 +137,17 @@ class MavisEmbeddingFunction(_BaseEmbedding):
 
 
 def get_chroma_client() -> Optional[Any]:
-    """Khởi tạo hoặc kết nối Chroma Persistent Client an toàn."""
-    if not CHROMA_AVAILABLE or chromadb is None:
+    """Khởi tạo hoặc kết nối Chroma Persistent Client an toàn (Lazy-load)."""
+    chroma_mod, settings_cls = get_chroma_components()
+    if chroma_mod is None or settings_cls is None:
         return None
     try:
-        return chromadb.PersistentClient(
+        return chroma_mod.PersistentClient(
             path=KNOWLEDGE_BASE_DIR,
-            settings=Settings(anonymized_telemetry=False, is_persistent=True),
+            settings=settings_cls(anonymized_telemetry=False, is_persistent=True),
         )
-    except Exception:
+    except Exception as e:
+        print(f"Lỗi khởi tạo Chroma PersistentClient: {e}")
         return None
 
 
@@ -251,7 +262,7 @@ def ingest_document(
     Động cơ RAG: Đọc tài liệu (PDF / Web URL), phân mảnh (chunking) bằng RecursiveCharacterTextSplitter,
     và lưu trữ vào Chroma Vector Database.
     """
-    if not CHROMA_AVAILABLE or not DOC_LOADERS_AVAILABLE or RecursiveCharacterTextSplitter is None:
+    if not is_chroma_available() or not DOC_LOADERS_AVAILABLE or RecursiveCharacterTextSplitter is None:
         return {"success": False, "source": source, "chunks_count": 0, "message": "ChromaDB hoặc Document Loaders chưa sẵn sàng trên môi trường này."}
 
     raw_docs = load_documents_from_source(source)
@@ -309,7 +320,7 @@ def query_knowledge_base(
     collection_name: str = DEFAULT_COLLECTION,
 ) -> List[Dict[str, Any]]:
     """Truy vấn tìm kiếm ngữ cảnh liên quan trong Chroma Vector Database."""
-    if not CHROMA_AVAILABLE:
+    if not is_chroma_available():
         return []
 
     try:
@@ -352,7 +363,7 @@ def scan_and_retrieve_context(user_message: str, top_k: int = 3) -> Optional[str
     1. Nếu phát hiện file PDF hoặc link URL mới: Tự động phân mảnh và nạp vào Chroma Knowledge Base.
     2. Sau đó truy vấn các đoạn trích liên quan nhất từ Vector Database để nạp vào uploaded_context.
     """
-    if not CHROMA_AVAILABLE:
+    if not is_chroma_available():
         return None
 
     detected_sources = extract_links_or_paths(user_message)

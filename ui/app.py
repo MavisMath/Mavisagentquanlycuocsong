@@ -130,54 +130,86 @@ except Exception as _auth_import_err:
     get_authenticator = None
     register_user = None
 
-# 4. Nạp an toàn các Chatbot functions từ agents.brain
-try:
-    import agents.brain as ab
-    chat_node = getattr(ab, "chat_node", None)
-    ceo_coach_chat = getattr(ab, "ceo_coach_chat", None)
-    architect_chat = getattr(ab, "architect_chat", None)
-    scheduler_chat = getattr(ab, "scheduler_chat", None)
-    retrospective_chat = getattr(ab, "retrospective_chat", None)
-except Exception as _brain_err:
-    import traceback
-    st.error(f"⚠️ Cảnh báo nạp các Chatbot từ `agents.brain`: {_brain_err}")
-    with st.expander("Chi tiết kỹ thuật lỗi nạp agents.brain"):
-        st.code(traceback.format_exc())
-    chat_node = None
-    ceo_coach_chat = None
-    architect_chat = None
-    scheduler_chat = None
-    retrospective_chat = None
+# 4. Lazy-load các Chatbot functions từ agents.brain và MavisAgentWrapper từ agents.graph qua @st.cache_resource
+@st.cache_resource
+def get_brain_modules():
+    """Lazy-load các chatbot functions từ agents.brain chỉ khi cần tương tác chat để tiết kiệm RAM khi khởi động."""
+    try:
+        import agents.brain as ab
+        return {
+            "chat_node": getattr(ab, "chat_node", None),
+            "ceo_coach_chat": getattr(ab, "ceo_coach_chat", None),
+            "architect_chat": getattr(ab, "architect_chat", None),
+            "scheduler_chat": getattr(ab, "scheduler_chat", None),
+            "retrospective_chat": getattr(ab, "retrospective_chat", None),
+        }
+    except Exception as _brain_err:
+        import traceback
+        st.error(f"⚠️ Cảnh báo nạp các Chatbot từ `agents.brain`: {_brain_err}")
+        with st.expander("Chi tiết kỹ thuật lỗi nạp agents.brain"):
+            st.code(traceback.format_exc())
+        return {
+            "chat_node": None,
+            "ceo_coach_chat": None,
+            "architect_chat": None,
+            "scheduler_chat": None,
+            "retrospective_chat": None,
+        }
 
-from langchain_core.messages import HumanMessage, AIMessage
+@st.cache_resource
+def get_mavis_agent():
+    """Lazy-load và khởi tạo MavisAgentWrapper từ agents.graph duy nhất 1 lần qua @st.cache_resource."""
+    try:
+        from agents.graph import build_graph, MavisAgentWrapper
+        return build_graph()
+    except Exception as _graph_import_err:
+        import traceback
+        st.error(f"⚠️ Phát hiện cảnh báo khi khởi tạo Multi-Agent Graph: {_graph_import_err}")
+        with st.expander("Chi tiết kỹ thuật lỗi khởi tạo (Technical Traceback)"):
+            st.code(traceback.format_exc())
 
-# 5. Khởi tạo an toàn Agent Graph
-try:
-    import agents.graph as ag
-    build_graph = getattr(ag, "build_graph", None)
-    mavis_agent = getattr(ag, "mavis_agent", None) or (build_graph() if callable(build_graph) else None)
-    if mavis_agent is None:
-        raise ImportError("Không thể khởi tạo mavis_agent từ agents.graph")
-except Exception as _graph_import_err:
-    import traceback
-    st.error(f"⚠️ Phát hiện cảnh báo khi khởi tạo Multi-Agent Graph: {_graph_import_err}")
-    with st.expander("Chi tiết kỹ thuật lỗi khởi tạo (Technical Traceback)"):
-        st.code(traceback.format_exc())
+        class FallbackAgent:
+            def invoke(self, state, config=None):
+                return {
+                    "messages": [
+                        {
+                            "role": "assistant",
+                            "content": "⚠️ Hệ thống đang đồng bộ cấu hình trên Cloud. Vui lòng kiểm tra lại API Key hoặc liên hệ Quản trị viên."
+                        }
+                    ]
+                }
 
-    class FallbackAgent:
-        def invoke(self, state, config=None):
-            return {
-                "messages": [
-                    AIMessage(
-                        content="⚠️ Hệ thống đang đồng bộ cấu hình trên Cloud. Vui lòng kiểm tra lại API Key hoặc liên hệ Quản trị viên."
-                    )
-                ]
-            }
-
-    def build_graph(checkpointer=None):
         return FallbackAgent()
 
-    mavis_agent = FallbackAgent()
+def ceo_coach_chat(*args, **kwargs):
+    fn = get_brain_modules().get("ceo_coach_chat")
+    if fn:
+        return fn(*args, **kwargs)
+    return {"response": "Hệ thống đang đồng bộ kết nối AI. Vui lòng thử lại sau giây lát."}
+
+def architect_chat(*args, **kwargs):
+    fn = get_brain_modules().get("architect_chat")
+    if fn:
+        return fn(*args, **kwargs)
+    return {"response": "Hệ thống đang đồng bộ kết nối AI. Vui lòng thử lại sau giây lát."}
+
+def scheduler_chat(*args, **kwargs):
+    fn = get_brain_modules().get("scheduler_chat")
+    if fn:
+        return fn(*args, **kwargs)
+    return {"response": "Hệ thống đang đồng bộ kết nối AI. Vui lòng thử lại sau giây lát."}
+
+def retrospective_chat(*args, **kwargs):
+    fn = get_brain_modules().get("retrospective_chat")
+    if fn:
+        return fn(*args, **kwargs)
+    return {"response": "Hệ thống đang đồng bộ kết nối AI. Vui lòng thử lại sau giây lát."}
+
+def chat_node(*args, **kwargs):
+    fn = get_brain_modules().get("chat_node")
+    if fn:
+        return fn(*args, **kwargs)
+    return None
 
 # 6. Nạp an toàn module tools.google_calendar (Tích hợp Google Calendar API 2 chiều)
 try:
@@ -944,10 +976,8 @@ retro_logs_key = f"retro_logs_{current_username}"
 if retro_logs_key not in st.session_state:
     st.session_state[retro_logs_key] = load_retrospective_logs(current_username)
 
-# Khởi tạo graph = build_graph() trong st.session_state duy nhất 1 lần
-if "mavis_graph" not in st.session_state:
-    st.session_state["mavis_graph"] = build_graph()
-mavis_agent = st.session_state["mavis_graph"]
+# Lấy instance MavisAgentWrapper qua @st.cache_resource
+mavis_agent = get_mavis_agent()
 
 
 # ==========================================
